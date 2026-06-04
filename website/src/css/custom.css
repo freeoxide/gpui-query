@@ -1,0 +1,1195 @@
+/* ==========================================================================
+   GPUI Query Documentation — Custom Theme
+   Minimal, green-accented, sharp-edged, professional
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Google Fonts
+   -------------------------------------------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* --------------------------------------------------------------------------
+   Infima / Docusaurus CSS Variable Overrides — Light Mode
+   -------------------------------------------------------------------------- */
+:root {
+  /* Primary green palette */
+  --ifm-color-primary: #3ebd7f;
+  --ifm-color-primary-dark: #35a870;
+  --ifm-color-primary-darker: #319e68;
+  --ifm-color-primary-darkest: #288253;
+  --ifm-color-primary-light: #55c48f;
+  --ifm-color-primary-lighter: #68cc9d;
+  --ifm-color-primary-lightest: #8fd9b5;
+
+  /* Background & surface */
+  --ifm-background-color: #ffffff;
+  --ifm-background-surface-color: #ffffff;
+
+  /* Foreground / text */
+  --ifm-font-color-base: #1a1a2e;
+  --ifm-heading-color: #1a1a2e;
+  --ifm-color-emphasis-300: #e8e8ed;
+  --ifm-color-emphasis-200: #ededf0;
+  --ifm-color-emphasis-100: #f5f5f7;
+
+  /* Typography */
+  --ifm-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+  --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'Consolas',
+    'Monaco', monospace;
+  --ifm-code-font-size: 90%;
+
+  /* Radius — sharp */
+  --ifm-global-radius: 0px;
+  --ifm-button-border-radius: 4px;
+  --ifm-card-border-radius: 0px;
+  --ifm-alert-border-radius: 0px;
+  --ifm-badge-border-radius: 4px;
+  --ifm-pagination-border-radius: 4px;
+  --ifm-code-border-radius: 4px;
+  --ifm-tabs-border-radius: 0px;
+
+  /* Borders */
+  --ifm-color-border: #e8e8ed;
+  --ifm-border-width: 1px;
+
+  /* Navbar */
+  --ifm-navbar-height: 60px;
+  --ifm-navbar-background-color: #ffffff;
+  --ifm-navbar-shadow: 0 1px 0 #e8e8ed;
+
+  /* Sidebar */
+  --ifm-menu-color: #1a1a2e;
+  --ifm-menu-color-active: #3ebd7f;
+
+  /* Links */
+  --ifm-link-color: #3ebd7f;
+  --ifm-link-hover-color: #35a870;
+  --ifm-link-decoration: none;
+
+  /* Footer */
+  --ifm-footer-background-color: #1a1a2e;
+  --ifm-footer-color: #f8f8fa;
+  --ifm-footer-link-color: #a0a0b8;
+  --ifm-footer-link-hover-color: #3ebd7f;
+  --ifm-footer-title-color: #f8f8fa;
+
+  /* Table of contents */
+  --ifm-toc-link-color: #555570;
+  --ifm-toc-border-color: #e8e8ed;
+
+  /* Hero */
+  --ifm-hero-background-color: transparent;
+  --ifm-hero-text-color: #1a1a2e;
+
+  /* Pagination */
+  --ifm-pagination-nav-color-hover: #3ebd7f;
+
+  /* Shadows */
+  --ifm-global-shadow-lw: none;
+  --ifm-global-shadow-md: none;
+  --ifm-global-shadow-tl: none;
+
+  /* Highlighted code line */
+  --docusaurus-highlighted-code-line-bg: rgba(62, 189, 127, 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   Base Resets
+   -------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+}
+
+/* Re-allow specific small radii */
+.button,
+.badge,
+code,
+pre,
+input,
+.search-bar,
+.DocSearch-Button {
+  border-radius: 4px !important;
+}
+
+/* --------------------------------------------------------------------------
+   Body & Typography
+   -------------------------------------------------------------------------- */
+body {
+  font-family: var(--ifm-font-family-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: var(--ifm-font-color-base);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--ifm-font-family-base);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ifm-heading-color);
+}
+
+h1 { font-size: 2.25rem; }
+h2 { font-size: 1.625rem; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1.1rem; }
+
+p {
+  line-height: 1.7;
+}
+
+a {
+  color: var(--ifm-link-color);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: var(--ifm-link-hover-color);
+}
+
+/* --------------------------------------------------------------------------
+   Navbar
+   -------------------------------------------------------------------------- */
+.navbar {
+  background-color: var(--ifm-navbar-background-color);
+  box-shadow: var(--ifm-navbar-shadow);
+  border-bottom: 1px solid var(--ifm-color-border);
+  height: var(--ifm-navbar-height);
+  padding: 0 24px;
+}
+
+.navbar__brand {
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: #1a1a2e;
+}
+
+.navbar__brand:hover {
+  color: #3ebd7f;
+}
+
+.navbar__title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.navbar__link {
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: #555570;
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.navbar__link:hover,
+.navbar__link--active {
+  color: #3ebd7f;
+  background-color: transparent;
+}
+
+.navbar__toggle {
+  border-radius: 4px;
+}
+
+.navbar-sidebar {
+  border-radius: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Sidebar / Menu
+   -------------------------------------------------------------------------- */
+.theme-doc-sidebar-menu {
+  padding: 8px 0;
+}
+
+.menu__link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #555570;
+  padding: 6px 12px;
+  border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.menu__link:hover {
+  color: #1a1a2e;
+  background-color: #f5f5f7;
+}
+
+.menu__link--active {
+  color: #3ebd7f;
+  background-color: rgba(62, 189, 127, 0.08);
+  font-weight: 600;
+}
+
+.menu__list-item-collapsible .menu__link--active {
+  color: #3ebd7f;
+}
+
+.menu__caret {
+  border-radius: 4px;
+}
+
+.menu__list-item {
+  margin: 1px 0;
+}
+
+/* Sidebar container */
+.theme-doc-sidebar-container {
+  border-right: 1px solid var(--ifm-color-border);
+}
+
+/* --------------------------------------------------------------------------
+   Buttons
+   -------------------------------------------------------------------------- */
+.button {
+  font-family: var(--ifm-font-family-base);
+  font-weight: 600;
+  border-radius: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+  transition: all 0.15s ease;
+}
+
+.button--primary {
+  background-color: #3ebd7f;
+  border-color: #3ebd7f;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.button--primary:hover {
+  background-color: #35a870;
+  border-color: #35a870;
+  color: #ffffff;
+}
+
+.button--secondary {
+  background-color: transparent;
+  border-color: #e8e8ed;
+  color: #1a1a2e;
+  box-shadow: none;
+}
+
+.button--secondary:hover {
+  border-color: #3ebd7f;
+  color: #3ebd7f;
+  background-color: transparent;
+}
+
+.button--outline {
+  border-color: #3ebd7f;
+  color: #3ebd7f;
+  background: transparent;
+}
+
+.button--outline:hover {
+  background-color: #3ebd7f;
+  color: #ffffff;
+}
+
+/* Action button (hero CTA) */
+.button--lg {
+  font-size: 1rem;
+  padding: 12px 28px;
+}
+
+.buttons_AKcl > .button {
+  margin: 0 8px;
+}
+
+/* --------------------------------------------------------------------------
+   Code Blocks
+   -------------------------------------------------------------------------- */
+code {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: var(--ifm-code-font-size);
+  background-color: rgba(62, 189, 127, 0.08);
+  color: #2d7a56;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: none;
+}
+
+pre {
+  font-family: var(--ifm-font-family-monospace);
+  border-radius: 0;
+  border: 1px solid var(--ifm-color-border);
+  background-color: #fafafa;
+}
+
+pre code {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+
+.theme-code-block {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.prism-code {
+  font-family: var(--ifm-font-family-monospace);
+  border-radius: 0;
+}
+
+/* Code block header / tabs */
+.code-block-tabs {
+  border-radius: 0;
+}
+
+/* Copy button */
+.theme-code-block .clean-btn {
+  border-radius: 4px;
+  color: #999;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+.theme-code-block .clean-btn:hover {
+  opacity: 1;
+  color: #3ebd7f;
+}
+
+/* Inline code in headers */
+h1 code, h2 code, h3 code, h4 code, h5 code, h6 code {
+  font-size: 0.9em;
+}
+
+/* --------------------------------------------------------------------------
+   Tables
+   -------------------------------------------------------------------------- */
+table {
+  border-collapse: collapse;
+  border-radius: 0;
+  border: 1px solid var(--ifm-color-border);
+  font-size: 0.875rem;
+}
+
+table thead {
+  background-color: #f5f5f7;
+}
+
+table th {
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555570;
+  border-bottom: 1px solid var(--ifm-color-border);
+}
+
+table td,
+table th {
+  padding: 10px 16px;
+  border: none;
+}
+
+table tr:nth-child(even) {
+  background-color: #fafafa;
+}
+
+table tr:hover {
+  background-color: rgba(62, 189, 127, 0.04);
+}
+
+/* --------------------------------------------------------------------------
+   Admonitions / Alerts
+   -------------------------------------------------------------------------- */
+.admonition {
+  border-radius: 0;
+  border: 1px solid;
+  font-size: 0.9rem;
+}
+
+.admonition-heading {
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.admonition--info {
+  border-color: #3ebd7f;
+  background-color: rgba(62, 189, 127, 0.06);
+}
+
+.admonition--info .admonition-heading {
+  color: #2d7a56;
+}
+
+.admonition--tip {
+  border-color: #3ebd7f;
+  background-color: rgba(62, 189, 127, 0.06);
+}
+
+.admonition--tip .admonition-heading {
+  color: #2d7a56;
+}
+
+.admonition--warning {
+  border-color: #e5a820;
+  background-color: rgba(229, 168, 32, 0.06);
+}
+
+.admonition--warning .admonition-heading {
+  color: #b8860b;
+}
+
+.admonition--danger {
+  border-color: #e55050;
+  background-color: rgba(229, 80, 80, 0.06);
+}
+
+.admonition--danger .admonition-heading {
+  color: #c03030;
+}
+
+.admonition--caution {
+  border-color: #e55050;
+  background-color: rgba(229, 80, 80, 0.06);
+}
+
+.admonition--caution .admonition-heading {
+  color: #c03030;
+}
+
+/* --------------------------------------------------------------------------
+   Cards
+   -------------------------------------------------------------------------- */
+.card {
+  border-radius: 0;
+  border: 1px solid var(--ifm-color-border);
+  box-shadow: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover {
+  border-color: #3ebd7f;
+}
+
+.card__header {
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   Table of Contents
+   -------------------------------------------------------------------------- */
+.table-of-contents {
+  border-left: 2px solid var(--ifm-color-border);
+  padding-left: 12px;
+}
+
+.table-of-contents__link {
+  font-size: 0.8125rem;
+  color: #555570;
+  line-height: 1.6;
+}
+
+.table-of-contents__link:hover,
+.table-of-contents__link--active {
+  color: #3ebd7f;
+}
+
+.table-of-contents__link--active {
+  font-weight: 600;
+}
+
+.theme-doc-toc-desktop {
+  border-left: none;
+}
+
+/* --------------------------------------------------------------------------
+   Breadcrumbs
+   -------------------------------------------------------------------------- */
+.breadcrumbs__link {
+  font-size: 0.8125rem;
+  color: #555570;
+}
+
+.breadcrumbs__link:hover {
+  color: #3ebd7f;
+}
+
+.breadcrumbs__item--active .breadcrumbs__link {
+  color: #1a1a2e;
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   Pagination
+   -------------------------------------------------------------------------- */
+.pagination-nav__link {
+  border: 1px solid var(--ifm-color-border);
+  border-radius: 4px;
+  transition: border-color 0.15s ease;
+}
+
+.pagination-nav__link:hover {
+  border-color: #3ebd7f;
+}
+
+.pagination-nav__label {
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Footer
+   -------------------------------------------------------------------------- */
+.footer {
+  background-color: #1a1a2e;
+  border-top: none;
+  padding: 48px 24px 32px;
+}
+
+.footer__title {
+  color: #f8f8fa;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.footer__link-item {
+  color: #a0a0b8;
+  font-size: 0.875rem;
+  transition: color 0.15s ease;
+}
+
+.footer__link-item:hover {
+  color: #3ebd7f;
+}
+
+.footer__bottom {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 32px;
+  padding-top: 24px;
+}
+
+.footer__copyright {
+  color: #707088;
+  font-size: 0.8125rem;
+}
+
+/* --------------------------------------------------------------------------
+   DocSearch / Search Bar
+   -------------------------------------------------------------------------- */
+.DocSearch-Button {
+  border-radius: 4px !important;
+  border: 1px solid #e8e8ed;
+  background: #f5f5f7;
+  box-shadow: none;
+  height: 36px;
+  font-family: var(--ifm-font-family-base);
+}
+
+.DocSearch-Button:hover {
+  border-color: #3ebd7f;
+  background: #f5f5f7;
+  box-shadow: none;
+}
+
+.DocSearch-Button-Key {
+  border-radius: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   Tabs
+   -------------------------------------------------------------------------- */
+.tabs {
+  border-bottom: 1px solid var(--ifm-color-border);
+  border-radius: 0;
+}
+
+.tabs__item {
+  border-radius: 0;
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: #555570;
+  padding: 8px 16px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s ease;
+}
+
+.tabs__item:hover {
+  color: #1a1a2e;
+  background-color: transparent;
+}
+
+.tabs__item--active {
+  color: #3ebd7f;
+  border-bottom-color: #3ebd7f;
+  background-color: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   Details / Collapsible
+   -------------------------------------------------------------------------- */
+details {
+  border: 1px solid var(--ifm-color-border);
+  border-radius: 0;
+}
+
+details summary {
+  border-radius: 0;
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   Hero Section
+   -------------------------------------------------------------------------- */
+.hero {
+  background-color: transparent;
+  padding: 48px 24px;
+}
+
+.hero__title {
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.hero__subtitle {
+  font-size: 1.125rem;
+  color: #555570;
+  font-weight: 400;
+}
+
+/* --------------------------------------------------------------------------
+   Badge
+   -------------------------------------------------------------------------- */
+.badge {
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.7rem;
+  padding: 3px 8px;
+}
+
+.badge--primary {
+  background-color: rgba(62, 189, 127, 0.12);
+  color: #2d7a56;
+}
+
+.badge--secondary {
+  background-color: #f5f5f7;
+  color: #555570;
+}
+
+/* --------------------------------------------------------------------------
+   Scrollbar (subtle)
+   -------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #d0d0d8;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #b0b0b8;
+}
+
+/* --------------------------------------------------------------------------
+   Doc Page Layout
+   -------------------------------------------------------------------------- */
+.theme-doc-markdown {
+  max-width: 780px;
+}
+
+.theme-doc-markdown > header {
+  margin-bottom: 32px;
+}
+
+.theme-doc-markdown > header h1 {
+  margin-bottom: 8px;
+}
+
+.theme-doc-version-badge {
+  margin-bottom: 16px;
+}
+
+/* --------------------------------------------------------------------------
+   Announcement Bar
+   -------------------------------------------------------------------------- */
+div[class*='announcementBar'] {
+  background-color: #3ebd7f;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+div[class*='announcementBar'] a {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   Dropdown
+   -------------------------------------------------------------------------- */
+.navbar__dropdown {
+  border-radius: 4px;
+}
+
+.dropdown__menu {
+  border-radius: 4px;
+  border: 1px solid var(--ifm-color-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  padding: 4px;
+}
+
+.dropdown__link {
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Back to Top
+   -------------------------------------------------------------------------- */
+.clean-btn.theme-back-to-top-button {
+  border-radius: 4px;
+  background-color: #3ebd7f;
+  box-shadow: none;
+}
+
+/* --------------------------------------------------------------------------
+   Docusaurus Live Code Block
+   -------------------------------------------------------------------------- */
+.theme-live-codeblock {
+  border-radius: 0;
+  border: 1px solid var(--ifm-color-border);
+}
+
+/* --------------------------------------------------------------------------
+   Anchor Links (headings)
+   -------------------------------------------------------------------------- */
+.anchor {
+  color: #3ebd7f;
+}
+
+.anchor:hover {
+  color: #35a870;
+}
+
+/* --------------------------------------------------------------------------
+   Selection
+   -------------------------------------------------------------------------- */
+::selection {
+  background-color: rgba(62, 189, 127, 0.2);
+  color: inherit;
+}
+
+/* ==========================================================================
+   DARK MODE
+   ========================================================================== */
+
+[data-theme='dark'] {
+  /* Primary green — brighter for dark backgrounds */
+  --ifm-color-primary: #34a870;
+  --ifm-color-primary-dark: #2d9563;
+  --ifm-color-primary-darker: #298b5c;
+  --ifm-color-primary-darkest: #20724a;
+  --ifm-color-primary-light: #4bb882;
+  --ifm-color-primary-lighter: #6bc498;
+  --ifm-color-primary-lightest: #97d5b6;
+
+  /* Background */
+  --ifm-background-color: #1a1a2e;
+  --ifm-background-surface-color: #1a1a2e;
+
+  /* Text */
+  --ifm-font-color-base: #f8f8fa;
+  --ifm-heading-color: #f8f8fa;
+  --ifm-color-emphasis-300: rgba(255, 255, 255, 0.1);
+  --ifm-color-emphasis-200: rgba(255, 255, 255, 0.06);
+  --ifm-color-emphasis-100: rgba(255, 255, 255, 0.04);
+
+  /* Borders */
+  --ifm-color-border: rgba(255, 255, 255, 0.1);
+
+  /* Navbar */
+  --ifm-navbar-background-color: #1a1a2e;
+  --ifm-navbar-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+
+  /* Links */
+  --ifm-link-color: #34a870;
+  --ifm-link-hover-color: #4bb882;
+
+  /* Footer */
+  --ifm-footer-background-color: #141424;
+  --ifm-footer-color: #a0a0b8;
+  --ifm-footer-link-color: #a0a0b8;
+  --ifm-footer-link-hover-color: #34a870;
+  --ifm-footer-title-color: #f8f8fa;
+
+  /* TOC */
+  --ifm-toc-link-color: #8888a0;
+  --ifm-toc-border-color: rgba(255, 255, 255, 0.1);
+
+  /* Pagination */
+  --ifm-pagination-nav-color-hover: #34a870;
+
+  /* Highlighted code line */
+  --docusaurus-highlighted-code-line-bg: rgba(52, 168, 112, 0.12);
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Navbar
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .navbar {
+  background-color: #1a1a2e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .navbar__brand {
+  color: #f8f8fa;
+}
+
+[data-theme='dark'] .navbar__brand:hover {
+  color: #34a870;
+}
+
+[data-theme='dark'] .navbar__link {
+  color: #8888a0;
+}
+
+[data-theme='dark'] .navbar__link:hover,
+[data-theme='dark'] .navbar__link--active {
+  color: #34a870;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Sidebar
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .menu__link {
+  color: #8888a0;
+}
+
+[data-theme='dark'] .menu__link:hover {
+  color: #f8f8fa;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='dark'] .menu__link--active {
+  color: #34a870;
+  background-color: rgba(52, 168, 112, 0.1);
+}
+
+[data-theme='dark'] .theme-doc-sidebar-container {
+  border-right-color: rgba(255, 255, 255, 0.1);
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Code
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] code {
+  background-color: rgba(52, 168, 112, 0.1);
+  color: #5ec98e;
+}
+
+[data-theme='dark'] pre {
+  background-color: #2d2d44;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] pre code {
+  background-color: transparent;
+  color: #d0d0e0;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Tables
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] table {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] table thead {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme='dark'] table th {
+  color: #8888a0;
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] table tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+[data-theme='dark'] table tr:hover {
+  background-color: rgba(52, 168, 112, 0.06);
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Cards
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .card {
+  border-color: rgba(255, 255, 255, 0.1);
+  background-color: #2d2d44;
+}
+
+[data-theme='dark'] .card:hover {
+  border-color: #34a870;
+}
+
+[data-theme='dark'] .card__header {
+  color: #f8f8fa;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Buttons
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .button--primary {
+  background-color: #34a870;
+  border-color: #34a870;
+}
+
+[data-theme='dark'] .button--primary:hover {
+  background-color: #2d9563;
+  border-color: #2d9563;
+}
+
+[data-theme='dark'] .button--secondary {
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #f8f8fa;
+}
+
+[data-theme='dark'] .button--secondary:hover {
+  border-color: #34a870;
+  color: #34a870;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Admonitions
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .admonition--info,
+[data-theme='dark'] .admonition--tip {
+  border-color: #34a870;
+  background-color: rgba(52, 168, 112, 0.08);
+}
+
+[data-theme='dark'] .admonition--info .admonition-heading,
+[data-theme='dark'] .admonition--tip .admonition-heading {
+  color: #5ec98e;
+}
+
+[data-theme='dark'] .admonition--warning {
+  border-color: #e5a820;
+  background-color: rgba(229, 168, 32, 0.08);
+}
+
+[data-theme='dark'] .admonition--warning .admonition-heading {
+  color: #f0c040;
+}
+
+[data-theme='dark'] .admonition--danger,
+[data-theme='dark'] .admonition--caution {
+  border-color: #e55050;
+  background-color: rgba(229, 80, 80, 0.08);
+}
+
+[data-theme='dark'] .admonition--danger .admonition-heading,
+[data-theme='dark'] .admonition--caution .admonition-heading {
+  color: #f06060;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Tabs
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .tabs {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .tabs__item {
+  color: #8888a0;
+}
+
+[data-theme='dark'] .tabs__item:hover {
+  color: #f8f8fa;
+}
+
+[data-theme='dark'] .tabs__item--active {
+  color: #34a870;
+  border-bottom-color: #34a870;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — TOC
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .table-of-contents {
+  border-left-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .table-of-contents__link {
+  color: #8888a0;
+}
+
+[data-theme='dark'] .table-of-contents__link:hover,
+[data-theme='dark'] .table-of-contents__link--active {
+  color: #34a870;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Breadcrumbs
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .breadcrumbs__link {
+  color: #8888a0;
+}
+
+[data-theme='dark'] .breadcrumbs__link:hover {
+  color: #34a870;
+}
+
+[data-theme='dark'] .breadcrumbs__item--active .breadcrumbs__link {
+  color: #f8f8fa;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Pagination
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .pagination-nav__link {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .pagination-nav__link:hover {
+  border-color: #34a870;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Footer
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .footer {
+  background-color: #141424;
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Search
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .DocSearch-Button {
+  background-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .DocSearch-Button:hover {
+  border-color: #34a870;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Details
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] details {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] details summary {
+  color: #f8f8fa;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Badge
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .badge--primary {
+  background-color: rgba(52, 168, 112, 0.15);
+  color: #5ec98e;
+}
+
+[data-theme='dark'] .badge--secondary {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #8888a0;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Hero
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .hero__subtitle {
+  color: #8888a0;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Back to Top
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .clean-btn.theme-back-to-top-button {
+  background-color: #34a870;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Dropdown
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .dropdown__menu {
+  background-color: #2d2d44;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Scrollbar
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Announcement Bar
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] div[class*='announcementBar'] {
+  background-color: #34a870;
+  color: #ffffff;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — General Text
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] h1,
+[data-theme='dark'] h2,
+[data-theme='dark'] h3,
+[data-theme='dark'] h4,
+[data-theme='dark'] h5,
+[data-theme='dark'] h6 {
+  color: #f8f8fa;
+}
+
+[data-theme='dark'] p,
+[data-theme='dark'] li {
+  color: #c0c0d0;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Anchors
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] .anchor {
+  color: #34a870;
+}
+
+[data-theme='dark'] .anchor:hover {
+  color: #4bb882;
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode — Selection
+   -------------------------------------------------------------------------- */
+[data-theme='dark'] ::selection {
+  background-color: rgba(52, 168, 112, 0.3);
+}
