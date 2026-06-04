@@ -49,6 +49,8 @@ gpui-query is a mature library with a three-layer architecture (core/client/hook
 - R17. Code blocks feature Rust syntax highlighting with copy-to-clipboard functionality
 - R18. The site is fully responsive with mobile navigation
 - R19. Dark and light mode is supported via system preference and toggle
+- R20. An About page provides project background, author info, and links to GitHub and Zed
+- R21. A Changelog page presents release history sourced from git tags or a maintained data array
 
 ---
 
@@ -70,7 +72,10 @@ For a static site, all content must be resolved at build time. Vite's `import.me
 The docs sidebar, pagination, and prerender page list are all derived from `getAllDocs()` which reads frontmatter from MDX files via `import.meta.glob`. There is no separate `docs-nav.ts` manifest — the frontmatter `category`, `order`, and `title` fields are the single source of truth. This eliminates the synchronization burden of maintaining a parallel manifest.
 
 **KTD-4c. Dynamic route prerendering via explicit `pages` config, not `crawlLinks` alone.**
-TanStack Start's `autoStaticPathsDiscovery` explicitly skips dynamic routes (routes containing `$` in the path). The `crawlLinks` approach is fragile — it depends on the docs index page rendering complete link lists. Instead, the plan uses the `pages` config array in `tanstackStart()` to explicitly enumerate all doc and blog slugs. This array is generated programmatically from the content directory at build config time via a Vite plugin or a config-resolution step that reads MDX filenames.
+TanStack Start's `autoStaticPathsDiscovery` explicitly skips dynamic routes (routes containing `$` in the path). The `crawlLinks` approach is fragile — it depends on the docs index page rendering complete link lists. Instead, the plan uses the `pages` config array in `tanstackStart()` to explicitly enumerate all doc and blog slugs. Resolution: a pre-build script (`scripts/get-slugs.mjs`) reads MDX filenames from the filesystem via `fs.readdirSync` and writes a `src/lib/slug-list.ts` file consumed by `vite.config.ts`. This avoids the `import.meta.glob` timing issue (glob only resolves at build time, not at config resolution time). `crawlLinks: true` is retained as a secondary discovery mechanism for non-dynamic routes only — it is not the primary slug enumeration strategy.
+
+**KTD-4d. MDX-in-SSR early validation gate in U1.**
+Whether `import.meta.glob` eagerly resolves MDX through the plugin in the SSR/server environment used during prerender is unverified. This is a load-bearing assumption for the entire content system. U1 includes an explicit validation step: create a minimal MDX file, add `import.meta.glob` to resolve it, run `vp build` with prerender enabled, and verify the MDX content appears in the static HTML output. This gate must pass before proceeding to U2 or U3.
 
 **KTD-5. Pagefind for search (not Algolia or FlexSearch).**
 Pagefind is a static search index generator that runs post-build, creates a lightweight WASM-based index, and requires zero server infrastructure. Ideal for SSG sites. Algolia requires an external service; FlexSearch requires shipping the full corpus to the client.
@@ -103,7 +108,6 @@ flowchart TB
 
     subgraph Output
         HTML[".output/public/<br/>Static HTML pages"]
-        SITEMAP["sitemap.xml<br/>robots.txt"]
         LLMSTXT["llms.txt<br/>llms-full.txt"]
         SEARCH["search/index/<br/>Pagefind WASM index"]
     end
@@ -116,8 +120,8 @@ flowchart TB
     MDX --> MDX_PLUGIN --> VITE
     STATIC --> VITE
     VITE --> TS_PLUGIN --> HTML
+    TS_PLUGIN --> SITEMAP
     HTML --> PAGEFIND --> SEARCH
-    HTML --> SITEMAP
     HTML --> LLMSTXT
     HTML --> CF --> DOMAIN
     SEARCH --> CF
@@ -145,7 +149,6 @@ web/
 │   │   ├── callout.tsx            # Info/Warning/Tip callout boxes
 │   │   ├── mdx-components.tsx     # Custom MDX component overrides
 │   │   ├── theme-toggle.tsx       # Dark/light mode switch
-│   │   ├── seo-head.tsx           # Per-route SEO meta helper
 │   │   └── search-dialog.tsx      # Pagefind search command palette
 │   ├── content/
 │   │   ├── docs/                  # Documentation MDX files
@@ -175,7 +178,7 @@ web/
 │   ├── lib/
 │   │   ├── content.ts             # Content loading utilities (import.meta.glob)
 │   │   ├── seo.ts                 # Structured data helpers (JSON-LD)
-│   │   ├── llms.ts                # llms.txt generation utilities
+│   │   ├── rss.ts                 # RSS feed generation utility
 │   │   └── utils.ts               # shadcn/ui utility (cn helper)
 │   ├── routes/
 │   │   ├── __root.tsx             # HTML shell with navbar, footer, theme
@@ -268,7 +271,7 @@ web/
 10. Gate TanStack DevTools components behind `import.meta.env.DEV` in `__root.tsx` (keep the Vite devtools plugin in the config — it only activates in development)
 11. Validate: run `vp build` after configuration to confirm MDX content renders in the static HTML output from prerender, not just in client-side hydration. If `vp build` fails with the plugin chain, fall back to `npx vite build` and document which approach works
 
-**Patterns to follow:** Plugin ordering: keep the existing scaffold order and insert MDX before `tanstackStart()`. The scaffold's working order is `devtools() → cloudflare() → tailwindcss() → tanstackStart() → viteReact()`; after inserting MDX it becomes `devtools() → cloudflare({ assetsOnly: true }) → tailwindcss() → mdx() → tanstackStart() → viteReact()`. AGENTS.md `vp` CLI usage.
+**Patterns to follow:** Plugin ordering: keep the existing scaffold order and insert MDX before `tanstackStart()`. The scaffold's working order is `devtools() → cloudflare() → tailwindcss() → tanstackStart() → viteReact()`; after inserting MDX it becomes `devtools() → cloudflare({ assetsOnly: true }) → tailwindcss() → mdx() → tanstackStart() → viteReact()`. If `vp build` fails with this ordering, try moving `mdx()` after `tanstackStart()` — TanStack Start's plugin may need to process routes before MDX compilation. Document whichever ordering works. AGENTS.md `vp` CLI usage.
 
 **Test scenarios:**
 - Happy path: `vp build` completes without errors, producing `.output/public/` with static HTML files
@@ -296,7 +299,6 @@ web/
 - `web/src/components/code-block.tsx` — syntax-highlighted code with copy button
 - `web/src/components/callout.tsx` — info/warning/tip/note callout boxes
 - `web/src/components/mdx-components.tsx` — MDX provider component overrides
-- `web/src/components/seo-head.tsx` — structured data and meta tag helpers
 - `web/src/components/ui/button.tsx` — shadcn button (installed)
 - `web/src/components/ui/card.tsx` — shadcn card
 - `web/src/components/ui/accordion.tsx` — shadcn accordion
@@ -310,14 +312,14 @@ web/
 
 **Approach:**
 1. Install shadcn components: `npx shadcn@latest add button card accordion badge navigation-menu separator tabs sheet command`
-2. Build `Navbar` with logo, section links (Docs, Blog, FAQ, GitHub), theme toggle, and mobile hamburger menu. Use `NavigationMenu` for desktop and `Sheet` for mobile.
+2. Build `Navbar` with logo, section links (Docs, Blog, FAQ, GitHub), theme toggle, and mobile hamburger menu. Use `NavigationMenu` for desktop and `Sheet` for mobile. Mobile nav: hamburger icon on navbar right side (after theme toggle), Sheet slides in from left, tapping backdrop or pressing Escape closes it, route navigation auto-closes the Sheet, full nav links displayed.
 3. Build `Footer` with project links, GitHub repo, and license info
 4. Build `DocsSidebar` with a navigation tree derived from `getAllDocs()` (the frontmatter-driven content utility from U3). Highlight the current page. Collapsible sections per category.
-5. Build `CodeBlock` wrapping rehype-pretty-code output with a copy-to-clipboard button and optional filename/title caption
+5. Build `CodeBlock` wrapping rehype-pretty-code output with a copy-to-clipboard button and optional filename/title caption. Copy feedback: on click, swap button to checkmark icon for 2 seconds then revert. Use `navigator.clipboard.writeText` with `document.execCommand('copy')` fallback.
 6. Build `Callout` component mapping MDX `<Callout type="info|warning|tip|note">` to styled boxes with lucide-react icons
 7. Build `MdxComponents` providing component overrides for MDX rendering: `pre`, `code`, `a`, `Callout`, `Tabs`/`Tab` examples
-8. Build `ThemeToggle` using system preference detection and localStorage persistence
-9. Build `seo-head.tsx` factory functions for JSON-LD: `softwareSourceCode()`, `techArticle()`, `howTo()`, `faqPage()`
+8. Build `ThemeToggle` using system preference detection and localStorage persistence. Prevent flash-of-unstyled-content (FOUC): add an inline `<script>` block in `__root.tsx` `<head>` that reads localStorage theme preference (or falls back to `matchMedia` system preference) and sets `dark` class on `<html>` synchronously before paint.
+9. Build `seo.ts` factory functions for JSON-LD: `softwareSourceCode()`, `techArticle()`, `howTo()`, `faqPage()`, `blogPost()`. All structured data helpers live in `seo.ts` — route head functions import directly. No separate `seo-head.tsx` component wrapper needed.
 10. Update `styles.css` with shadcn CSS custom properties, `@tailwindcss/typography` prose customization, and code block theme variables
 
 **Patterns to follow:** shadcn/ui component patterns (forwardRef, className composition via `cn()`). Tailwind CSS v4 utility-first. `lucide-react` for icons.
@@ -344,6 +346,9 @@ web/
 - `web/src/lib/content.ts` — content loading and slug resolution utilities
 - `web/src/content/docs/getting-started.mdx` — seed documentation page
 - `web/src/content/docs/core-concepts.mdx` — seed documentation page
+- `web/src/content/blog/why-gpui-query.mdx` — seed blog post (skeleton, content authored in U6)
+- `web/src/content/blog/cooperative-cancellation.mdx` — seed blog post (skeleton)
+- `web/src/content/blog/cache-policies-explained.mdx` — seed blog post (skeleton)
 - `web/src/env.d.ts` or module declaration — MDX module type declarations
 
 **Approach:**
@@ -388,6 +393,7 @@ web/
 5. **Architecture highlight:** Brief visual showing the three-layer design (core → client → hook) with a mermaid or ASCII diagram
 6. **CTA footer section:** "Ready to get started?" with prominent Get Started button
 7. Update `__root.tsx` to wrap `Outlet` with `Navbar` and `Footer` so all routes share the chrome
+8. **Accessibility:** All interactive elements have visible focus indicators (ring utilities). Hero CTA buttons have descriptive aria-labels. Feature cards use semantic heading hierarchy (h2 for section, h3 per card). Comparison table uses `<th scope>` and proper header association. Color contrast meets WCAG 2.1 AA (4.5:1 for text, 3:1 for large text). Images/decorative elements carry `alt` text or `aria-hidden`. Skip-to-content link as first focusable element in `__root.tsx`.
 
 **Patterns to follow:** shadcn `Card` for feature grid. `Tabs` for comparison table. Tailwind CSS responsive grid (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`). `prose` class for code example.
 
@@ -416,7 +422,7 @@ web/
 - `web/src/content/docs/*.mdx` — all documentation content files (18+ files)
 
 **Approach:**
-1. Create docs layout route (`docs.tsx` as a layout route, or use the `$slug.tsx` route with a shared wrapper) that renders `DocsSidebar` + content area in a two-column layout
+1. Create docs layout route — use `docs.tsx` as a TanStack Router layout route (not a pathless layout wrap). This route file renders `DocsSidebar` + `<Outlet />` in a two-column layout and is shared by `/docs` (index) and `/docs/$slug` (dynamic). The layout route owns the sidebar; child routes only render their content.
 2. Build `$slug.tsx` route with:
    - `loader` that resolves the MDX module by slug parameter
    - `head` that extracts frontmatter for meta tags (title, description, canonical, OG)
@@ -425,7 +431,7 @@ web/
 3. Build docs listing page at `/docs` that MUST render a categorized grid of all docs with links to every page. This is critical: the prerender crawler discovers dynamic routes by following `<a href>` links from this page. Do NOT redirect to getting-started — the listing page is the discovery entry point for all doc pages
 4. Wire `DocsSidebar` to the navigation data derived from `getAllDocs()` (frontmatter-driven) with active-state highlighting based on current slug
 5. Build `DocsPagination` with previous/next links derived from the frontmatter order
-6. Integrate Pagefind: add `data-pagefind-body` attribute to content containers, run `npx pagefind --site .output/public` as a post-build step, create `SearchDialog` component using `@pagefind/default-ui`
+6. Integrate Pagefind: add `data-pagefind-body` attribute to content containers, run `npx pagefind --site .output/public` as a post-build step, create `SearchDialog` component using `@pagefind/default-ui`. Search dialog: triggered by `Cmd+K` / `Ctrl+K` keyboard shortcut or search icon in navbar. Modal overlay with search input, results list with title + snippet highlighting, arrow-key navigation, Enter to navigate. Closes on Escape or backdrop click. Lazy-loads Pagefind UI on first open to avoid impacting initial page load.
 7. Write all documentation MDX content files covering:
    - Getting Started (installation, QueryClient setup, first query)
    - Core Concepts (three-layer architecture, QueryResource state machine, QueryKey, QueryStatus lifecycle)
@@ -480,8 +486,8 @@ web/
 **Approach:**
 1. Build blog listing page with `Card` components showing post title, date, description, and tags. Sorted by date descending. Pagination is client-side for the initial launch (load all posts, paginate in JS) — sufficient for 3 seed posts. URL-based pagination (`/blog/page/2`) is deferred.
 2. Build blog post route (`$slug.tsx`) with `loader` resolving MDX, `head` extracting meta tags, and component rendering with `prose` styling
-3. Add tag filtering via query parameter (`/blog?tag=rust`)
-4. Generate RSS 2.0 XML feed as a prerendered route (`rss.xml.tsx`) that uses `getBlogPosts()` and returns XML content type. This keeps RSS generation inside the content pipeline and benefits from prerendering
+3. Add tag filtering via query parameter (`/blog?tag=rust`). UI: pill-shaped tag buttons below the page heading, active tag highlighted. Clicking a tag filters the post grid in-place (no full page reload — use `useSearch` to read query param and filter client-side). "All" pill clears the filter. Tags are derived from the union of all post `tags` frontmatter arrays.
+4. Generate RSS 2.0 XML feed as a prerendered route (`rss.xml.tsx`) that uses `getBlogPosts()` and returns XML content type. Content-type: set `Content-Type: application/rss+xml; charset=utf-8` in the route response. Include `<lastBuildDate>` with the most recent post date, `<ttl>60</ttl>`, and ensure all `<link>` elements use absolute URLs (`https://gpui-query.hmziq.xyz/blog/{slug}`). This keeps RSS generation inside the content pipeline and benefits from prerendering.
 5. Write 3 seed blog posts:
    - "Why gpui-query?" — the problem space, why TanStack Query patterns translate to Rust/GPUI, what makes this different
    - "Cooperative Cancellation with QuerySignal" — how Arc<AtomicBool> enables clean cancellation, the signal lifecycle, interaction with LatestWins
@@ -511,6 +517,7 @@ web/
 - `web/src/routes/faq.tsx` — FAQ page with Accordion and FAQPage JSON-LD
 - `web/src/routes/changelog.tsx` — changelog / release notes page
 - `web/src/routes/about.tsx` — about the project page
+- `web/src/routes/404.tsx` — custom 404 not-found page
 
 **Approach:**
 1. **FAQ page:** Array of Q&A items rendered with shadcn `Accordion`. Each item has a question as the trigger and a rich answer (supporting basic markdown/code). Inject `FAQPage` JSON-LD structured data in the route's `head` with all Q&A pairs. Questions cover:
@@ -533,7 +540,7 @@ web/
 - Happy path: FAQ page renders all questions with expand/collapse behavior
 - Happy path: FAQ page static HTML contains FAQPage JSON-LD with all Q&A pairs
 - Happy path: Changelog renders version entries in reverse chronological order
-- Edge case: FAQ accordion allows multiple items open simultaneously (or single, confirm UX choice)
+- Edge case: FAQ accordion uses `type="multiple"` so users can open multiple items simultaneously — FAQ browsing benefits from comparing answers side by side
 
 **Verification:** FAQ page is prerendered with correct JSON-LD in static HTML. Accordion toggles work client-side. Changelog and about pages render correctly.
 
@@ -547,11 +554,9 @@ web/
 
 **Files:**
 - `web/src/lib/seo.ts` — JSON-LD factory functions (enhanced from U2)
-- `web/src/lib/llms.ts` — llms.txt and llms-full.txt build-time generation script
 - `web/scripts/generate-llms-txt.mjs` — build-time script for llms.txt and llms-full.txt
 - `web/scripts/generate-md-alt.mjs` — build-time script for .md alternatives from MDX source
 - `web/public/robots.txt` — updated with sitemap and llms.txt references
-- `web/src/routes/404.tsx` — custom 404 not-found page
 - All route files — updated `head` exports with meta tags, structured data, canonical URLs
 - `web/vite.config.ts` — updated with sitemap config (top-level, not nested in prerender)
 - `web/public/og-image.png` — default Open Graph image
@@ -572,13 +577,13 @@ web/
 8. **OG image:** Create a default Open Graph image (1200x630) with the library name, tagline, and branding. Place in `public/og-image.png`.
 9. **Cloudflare caching:** Configure caching headers via Cloudflare dashboard Rules (not `_headers` file, which is a Cloudflare Pages convention not fully supported in Workers mode). Rules: HTML cache 1 hour, static assets cache 1 year.
 10. **Canonical URLs:** Every page emits `<link rel="canonical" href="https://gpui-query.hmziq.xyz/{path}">` to prevent duplicate content
-11. **Custom 404 page:** Create `src/routes/404.tsx` with a styled not-found message, search suggestion, and link back to docs/home. Prerendered so it works for any invalid URL.
+11. **Custom 404 page:** Created in U7 as `src/routes/404.tsx` with a styled not-found message, search suggestion, and link back to docs/home. Prerendered so it works for any invalid URL. This file is listed in U7 because it shares the same component patterns as FAQ/changelog/about pages.
 
 **Patterns to follow:** TanStack Router `head` function for meta/links/scripts. JSON-LD via `<script type="application/ld+json">` in head scripts. Cloudflare Workers dashboard Rules for caching headers.
 
 **Test scenarios:**
 - Happy path: every prerendered page has correct `<title>`, canonical URL, and OG meta tags in static HTML
-- Happy path: JSON-LD validates against schema.org types (SoftwareSourceCode, TechArticle, HowTo, FAQPage)
+- Happy path: JSON-LD validates against schema.org types (SoftwareSourceCode, TechArticle, HowTo, FAQPage, BlogPosting)
 - Happy path: sitemap.xml lists all prerendered routes with correct URLs (excluding utility routes like rss.xml)
 - Happy path: `/llms.txt` in output directory contains valid markdown following llmstxt.org format
 - Happy path: `/llms-full.txt` contains concatenated documentation content
@@ -604,7 +609,7 @@ web/
 - `.github/workflows/pr-checks.yml` — PR validation (at repo root)
 
 **Approach:**
-1. **Build script:** `package.json` scripts: `"build": "vp build && npx pagefind --site .output/public && node scripts/generate-llms-txt.mjs && node scripts/generate-md-alt.mjs"`. Pagefind and AI-crawler files run as post-build steps against the static output. If `vp build` fails, fall back to `npx vite build` and document the working approach.
+1. **Build script:** `package.json` scripts: `"build": "vp build && npx pagefind --site .output/public && node scripts/generate-llms-txt.mjs && node scripts/generate-md-alt.mjs"`. Pagefind and AI-crawler files run as post-build steps against the static output. Both generate scripts accept a `--output` CLI argument (default `.output/public`) so they can be run independently for debugging without a full rebuild. If `vp build` fails, fall back to `npx vite build` and document the working approach.
 2. **Deploy script:** `"deploy": "pnpm run build && wrangler deploy"`. Deploys to Cloudflare Workers in `assetsOnly` mode (pure static serving, no Worker invocations).
 3. **GitHub Actions deploy workflow:** Triggered on push to `main`. Steps: checkout, setup pnpm, `vp install`, `pnpm run build`, `wrangler deploy`. Uses `CLOUDFLARE_API_TOKEN` secret.
 4. **GitHub Actions PR checks:** Triggered on pull requests. Steps: checkout, setup pnpm, `vp install`, `vp check`, `vp test`, `pnpm run build` (dry run).
