@@ -1,9 +1,4 @@
-import {
-  HeadContent,
-  Scripts,
-  createRootRoute,
-  Outlet,
-} from "@tanstack/react-router";
+import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
 
@@ -49,9 +44,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <a href="#main-content" className="skip-to-content">
           Skip to content
         </a>
-        <div id="app">
-          {children}
-        </div>
+        <div id="app">{children}</div>
         {import.meta.env.DEV && <DevTools />}
         <Scripts />
       </body>

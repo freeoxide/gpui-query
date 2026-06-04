@@ -1,0 +1,51 @@
+---
+title: Getting Started
+description: Install gpui-query and write your first query in a GPUI application
+category: Getting Started
+order: 1
+---
+
+# Getting Started
+
+## Installation
+
+Add gpui-query to your `Cargo.toml`:
+
+```toml
+[dependencies]
+gpui-query = "2.0"
+```
+
+## Setup
+
+Create a `QueryClient` and register it in your GPUI application:
+
+```rust
+use gpui::prelude::*;
+use gpui_query::prelude::*;
+
+fn main() {
+    let client = QueryClient::new();
+    // Register with your GPUI app
+}
+```
+
+## Your First Query
+
+Use `use_query` to fetch data asynchronously:
+
+```rust
+use gpui_query::use_query;
+
+fn my_component(cx: &mut ViewContext<App>) {
+    let query = use_query(
+        QueryKey::from("user-profile"),
+        |cx| async move {
+            fetch_user_profile().await
+        },
+        cx,
+    );
+}
+```
+
+The query automatically handles caching, deduplication, and retries.

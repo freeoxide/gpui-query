@@ -1,0 +1,39 @@
+---
+title: Core Concepts
+description: Understanding the three-layer architecture of gpui-query
+category: Getting Started
+order: 2
+---
+
+# Core Concepts
+
+gpui-query follows a three-layer architecture inspired by TanStack Query:
+
+## The Three Layers
+
+### 1. Core Layer
+
+The core layer provides the fundamental types and state management. `QueryResource` represents a single query's lifecycle with states: `Loading`, `Success`, `Error`, and `Cancelled`.
+
+### 2. Client Layer
+
+`QueryClient` is the central registry. It manages all active queries, handles caching via `CachePolicy`, and coordinates query lifecycle events.
+
+### 3. Hook Layer
+
+Hooks like `use_query`, `use_mutation`, and `use_infinite_query` provide the ergonomic API that GPUI components consume. They automatically subscribe to query state changes.
+
+## Query Keys
+
+Query keys use a hierarchical system (`QueryKey`) that supports:
+
+- Exact matching for single query operations
+- Prefix matching for bulk operations like invalidation
+
+## Cache Policies
+
+gpui-query supports multiple cache policies:
+
+- **NoCache** — no caching, always refetch
+- **TTL** — time-to-live based expiration
+- **StaleWhileRevalidate** — serve stale while fetching fresh data

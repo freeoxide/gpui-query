@@ -24,9 +24,7 @@ const config = defineConfig({
     tailwindcss(),
     mdx({
       remarkPlugins: [remarkGfm, remarkFrontmatter, remarkMdxFrontmatter],
-      rehypePlugins: [
-        [rehypePrettyCode, { theme: "github-dark-default" }],
-      ],
+      rehypePlugins: [[rehypePrettyCode, { theme: "github-dark-default" }]],
     }),
     tanstackStart({
       prerender: {

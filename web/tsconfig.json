@@ -10,7 +10,6 @@
     },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
-    "include": ["**/*.ts", "**/*.tsx", "src/env.d.ts"],
 
     /* Bundler mode */
     "moduleResolution": "bundler",
