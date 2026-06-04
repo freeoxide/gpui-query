@@ -1,0 +1,157 @@
+---
+title: "Migration from v1 to v2"
+description: "Breaking changes, new patterns, and migration guide for upgrading from gpui-query v1 to v2"
+category: "Getting Started"
+order: 17
+---
+
+# Migration from v1 to v2
+
+gpui-query v2 introduces an options-first API, expanded type system, and new capabilities like infinite queries and persistence. This guide covers every breaking change.
+
+## Breaking Changes
+
+### 1. Options-First API
+
+**v1:** Options passed as individual parameters
+
+```rust
+// v1
+use_query(cx, "users", fetcher, CachePolicy::TTL(Duration::from_secs(60)), 3);
+```
+
+**v2:** Options collected via builder methods
+
+```rust
+// v2
+use_query(cx, "users", || async { fetch_users().await })
+    .with_cache_policy(CachePolicy::TTL(Duration::from_secs(60)))
+    .with_retry(RetryPolicy::default())
+    .with_request_policy(RequestPolicy::LatestWins);
+```
+
+### 2. QueryResource Shape
+
+**v1:** Flat fields without status tracking
+
+```rust
+// v1
+pub struct QueryResource<T> {
+    pub data: Option<T>,
+    pub is_loading: bool,
+    pub error: Option<String>,
+}
+```
+
+**v2:** Full lifecycle tracking
+
+```rust
+// v2
+pub struct QueryResource<T, E> {
+    pub data: Option<T>,
+    pub status: QueryStatus,  // Idle | Pending | Success | Error
+    pub is_fetching: bool,    // Replaces is_loading
+    pub is_refetching: bool,  // NEW
+    pub error: Option<QueryError>,  // Typed error
+    pub updated_at: Option<Instant>,
+}
+```
+
+**Migration:**
+
+- Replace `is_loading` with `status == QueryStatus::Pending`
+- Replace `error: Option<String>` with `error: Option<QueryError>` and use `error.message()`
+- Add error type parameter `E`
+
+### 3. Typed Errors
+
+**v1:** `Option<String>`
+**v2:** `Option<QueryError>` with `QueryErrorKind`
+
+```rust
+// v2
+if let Some(error) = &query.error {
+    match error.kind() {
+        QueryErrorKind::Fetch => show_retryable_error(error.message()),
+        QueryErrorKind::Cancelled => show_transient_notice(),
+        QueryErrorKind::RetryExhausted => show_permanent_error(error.message()),
+        _ => show_generic_error(error.message()),
+    }
+}
+```
+
+### 4. Mutation Callbacks
+
+**v1:** Callbacks as individual closures
+**v2:** Callbacks in `MutationCallbacks` struct
+
+```rust
+// v2
+mutate_with_callbacks(cx, &client, "key", value, MutationCallbacks {
+    on_success: |data, cx| { /* ... */ },
+    on_error: |error, cx| { /* ... */ },
+    on_settled: |cx| { /* ... */ },  // NEW: fires regardless of outcome
+});
+```
+
+### 5. QueryClient Method Names
+
+| v1                       | v2                             |
+| ------------------------ | ------------------------------ |
+| `clear()`                | `gc()`                         |
+| `invalidate(key)`        | `invalidate_queries(filter)`   |
+| `prefetch(key, fetcher)` | `prefetch_query(key, fetcher)` |
+
+## New Features in v2
+
+### Infinite Queries
+
+```rust
+use_infinite_query(cx, "paginated-data", |page_param| async move {
+    fetch_page(page_param).await
+}).with_max_pages(10);
+```
+
+### Select Pattern
+
+```rust
+use_query_select(cx, "users", |users: &Vec<User>| {
+    users.iter().filter(|u| u.is_active).cloned().collect()
+});
+```
+
+### Persistence
+
+```rust
+impl QueryPersister for FilePersister {
+    fn persist(&self, state: &DehydratedState) -> Result<()> {
+        let json = serde_json::to_string(state)?;
+        std::fs::write("cache.json", json)?;
+        Ok(())
+    }
+
+    fn restore(&self) -> Result<DehydratedState> {
+        let json = std::fs::read_to_string("cache.json")?;
+        serde_json::from_str(&json)
+    }
+}
+```
+
+## Migration Checklist
+
+1. Update `Cargo.toml` version to `0.2.0` or later
+2. Fix `QueryResource` references — add error type parameter, update field names
+3. Convert options to builder pattern — replace positional args with `.with_*()` methods
+4. Update error handling — replace `String` errors with `QueryError` and `QueryErrorKind`
+5. Update mutation calls — wrap callbacks in `MutationCallbacks`
+6. Rename `QueryClient` methods — `clear` → `gc`, `invalidate` → `invalidate_queries`
+7. Opt-in to new features as needed
+8. Run tests to verify
+
+## Summary
+
+- v2 adopts an options-first builder API
+- `QueryResource` gains status tracking and typed errors
+- New features: infinite queries, select pattern, persistence, observers
+- Migration is mechanical — rename methods, wrap callbacks, update types
+- Each change is independent — migrate incrementally

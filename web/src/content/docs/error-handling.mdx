@@ -1,0 +1,198 @@
+---
+title: "Error Handling"
+description: "How gpui-query handles errors, QueryError types, error sanitization, and best practices"
+category: "Guides"
+order: 14
+---
+
+# Error Handling
+
+gpui-query provides structured error handling through the `QueryError` and `QueryErrorKind` types. Every query and mutation tracks its error state, giving you full visibility into what went wrong and why.
+
+## QueryError
+
+When a fetcher or mutator fails, gpui-query wraps the error in a `QueryError`:
+
+```rust
+pub struct QueryError {
+    kind: QueryErrorKind,
+    message: String,
+}
+```
+
+The error is stored in the `QueryResource` and reflected in the `QueryStatus::Error` variant.
+
+## QueryErrorKind
+
+`QueryErrorKind` categorizes errors by their source:
+
+```rust
+pub enum QueryErrorKind {
+    /// The fetcher returned an error
+    Fetch,
+    /// The query was cancelled via QuerySignal
+    Cancelled,
+    /// The query exceeded its retry budget
+    RetryExhausted,
+    /// The query was not found in the registry
+    NotFound,
+}
+```
+
+This categorization lets you handle different error types differently in your UI:
+
+```rust
+let query = use_query(cx, "user-profile", || async {
+    fetch_user(user_id).await
+});
+
+match &query.error {
+    Some(err) => match err.kind() {
+        QueryErrorKind::Fetch => {
+            // Network or API error — show retry button
+            render_fetch_error(&err.message)
+        }
+        QueryErrorKind::Cancelled => {
+            // Query was cancelled — typically transient
+            render_cancelled_notice()
+        }
+        QueryErrorKind::RetryExhausted => {
+            // All retries failed — show degraded message
+            render_retry_exhausted(&err.message)
+        }
+        QueryErrorKind::NotFound => {
+            // Resource doesn't exist — show 404
+            render_not_found()
+        }
+    },
+    None => { /* no error */ }
+}
+```
+
+## Error in QueryResource
+
+The `QueryResource<T, E>` type carries the error alongside data and status:
+
+```rust
+pub struct QueryResource<T, E> {
+    pub data: Option<T>,
+    pub status: QueryStatus,
+    pub is_fetching: bool,
+    pub is_refetching: bool,
+    pub error: Option<QueryError>,
+    pub updated_at: Option<Instant>,
+}
+```
+
+Key behaviors:
+
+- **Error clears on success:** When a refetch succeeds, the error is set to `None`. You don't need to manually clear errors.
+- **Error persists across retries:** While retry logic is active, the error from the last attempt remains visible.
+- **Error and data can coexist:** In `StaleWhileRevalidate` scenarios, you may have stale `data` from a previous successful fetch alongside an `error` from a failed refetch.
+
+## Error Sanitization
+
+gpui-query sanitizes error messages to prevent sensitive information from leaking into the UI. The `QueryError::message()` method returns a sanitized version suitable for display.
+
+For development, access full error details through diagnostics:
+
+```rust
+let diagnostics = client.diagnostics();
+for query in &diagnostics.queries {
+    if let Some(error) = &query.error {
+        println!("Query {} error: {:?}", query.key, error);
+    }
+}
+```
+
+## Display and Error Traits
+
+`QueryError` implements both `Display` and `Error`:
+
+```rust
+impl std::fmt::Display for QueryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.kind, self.message)
+    }
+}
+
+impl std::error::Error for QueryError {}
+```
+
+This allows `QueryError` to integrate with Rust's error ecosystem — use the `?` operator, chain with `anyhow`, or convert to your application's error types.
+
+## Mutation Errors
+
+Mutations use the same `QueryError` type through `MutationResource`:
+
+```rust
+pub struct MutationResource<T, E, V> {
+    pub data: Option<T>,
+    pub status: QueryStatus,
+    pub error: Option<QueryError>,
+    pub is_mutating: bool,
+}
+```
+
+Handle mutation errors with callbacks:
+
+```rust
+mutate_with_callbacks(
+    cx,
+    &client,
+    "update-user",
+    user_update,
+    MutationCallbacks {
+        on_success: |_data, _cx| {
+            // Mutation succeeded
+        },
+        on_error: |error, _cx| {
+            log::error!("Mutation failed: {}", error);
+        },
+        on_settled: |_cx| {
+            // Always runs
+        },
+    },
+);
+```
+
+## Best Practices
+
+### Show Errors Contextually
+
+Map `QueryErrorKind` to user-friendly messages:
+
+```rust
+fn error_message(error: &QueryError) -> &str {
+    match error.kind() {
+        QueryErrorKind::Fetch => "Unable to load data. Check your connection.",
+        QueryErrorKind::Cancelled => "The request was cancelled.",
+        QueryErrorKind::RetryExhausted => "Failed after multiple attempts.",
+        QueryErrorKind::NotFound => "The requested resource was not found.",
+    }
+}
+```
+
+### Use Error Boundaries
+
+For critical queries, render error boundaries:
+
+```rust
+if query.status == QueryStatus::Error && query.data.is_none() {
+    return render_error_view(query.error.as_ref());
+}
+
+if query.error.is_some() {
+    return render_data_with_error_notice(query.data.as_ref(), query.error.as_ref());
+}
+
+render_data(query.data.as_ref())
+```
+
+## Summary
+
+- `QueryError` wraps all error states with `QueryErrorKind` categorization
+- Error clears automatically on successful refetch
+- Error and stale data can coexist in SWR scenarios
+- `Display` and `Error` trait implementations enable ecosystem integration
+- Mutation errors use the same type system with callback support

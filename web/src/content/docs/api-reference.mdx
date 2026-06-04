@@ -1,0 +1,244 @@
+---
+title: "API Reference"
+description: "Comprehensive listing of all public types, functions, and traits in gpui-query"
+category: "API Reference"
+order: 18
+---
+
+# API Reference
+
+Complete listing of all public types, functions, and traits across gpui-query's three layers.
+
+## Core Layer (`gpui_query::core`)
+
+### `QueryKey`
+
+```rust
+pub struct QueryKey(/* private */);
+impl QueryKey {
+    pub fn new(key: &str) -> Self;
+}
+impl Clone for QueryKey
+impl Hash for QueryKey
+impl Eq for QueryKey
+impl Into<QueryKeyFilter> for QueryKey
+```
+
+### `QueryStatus`
+
+```rust
+pub enum QueryStatus {
+    Idle,
+    Pending,
+    Success,
+    Error,
+}
+```
+
+### `QueryResource<T, E>`
+
+```rust
+pub struct QueryResource<T, E> {
+    pub data: Option<T>,
+    pub status: QueryStatus,
+    pub is_fetching: bool,
+    pub is_refetching: bool,
+    pub error: Option<QueryError>,
+    pub updated_at: Option<Instant>,
+}
+```
+
+### `CachePolicy`
+
+```rust
+pub enum CachePolicy {
+    NoCache,
+    TTL(Duration),
+    StaleWhileRevalidate {
+        stale_time: Duration,
+        cache_time: Duration,
+    },
+}
+```
+
+### `RequestPolicy`
+
+```rust
+pub enum RequestPolicy {
+    LatestWins,
+    IgnoreWhileLoading,
+}
+```
+
+### `RetryPolicy`
+
+```rust
+pub struct RetryPolicy {
+    pub max_retries: usize,
+    pub retry_delay: Duration,
+    pub backoff_multiplier: f64,
+    pub max_retry_delay: Duration,
+}
+
+impl RetryPolicy {
+    pub fn default() -> Self;
+    pub fn none() -> Self;
+    pub fn exponential(max_retries: usize) -> Self;
+}
+```
+
+### `QueryError` / `QueryErrorKind`
+
+```rust
+pub struct QueryError { /* private */ }
+impl QueryError {
+    pub fn kind(&self) -> QueryErrorKind;
+    pub fn message(&self) -> &str;
+    pub fn cancelled(msg: &str) -> Self;
+    pub fn fetch(msg: &str) -> Self;
+}
+impl Display for QueryError
+impl Error for QueryError
+
+pub enum QueryErrorKind {
+    Fetch,
+    Cancelled,
+    RetryExhausted,
+    NotFound,
+}
+```
+
+### `MutationResource<T, E, V>`
+
+```rust
+pub struct MutationResource<T, E, V> {
+    pub data: Option<T>,
+    pub status: QueryStatus,
+    pub error: Option<QueryError>,
+    pub is_mutating: bool,
+}
+```
+
+### `InfiniteQueryResource<T, E>`
+
+```rust
+pub struct InfiniteQueryResource<T, E> {
+    pub data: Option<Vec<T>>,
+    pub pages: Vec<T>,
+    pub page_params: Vec<Option<PageParam>>,
+    pub fetch_direction: FetchDirection,
+    pub has_next_page: bool,
+    pub has_previous_page: bool,
+    pub status: QueryStatus,
+    pub is_fetching: bool,
+    pub error: Option<QueryError>,
+}
+```
+
+### `FetchDirection`
+
+```rust
+pub enum FetchDirection {
+    Forward,
+    Backward,
+}
+```
+
+### `QueryKeyFilter`
+
+```rust
+pub enum QueryKeyFilter {
+    Exact(QueryKey),
+    Prefix(QueryKey),
+    All,
+}
+```
+
+## Client Layer (`gpui_query::client`)
+
+### `QueryClient`
+
+```rust
+impl QueryClient {
+    pub fn new() -> Self;
+    pub fn resource<T, E>(&self, key: &QueryKey) -> Option<QueryResource<T, E>>;
+    pub fn query<T, E>(&self, key: &QueryKey) -> Option<&QueryResource<T, E>>;
+    pub fn invalidate_queries(&self, filter: QueryKeyFilter);
+    pub fn reset_queries(&self, filter: QueryKeyFilter);
+    pub fn remove_queries(&self, filter: QueryKeyFilter);
+    pub fn cancel_queries(&self, filter: QueryKeyFilter);
+    pub fn gc(&self);
+    pub fn get_query_data<T>(&self, key: &QueryKey) -> Option<T>;
+    pub fn set_query_data<T>(&self, key: &QueryKey, data: T);
+    pub fn prepare_fetch<T, E>(&self, key: &QueryKey, fetcher: impl Future<Output = Result<T, E>>);
+    pub fn prefetch_query<T, E>(&self, key: &QueryKey, fetcher: impl Future<Output = Result<T, E>>);
+    pub fn dehydrate(&self) -> DehydratedState;
+    pub fn hydrate(&self, state: DehydratedState);
+    pub fn persist(&self, persister: &dyn QueryPersister) -> Result<()>;
+    pub fn restore(&self, persister: &dyn QueryPersister) -> Result<()>;
+    pub fn diagnostics(&self) -> ClientDiagnostics;
+}
+```
+
+## Hook Layer (`gpui_query::hook`)
+
+### Query Hooks
+
+```rust
+pub fn use_query<T, E, F>(cx, key, fetcher) -> QueryResource<T, E>
+pub fn use_query_manual<T, E, F>(cx, key, fetcher) -> QueryResource<T, E>
+pub fn use_query_unsignalled<T, E, F>(cx, key, fetcher) -> QueryResource<T, E>
+pub fn use_query_select<T, S>(cx, key, select_fn) -> MappedQueryResource<S>
+```
+
+### Mutation Hooks
+
+```rust
+pub fn use_mutation<T, E, V, F>(cx, key, mutator) -> MutationResource<T, E, V>
+pub fn mutate<T, E, V>(cx, client, key, value) -> MutationResource<T, E, V>
+pub fn mutate_with_callbacks<T, E, V>(cx, client, key, value, callbacks) -> MutationResource<T, E, V>
+pub fn use_mutation_state<T, E, V>(cx, key) -> MutationResource<T, E, V>
+```
+
+### Infinite Query Hooks
+
+```rust
+pub fn use_infinite_query<T, E, F>(cx, key, fetcher) -> InfiniteQueryResource<T, E>
+pub fn fetch_next_page_infinite<T, E>(cx, client, key)
+pub fn fetch_previous_page_infinite<T, E>(cx, client, key)
+```
+
+### Direct Fetch
+
+```rust
+pub fn fetch_query<T, E, F>(cx, client, key, fetcher)
+pub fn fetch_query_with_signal<T, E, F>(cx, client, key, fetcher, signal)
+```
+
+## Observer Layer
+
+```rust
+pub struct QueryObserver<T, E> {
+    pub fn new(client: &QueryClient, key: &str) -> Self;
+    pub fn subscribe(&self, callback: impl Fn(&QueryResource<T, E>));
+    pub fn current(&self) -> Option<QueryResource<T, E>>;
+}
+
+pub struct MutationObserver<T, E, V> { /* similar */ }
+pub struct InfiniteQueryObserver<T, E> { /* similar */ }
+```
+
+## Persistence
+
+```rust
+pub trait QueryPersister {
+    fn persist(&self, state: &DehydratedState) -> Result<()>;
+    fn restore(&self) -> Result<DehydratedState>;
+}
+
+pub struct DehydratedState {
+    pub queries: Vec<DehydratedQuery>,
+    pub mutations: Vec<DehydratedMutation>,
+    pub timestamp: Instant,
+}
+```

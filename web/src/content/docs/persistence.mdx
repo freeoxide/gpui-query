@@ -192,6 +192,7 @@ let client = QueryClient::builder()
 ```
 
 The client will automatically:
+
 - Persist data after successful fetches
 - Restore data on startup for matching keys
 - Remove data when queries are removed from cache
@@ -214,9 +215,10 @@ let query = use_query(
 ```
 
 <Callout type="info">
-Persistence is opt-in. By default, no persister is configured and query data lives only in memory.
+  Persistence is opt-in. By default, no persister is configured and query data lives only in memory.
 </Callout>
 
 <Callout type="warning">
-Avoid persisting sensitive data (tokens, passwords, personal information) without encryption. Implement an encrypted persister if your cache contains private data.
+  Avoid persisting sensitive data (tokens, passwords, personal information) without encryption.
+  Implement an encrypted persister if your cache contains private data.
 </Callout>

@@ -1,0 +1,163 @@
+---
+title: "Select Pattern"
+description: "Transform query results with use_query_select for derived data without redundant fetches"
+category: "Guides"
+order: 15
+---
+
+# Select Pattern
+
+The select pattern in gpui-query lets you transform query results into derived data without triggering additional fetches. Use `use_query_select` when you need a different view of cached data — filtered, mapped, or aggregated.
+
+## Why Select?
+
+Consider a query that fetches a list of users:
+
+```rust
+let query = use_query(cx, "all-users", || async {
+    fetch_all_users().await
+});
+```
+
+Now imagine you need only active users for one component, a count of admin users for another, and a name-sorted list for a third. Without select, you'd create separate queries (wasting network requests) or duplicate transformation logic.
+
+With `use_query_select`, you derive views from the same cached data:
+
+```rust
+let active_users = use_query_select(cx, "all-users", |data: &Vec<User>| {
+    data.iter().filter(|u| u.is_active).cloned().collect()
+});
+
+let admin_count = use_query_select(cx, "all-users", |data: &Vec<User>| {
+    data.iter().filter(|u| u.is_admin).count()
+});
+```
+
+All derive from the single "all-users" cache entry. No additional fetches required.
+
+## use_query_select
+
+```rust
+pub fn use_query_select<T, S, F>(
+    cx: &mut ViewContext<impl ManagedView>,
+    key: &str,
+    select_fn: F,
+) -> MappedQueryResource<S>
+where
+    T: Clone + 'static,
+    S: Clone + 'static,
+    F: Fn(&T) -> S + 'static,
+```
+
+Parameters:
+
+- `cx` — GPUI view context
+- `key` — The query key to select from (must match an existing query)
+- `select_fn` — Pure transformation function from `T` to `S`
+
+Returns a `MappedQueryResource<S>` with the same lifecycle as the source query.
+
+## MappedQueryResource
+
+The result of `use_query_select`:
+
+```rust
+pub struct MappedQueryResource<S> {
+    pub data: Option<S>,
+    pub status: QueryStatus,
+    pub is_fetching: bool,
+    pub error: Option<QueryError>,
+}
+```
+
+It mirrors `QueryResource` but only carries the selected type `S`. The status and fetching flags reflect the source query's state.
+
+## Common Patterns
+
+### Filtering
+
+```rust
+let completed_tasks = use_query_select(cx, "all-tasks", |tasks: &Vec<Task>| {
+    tasks.iter().filter(|t| t.completed).cloned().collect()
+});
+```
+
+### Aggregation
+
+```rust
+let total_revenue = use_query_select(cx, "orders", |orders: &Vec<Order>| {
+    orders.iter().map(|o| o.amount).sum()
+});
+```
+
+### Projection
+
+```rust
+let user_names = use_query_select(cx, "all-users", |users: &Vec<User>| {
+    users.iter().map(|u| u.name.clone()).collect::<Vec<_>>()
+});
+```
+
+### Nested Transformation
+
+```rust
+let stats = use_query_select(cx, "analytics-data", |data: &AnalyticsResponse| {
+    DashboardStats {
+        total_visits: data.visits.len(),
+        unique_users: data.visits.iter().map(|v| v.user_id).collect::<HashSet<_>>().len(),
+        avg_duration: data.visits.iter().map(|v| v.duration).average(),
+    }
+});
+```
+
+## Performance Considerations
+
+### Structural Sharing
+
+gpui-query uses structural sharing to minimize re-renders. When the select output hasn't changed (deep equality), the component doesn't re-render.
+
+### Memoize Complex Selects
+
+For expensive transformations, ensure the select function is deterministic and efficient:
+
+```rust
+// Good — simple, fast transformation
+let names = use_query_select(cx, "users", |users: &Vec<User>| {
+    users.iter().map(|u| u.name.clone()).collect::<Vec<_>>()
+});
+
+// Avoid — expensive computation on every source change
+let complex_analysis = use_query_select(cx, "data", |data: &BigData| {
+    expensive_machine_learning_analysis(data)
+});
+```
+
+### Select Runs on Every Source Change
+
+The select function executes whenever the source query's data changes. Keep this in mind for frequently-updating queries.
+
+## Combining with Other Queries
+
+Select works with any cached query. You can chain multiple selects from the same source:
+
+```rust
+// Source query
+use_query(cx, "products", || async { fetch_products().await });
+
+// Multiple derived views
+let in_stock = use_query_select(cx, "products", |p: &Vec<Product>| {
+    p.iter().filter(|p| p.in_stock).cloned().collect()
+});
+
+let out_of_stock = use_query_select(cx, "products", |p: &Vec<Product>| {
+    p.iter().filter(|p| !p.in_stock).cloned().collect()
+});
+```
+
+## Summary
+
+- `use_query_select` derives views from cached query data without additional fetches
+- The select function must be pure, synchronous, and lightweight
+- `MappedQueryResource` mirrors the source query's lifecycle and status
+- Structural sharing prevents unnecessary re-renders
+- Use select for filtering, aggregation, projection, and nested transformations
