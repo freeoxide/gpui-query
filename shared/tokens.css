@@ -1,0 +1,92 @@
+/* ==========================================================================
+   gpui-query — Shared Design Tokens
+   Single source of truth for colors, typography, spacing, and radius.
+   Used by both web/ (TanStack Start) and website/ (Docusaurus).
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Google Fonts
+   -------------------------------------------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* --------------------------------------------------------------------------
+   Light Mode
+   -------------------------------------------------------------------------- */
+:root {
+  /* ── Colors ────────────────────────────────────────────────────── */
+  --color-background:       oklch(1 0 0);
+  --color-foreground:       oklch(0.145 0 0);
+  --color-card:             oklch(1 0 0);
+  --color-card-foreground:  oklch(0.145 0 0);
+  --color-popover:          oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+  --color-primary:          oklch(0.841 0.238 128.85);
+  --color-primary-foreground: oklch(0.405 0.101 131.063);
+  --color-secondary:        oklch(0.967 0.001 286.375);
+  --color-secondary-foreground: oklch(0.21 0.006 285.885);
+  --color-muted:            oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+  --color-accent:           oklch(0.97 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+  --color-destructive:      oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border:           oklch(0.922 0 0);
+  --color-input:            oklch(0.922 0 0);
+  --color-ring:             oklch(0.708 0 0);
+
+  /* ── Typography ────────────────────────────────────────────────── */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-size-code: 90%;
+
+  /* ── Radius ────────────────────────────────────────────────────── */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 4px;
+
+  /* ── Shadows ───────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 0 var(--color-border);
+  --shadow-md: none;
+  --shadow-lg: none;
+
+  /* ── Footer ────────────────────────────────────────────────────── */
+  --color-footer-bg:       oklch(0.145 0 0);
+  --color-footer-text:     oklch(0.985 0 0);
+  --color-footer-link:     oklch(0.7 0 0);
+  --color-footer-link-hover: oklch(0.841 0.238 128.85);
+}
+
+/* --------------------------------------------------------------------------
+   Dark Mode
+   -------------------------------------------------------------------------- */
+.dark,
+[data-theme='dark'] {
+  --color-background:       oklch(0.145 0 0);
+  --color-foreground:       oklch(0.985 0 0);
+  --color-card:             oklch(0.205 0 0);
+  --color-card-foreground:  oklch(0.985 0 0);
+  --color-popover:          oklch(0.205 0 0);
+  --color-popover-foreground: oklch(0.985 0 0);
+  --color-primary:          oklch(0.768 0.233 130.85);
+  --color-primary-foreground: oklch(0.405 0.101 131.063);
+  --color-secondary:        oklch(0.274 0.006 286.033);
+  --color-secondary-foreground: oklch(0.985 0 0);
+  --color-muted:            oklch(0.269 0 0);
+  --color-muted-foreground: oklch(0.708 0 0);
+  --color-accent:           oklch(0.269 0 0);
+  --color-accent-foreground: oklch(0.985 0 0);
+  --color-destructive:      oklch(0.704 0.191 22.216);
+  --color-destructive-foreground: oklch(0.145 0 0);
+  --color-border:           oklch(1 0 0 / 10%);
+  --color-input:            oklch(1 0 0 / 15%);
+  --color-ring:             oklch(0.556 0 0);
+
+  --shadow-sm: 0 1px 0 oklch(1 0 0 / 10%);
+
+  --color-footer-bg:       oklch(0.12 0 0);
+  --color-footer-text:     oklch(0.985 0 0);
+  --color-footer-link:     oklch(0.7 0 0);
+  --color-footer-link-hover: oklch(0.768 0.233 130.85);
+}

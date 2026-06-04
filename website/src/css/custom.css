@@ -1,97 +1,93 @@
 /* ==========================================================================
-   GPUI Query Documentation — Custom Theme
-   Minimal, green-accented, sharp-edged, professional
+   gpui-query Docs — Docusaurus Theme Overrides
+   Imports shared design tokens and maps them to Docusaurus Infima variables.
+   All colors, fonts, and radius values come from shared/tokens.css.
    ========================================================================== */
 
-/* --------------------------------------------------------------------------
-   Google Fonts
-   -------------------------------------------------------------------------- */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "../../../shared/tokens.css";
 
 /* --------------------------------------------------------------------------
-   Infima / Docusaurus CSS Variable Overrides — Light Mode
+   Infima Variable Mappings — Light Mode
    -------------------------------------------------------------------------- */
 :root {
-  /* Primary green palette */
-  --ifm-color-primary: #3ebd7f;
-  --ifm-color-primary-dark: #35a870;
-  --ifm-color-primary-darker: #319e68;
-  --ifm-color-primary-darkest: #288253;
-  --ifm-color-primary-light: #55c48f;
-  --ifm-color-primary-lighter: #68cc9d;
-  --ifm-color-primary-lightest: #8fd9b5;
+  /* Primary — mapped from --color-primary */
+  --ifm-color-primary: var(--color-primary);
+  --ifm-color-primary-dark: var(--color-primary);
+  --ifm-color-primary-darker: var(--color-primary);
+  --ifm-color-primary-darkest: var(--color-primary-foreground);
+  --ifm-color-primary-light: var(--color-primary);
+  --ifm-color-primary-lighter: var(--color-primary);
+  --ifm-color-primary-lightest: var(--color-primary);
 
   /* Background & surface */
-  --ifm-background-color: #ffffff;
-  --ifm-background-surface-color: #ffffff;
+  --ifm-background-color: var(--color-background);
+  --ifm-background-surface-color: var(--color-card);
 
-  /* Foreground / text */
-  --ifm-font-color-base: #1a1a2e;
-  --ifm-heading-color: #1a1a2e;
-  --ifm-color-emphasis-300: #e8e8ed;
-  --ifm-color-emphasis-200: #ededf0;
-  --ifm-color-emphasis-100: #f5f5f7;
+  /* Text */
+  --ifm-font-color-base: var(--color-foreground);
+  --ifm-heading-color: var(--color-foreground);
+  --ifm-color-emphasis-300: var(--color-border);
+  --ifm-color-emphasis-200: var(--color-muted);
+  --ifm-color-emphasis-100: var(--color-accent);
 
   /* Typography */
-  --ifm-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
-  --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'Consolas',
-    'Monaco', monospace;
-  --ifm-code-font-size: 90%;
+  --ifm-font-family-base: var(--font-sans);
+  --ifm-font-family-monospace: var(--font-mono);
+  --ifm-code-font-size: var(--font-size-code);
 
-  /* Radius — sharp */
-  --ifm-global-radius: 0px;
-  --ifm-button-border-radius: 4px;
-  --ifm-card-border-radius: 0px;
-  --ifm-alert-border-radius: 0px;
-  --ifm-badge-border-radius: 4px;
-  --ifm-pagination-border-radius: 4px;
-  --ifm-code-border-radius: 4px;
-  --ifm-tabs-border-radius: 0px;
+  /* Radius — sharp from tokens */
+  --ifm-global-radius: var(--radius);
+  --ifm-button-border-radius: var(--radius-xl);
+  --ifm-card-border-radius: var(--radius);
+  --ifm-alert-border-radius: var(--radius);
+  --ifm-badge-border-radius: var(--radius-xl);
+  --ifm-pagination-border-radius: var(--radius-xl);
+  --ifm-code-border-radius: var(--radius-xl);
+  --ifm-tabs-border-radius: var(--radius);
 
   /* Borders */
-  --ifm-color-border: #e8e8ed;
+  --ifm-color-border: var(--color-border);
   --ifm-border-width: 1px;
 
   /* Navbar */
   --ifm-navbar-height: 60px;
-  --ifm-navbar-background-color: #ffffff;
-  --ifm-navbar-shadow: 0 1px 0 #e8e8ed;
+  --ifm-navbar-background-color: var(--color-background);
+  --ifm-navbar-shadow: var(--shadow-sm);
 
   /* Sidebar */
-  --ifm-menu-color: #1a1a2e;
-  --ifm-menu-color-active: #3ebd7f;
+  --ifm-menu-color: var(--color-muted-foreground);
+  --ifm-menu-color-active: var(--color-primary);
 
   /* Links */
-  --ifm-link-color: #3ebd7f;
-  --ifm-link-hover-color: #35a870;
+  --ifm-link-color: var(--color-primary);
+  --ifm-link-hover-color: var(--color-primary-foreground);
   --ifm-link-decoration: none;
 
   /* Footer */
-  --ifm-footer-background-color: #1a1a2e;
-  --ifm-footer-color: #f8f8fa;
-  --ifm-footer-link-color: #a0a0b8;
-  --ifm-footer-link-hover-color: #3ebd7f;
-  --ifm-footer-title-color: #f8f8fa;
+  --ifm-footer-background-color: var(--color-footer-bg);
+  --ifm-footer-color: var(--color-footer-text);
+  --ifm-footer-link-color: var(--color-footer-link);
+  --ifm-footer-link-hover-color: var(--color-footer-link-hover);
+  --ifm-footer-title-color: var(--color-footer-text);
 
   /* Table of contents */
-  --ifm-toc-link-color: #555570;
-  --ifm-toc-border-color: #e8e8ed;
+  --ifm-toc-link-color: var(--color-muted-foreground);
+  --ifm-toc-border-color: var(--color-border);
 
   /* Hero */
   --ifm-hero-background-color: transparent;
-  --ifm-hero-text-color: #1a1a2e;
+  --ifm-hero-text-color: var(--color-foreground);
 
   /* Pagination */
-  --ifm-pagination-nav-color-hover: #3ebd7f;
+  --ifm-pagination-nav-color-hover: var(--color-primary);
 
   /* Shadows */
-  --ifm-global-shadow-lw: none;
-  --ifm-global-shadow-md: none;
-  --ifm-global-shadow-tl: none;
+  --ifm-global-shadow-lw: var(--shadow-md);
+  --ifm-global-shadow-md: var(--shadow-md);
+  --ifm-global-shadow-tl: var(--shadow-md);
 
   /* Highlighted code line */
-  --docusaurus-highlighted-code-line-bg: rgba(62, 189, 127, 0.08);
+  --docusaurus-highlighted-code-line-bg: oklch(0.841 0.238 128.85 / 0.08);
 }
 
 /* --------------------------------------------------------------------------
@@ -100,7 +96,7 @@
 *,
 *::before,
 *::after {
-  border-radius: 0 !important;
+  border-radius: var(--radius) !important;
 }
 
 /* Re-allow specific small radii */
@@ -111,24 +107,24 @@ pre,
 input,
 .search-bar,
 .DocSearch-Button {
-  border-radius: 4px !important;
+  border-radius: var(--radius-xl) !important;
 }
 
 /* --------------------------------------------------------------------------
    Body & Typography
    -------------------------------------------------------------------------- */
 body {
-  font-family: var(--ifm-font-family-base);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color: var(--ifm-font-color-base);
+  color: var(--color-foreground);
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--ifm-font-family-base);
+  font-family: var(--font-sans);
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--ifm-heading-color);
+  color: var(--color-foreground);
 }
 
 h1 { font-size: 2.25rem; }
@@ -136,39 +132,37 @@ h2 { font-size: 1.625rem; }
 h3 { font-size: 1.25rem; }
 h4 { font-size: 1.1rem; }
 
-p {
-  line-height: 1.7;
-}
+p { line-height: 1.7; }
 
 a {
-  color: var(--ifm-link-color);
+  color: var(--color-primary);
   text-decoration: none;
   transition: color 0.15s ease;
 }
 
 a:hover {
-  color: var(--ifm-link-hover-color);
+  color: var(--color-primary-foreground);
 }
 
 /* --------------------------------------------------------------------------
    Navbar
    -------------------------------------------------------------------------- */
 .navbar {
-  background-color: var(--ifm-navbar-background-color);
-  box-shadow: var(--ifm-navbar-shadow);
-  border-bottom: 1px solid var(--ifm-color-border);
-  height: var(--ifm-navbar-height);
+  background-color: var(--color-background);
+  box-shadow: var(--shadow-sm);
+  border-bottom: 1px solid var(--color-border);
+  height: 60px;
   padding: 0 24px;
 }
 
 .navbar__brand {
   font-weight: 700;
   font-size: 1.125rem;
-  color: #1a1a2e;
+  color: var(--color-foreground);
 }
 
 .navbar__brand:hover {
-  color: #3ebd7f;
+  color: var(--color-primary);
 }
 
 .navbar__title {
@@ -179,24 +173,16 @@ a:hover {
 .navbar__link {
   font-weight: 500;
   font-size: 0.875rem;
-  color: #555570;
+  color: var(--color-muted-foreground);
   padding: 4px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-xl);
   transition: color 0.15s ease, background-color 0.15s ease;
 }
 
 .navbar__link:hover,
 .navbar__link--active {
-  color: #3ebd7f;
+  color: var(--color-primary);
   background-color: transparent;
-}
-
-.navbar__toggle {
-  border-radius: 4px;
-}
-
-.navbar-sidebar {
-  border-radius: 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -209,157 +195,131 @@ a:hover {
 .menu__link {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #555570;
+  color: var(--color-muted-foreground);
   padding: 6px 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-xl);
   transition: color 0.15s ease, background-color 0.15s ease;
 }
 
 .menu__link:hover {
-  color: #1a1a2e;
-  background-color: #f5f5f7;
+  color: var(--color-foreground);
+  background-color: var(--color-muted);
 }
 
 .menu__link--active {
-  color: #3ebd7f;
-  background-color: rgba(62, 189, 127, 0.08);
+  color: var(--color-primary);
+  background-color: oklch(0.841 0.238 128.85 / 0.08);
   font-weight: 600;
 }
 
 .menu__list-item-collapsible .menu__link--active {
-  color: #3ebd7f;
+  color: var(--color-primary);
 }
 
-.menu__caret {
-  border-radius: 4px;
-}
-
-.menu__list-item {
-  margin: 1px 0;
-}
-
-/* Sidebar container */
 .theme-doc-sidebar-container {
-  border-right: 1px solid var(--ifm-color-border);
+  border-right: 1px solid var(--color-border);
 }
 
 /* --------------------------------------------------------------------------
    Buttons
    -------------------------------------------------------------------------- */
 .button {
-  font-family: var(--ifm-font-family-base);
+  font-family: var(--font-sans);
   font-weight: 600;
-  border-radius: 4px;
+  border-radius: var(--radius-xl);
   text-transform: none;
   letter-spacing: 0;
   transition: all 0.15s ease;
 }
 
 .button--primary {
-  background-color: #3ebd7f;
-  border-color: #3ebd7f;
-  color: #ffffff;
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-background);
   box-shadow: none;
 }
 
 .button--primary:hover {
-  background-color: #35a870;
-  border-color: #35a870;
-  color: #ffffff;
+  background-color: var(--color-primary-foreground);
+  border-color: var(--color-primary-foreground);
+  color: var(--color-background);
 }
 
 .button--secondary {
   background-color: transparent;
-  border-color: #e8e8ed;
-  color: #1a1a2e;
+  border-color: var(--color-border);
+  color: var(--color-foreground);
   box-shadow: none;
 }
 
 .button--secondary:hover {
-  border-color: #3ebd7f;
-  color: #3ebd7f;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
   background-color: transparent;
 }
 
 .button--outline {
-  border-color: #3ebd7f;
-  color: #3ebd7f;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
   background: transparent;
 }
 
 .button--outline:hover {
-  background-color: #3ebd7f;
-  color: #ffffff;
-}
-
-/* Action button (hero CTA) */
-.button--lg {
-  font-size: 1rem;
-  padding: 12px 28px;
-}
-
-.buttons_AKcl > .button {
-  margin: 0 8px;
+  background-color: var(--color-primary);
+  color: var(--color-background);
 }
 
 /* --------------------------------------------------------------------------
    Code Blocks
    -------------------------------------------------------------------------- */
 code {
-  font-family: var(--ifm-font-family-monospace);
-  font-size: var(--ifm-code-font-size);
-  background-color: rgba(62, 189, 127, 0.08);
-  color: #2d7a56;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-code);
+  background-color: oklch(0.841 0.238 128.85 / 0.08);
+  color: var(--color-primary-foreground);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xl);
   border: none;
 }
 
 pre {
-  font-family: var(--ifm-font-family-monospace);
-  border-radius: 0;
-  border: 1px solid var(--ifm-color-border);
-  background-color: #fafafa;
+  font-family: var(--font-mono);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-muted);
 }
 
 pre code {
   background-color: transparent;
   color: inherit;
   padding: 0;
-  border-radius: 0;
+  border-radius: var(--radius);
   font-size: 0.85rem;
   line-height: 1.7;
 }
 
 .theme-code-block {
-  border-radius: 0;
+  border-radius: var(--radius);
   box-shadow: none;
 }
 
 .prism-code {
-  font-family: var(--ifm-font-family-monospace);
-  border-radius: 0;
+  font-family: var(--font-mono);
+  border-radius: var(--radius);
 }
 
-/* Code block header / tabs */
-.code-block-tabs {
-  border-radius: 0;
-}
-
-/* Copy button */
 .theme-code-block .clean-btn {
-  border-radius: 4px;
-  color: #999;
+  border-radius: var(--radius-xl);
+  color: var(--color-muted-foreground);
   opacity: 0.6;
   transition: opacity 0.15s ease;
 }
 
 .theme-code-block .clean-btn:hover {
   opacity: 1;
-  color: #3ebd7f;
+  color: var(--color-primary);
 }
 
-/* Inline code in headers */
 h1 code, h2 code, h3 code, h4 code, h5 code, h6 code {
   font-size: 0.9em;
 }
@@ -369,13 +329,13 @@ h1 code, h2 code, h3 code, h4 code, h5 code, h6 code {
    -------------------------------------------------------------------------- */
 table {
   border-collapse: collapse;
-  border-radius: 0;
-  border: 1px solid var(--ifm-color-border);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
   font-size: 0.875rem;
 }
 
 table thead {
-  background-color: #f5f5f7;
+  background-color: var(--color-muted);
 }
 
 table th {
@@ -383,8 +343,8 @@ table th {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #555570;
-  border-bottom: 1px solid var(--ifm-color-border);
+  color: var(--color-muted-foreground);
+  border-bottom: 1px solid var(--color-border);
 }
 
 table td,
@@ -394,18 +354,18 @@ table th {
 }
 
 table tr:nth-child(even) {
-  background-color: #fafafa;
+  background-color: var(--color-muted);
 }
 
 table tr:hover {
-  background-color: rgba(62, 189, 127, 0.04);
+  background-color: oklch(0.841 0.238 128.85 / 0.04);
 }
 
 /* --------------------------------------------------------------------------
    Admonitions / Alerts
    -------------------------------------------------------------------------- */
 .admonition {
-  border-radius: 0;
+  border-radius: var(--radius);
   border: 1px solid;
   font-size: 0.9rem;
 }
@@ -416,63 +376,45 @@ table tr:hover {
   letter-spacing: 0;
 }
 
-.admonition--info {
-  border-color: #3ebd7f;
-  background-color: rgba(62, 189, 127, 0.06);
-}
-
-.admonition--info .admonition-heading {
-  color: #2d7a56;
-}
-
+.admonition--info,
 .admonition--tip {
-  border-color: #3ebd7f;
-  background-color: rgba(62, 189, 127, 0.06);
+  border-color: var(--color-primary);
+  background-color: oklch(0.841 0.238 128.85 / 0.06);
 }
 
+.admonition--info .admonition-heading,
 .admonition--tip .admonition-heading {
-  color: #2d7a56;
+  color: var(--color-primary-foreground);
 }
 
 .admonition--warning {
-  border-color: #e5a820;
-  background-color: rgba(229, 168, 32, 0.06);
+  border-color: oklch(0.7 0.15 80);
+  background-color: oklch(0.7 0.15 80 / 0.06);
 }
 
-.admonition--warning .admonition-heading {
-  color: #b8860b;
-}
-
-.admonition--danger {
-  border-color: #e55050;
-  background-color: rgba(229, 80, 80, 0.06);
-}
-
-.admonition--danger .admonition-heading {
-  color: #c03030;
-}
-
+.admonition--danger,
 .admonition--caution {
-  border-color: #e55050;
-  background-color: rgba(229, 80, 80, 0.06);
+  border-color: var(--color-destructive);
+  background-color: oklch(0.577 0.245 27.325 / 0.06);
 }
 
+.admonition--danger .admonition-heading,
 .admonition--caution .admonition-heading {
-  color: #c03030;
+  color: var(--color-destructive);
 }
 
 /* --------------------------------------------------------------------------
    Cards
    -------------------------------------------------------------------------- */
 .card {
-  border-radius: 0;
-  border: 1px solid var(--ifm-color-border);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
   box-shadow: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease;
 }
 
 .card:hover {
-  border-color: #3ebd7f;
+  border-color: var(--color-primary);
 }
 
 .card__header {
@@ -483,27 +425,23 @@ table tr:hover {
    Table of Contents
    -------------------------------------------------------------------------- */
 .table-of-contents {
-  border-left: 2px solid var(--ifm-color-border);
+  border-left: 2px solid var(--color-border);
   padding-left: 12px;
 }
 
 .table-of-contents__link {
   font-size: 0.8125rem;
-  color: #555570;
+  color: var(--color-muted-foreground);
   line-height: 1.6;
 }
 
 .table-of-contents__link:hover,
 .table-of-contents__link--active {
-  color: #3ebd7f;
+  color: var(--color-primary);
 }
 
 .table-of-contents__link--active {
   font-weight: 600;
-}
-
-.theme-doc-toc-desktop {
-  border-left: none;
 }
 
 /* --------------------------------------------------------------------------
@@ -511,15 +449,15 @@ table tr:hover {
    -------------------------------------------------------------------------- */
 .breadcrumbs__link {
   font-size: 0.8125rem;
-  color: #555570;
+  color: var(--color-muted-foreground);
 }
 
 .breadcrumbs__link:hover {
-  color: #3ebd7f;
+  color: var(--color-primary);
 }
 
 .breadcrumbs__item--active .breadcrumbs__link {
-  color: #1a1a2e;
+  color: var(--color-foreground);
   font-weight: 600;
 }
 
@@ -527,13 +465,13 @@ table tr:hover {
    Pagination
    -------------------------------------------------------------------------- */
 .pagination-nav__link {
-  border: 1px solid var(--ifm-color-border);
-  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
   transition: border-color 0.15s ease;
 }
 
 .pagination-nav__link:hover {
-  border-color: #3ebd7f;
+  border-color: var(--color-primary);
 }
 
 .pagination-nav__label {
@@ -544,13 +482,13 @@ table tr:hover {
    Footer
    -------------------------------------------------------------------------- */
 .footer {
-  background-color: #1a1a2e;
+  background-color: var(--color-footer-bg);
   border-top: none;
   padding: 48px 24px 32px;
 }
 
 .footer__title {
-  color: #f8f8fa;
+  color: var(--color-footer-text);
   font-weight: 600;
   font-size: 0.875rem;
   text-transform: uppercase;
@@ -558,23 +496,23 @@ table tr:hover {
 }
 
 .footer__link-item {
-  color: #a0a0b8;
+  color: var(--color-footer-link);
   font-size: 0.875rem;
   transition: color 0.15s ease;
 }
 
 .footer__link-item:hover {
-  color: #3ebd7f;
+  color: var(--color-footer-link-hover);
 }
 
 .footer__bottom {
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid oklch(1 0 0 / 10%);
   margin-top: 32px;
   padding-top: 24px;
 }
 
 .footer__copyright {
-  color: #707088;
+  color: var(--color-footer-link);
   font-size: 0.8125rem;
 }
 
@@ -582,50 +520,46 @@ table tr:hover {
    DocSearch / Search Bar
    -------------------------------------------------------------------------- */
 .DocSearch-Button {
-  border-radius: 4px !important;
-  border: 1px solid #e8e8ed;
-  background: #f5f5f7;
+  border-radius: var(--radius-xl) !important;
+  border: 1px solid var(--color-border);
+  background: var(--color-muted);
   box-shadow: none;
   height: 36px;
-  font-family: var(--ifm-font-family-base);
+  font-family: var(--font-sans);
 }
 
 .DocSearch-Button:hover {
-  border-color: #3ebd7f;
-  background: #f5f5f7;
+  border-color: var(--color-primary);
+  background: var(--color-muted);
   box-shadow: none;
-}
-
-.DocSearch-Button-Key {
-  border-radius: 2px;
 }
 
 /* --------------------------------------------------------------------------
    Tabs
    -------------------------------------------------------------------------- */
 .tabs {
-  border-bottom: 1px solid var(--ifm-color-border);
-  border-radius: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius);
 }
 
 .tabs__item {
-  border-radius: 0;
+  border-radius: var(--radius);
   font-weight: 500;
   font-size: 0.875rem;
-  color: #555570;
+  color: var(--color-muted-foreground);
   padding: 8px 16px;
   border-bottom: 2px solid transparent;
   transition: color 0.15s ease;
 }
 
 .tabs__item:hover {
-  color: #1a1a2e;
+  color: var(--color-foreground);
   background-color: transparent;
 }
 
 .tabs__item--active {
-  color: #3ebd7f;
-  border-bottom-color: #3ebd7f;
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
   background-color: transparent;
 }
 
@@ -633,40 +567,20 @@ table tr:hover {
    Details / Collapsible
    -------------------------------------------------------------------------- */
 details {
-  border: 1px solid var(--ifm-color-border);
-  border-radius: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
 }
 
 details summary {
-  border-radius: 0;
+  border-radius: var(--radius);
   font-weight: 600;
-}
-
-/* --------------------------------------------------------------------------
-   Hero Section
-   -------------------------------------------------------------------------- */
-.hero {
-  background-color: transparent;
-  padding: 48px 24px;
-}
-
-.hero__title {
-  font-size: 3rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-}
-
-.hero__subtitle {
-  font-size: 1.125rem;
-  color: #555570;
-  font-weight: 400;
 }
 
 /* --------------------------------------------------------------------------
    Badge
    -------------------------------------------------------------------------- */
 .badge {
-  border-radius: 4px;
+  border-radius: var(--radius-xl);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -675,34 +589,13 @@ details summary {
 }
 
 .badge--primary {
-  background-color: rgba(62, 189, 127, 0.12);
-  color: #2d7a56;
+  background-color: oklch(0.841 0.238 128.85 / 0.12);
+  color: var(--color-primary-foreground);
 }
 
 .badge--secondary {
-  background-color: #f5f5f7;
-  color: #555570;
-}
-
-/* --------------------------------------------------------------------------
-   Scrollbar (subtle)
-   -------------------------------------------------------------------------- */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: #d0d0d8;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: #b0b0b8;
+  background-color: var(--color-muted);
+  color: var(--color-muted-foreground);
 }
 
 /* --------------------------------------------------------------------------
@@ -720,79 +613,65 @@ details summary {
   margin-bottom: 8px;
 }
 
-.theme-doc-version-badge {
-  margin-bottom: 16px;
-}
-
-/* --------------------------------------------------------------------------
-   Announcement Bar
-   -------------------------------------------------------------------------- */
-div[class*='announcementBar'] {
-  background-color: #3ebd7f;
-  color: #ffffff;
-  font-weight: 600;
-  font-size: 0.875rem;
-}
-
-div[class*='announcementBar'] a {
-  color: #ffffff;
-  text-decoration: underline;
-}
-
-/* --------------------------------------------------------------------------
-   Dropdown
-   -------------------------------------------------------------------------- */
-.navbar__dropdown {
-  border-radius: 4px;
-}
-
-.dropdown__menu {
-  border-radius: 4px;
-  border: 1px solid var(--ifm-color-border);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  padding: 4px;
-}
-
-.dropdown__link {
-  border-radius: 4px;
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
 /* --------------------------------------------------------------------------
    Back to Top
    -------------------------------------------------------------------------- */
 .clean-btn.theme-back-to-top-button {
-  border-radius: 4px;
-  background-color: #3ebd7f;
+  border-radius: var(--radius-xl);
+  background-color: var(--color-primary);
   box-shadow: none;
 }
 
 /* --------------------------------------------------------------------------
-   Docusaurus Live Code Block
-   -------------------------------------------------------------------------- */
-.theme-live-codeblock {
-  border-radius: 0;
-  border: 1px solid var(--ifm-color-border);
-}
-
-/* --------------------------------------------------------------------------
-   Anchor Links (headings)
+   Anchor Links
    -------------------------------------------------------------------------- */
 .anchor {
-  color: #3ebd7f;
+  color: var(--color-primary);
 }
 
 .anchor:hover {
-  color: #35a870;
+  color: var(--color-primary-foreground);
 }
 
 /* --------------------------------------------------------------------------
    Selection
    -------------------------------------------------------------------------- */
 ::selection {
-  background-color: rgba(62, 189, 127, 0.2);
+  background-color: oklch(0.841 0.238 128.85 / 0.2);
   color: inherit;
+}
+
+/* --------------------------------------------------------------------------
+   Scrollbar
+   -------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-border);
+  border-radius: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   Dropdown
+   -------------------------------------------------------------------------- */
+.dropdown__menu {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 16px oklch(0 0 0 / 0.08);
+  padding: 4px;
+}
+
+.dropdown__link {
+  border-radius: var(--radius-xl);
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 /* ==========================================================================
@@ -800,396 +679,307 @@ div[class*='announcementBar'] a {
    ========================================================================== */
 
 [data-theme='dark'] {
-  /* Primary green — brighter for dark backgrounds */
-  --ifm-color-primary: #34a870;
-  --ifm-color-primary-dark: #2d9563;
-  --ifm-color-primary-darker: #298b5c;
-  --ifm-color-primary-darkest: #20724a;
-  --ifm-color-primary-light: #4bb882;
-  --ifm-color-primary-lighter: #6bc498;
-  --ifm-color-primary-lightest: #97d5b6;
+  --ifm-color-primary: var(--color-primary);
+  --ifm-color-primary-dark: var(--color-primary);
+  --ifm-color-primary-darker: var(--color-primary);
+  --ifm-color-primary-darkest: var(--color-primary-foreground);
+  --ifm-color-primary-light: var(--color-primary);
+  --ifm-color-primary-lighter: var(--color-primary);
+  --ifm-color-primary-lightest: var(--color-primary);
 
-  /* Background */
-  --ifm-background-color: #1a1a2e;
-  --ifm-background-surface-color: #1a1a2e;
+  --ifm-background-color: var(--color-background);
+  --ifm-background-surface-color: var(--color-card);
+  --ifm-font-color-base: var(--color-foreground);
+  --ifm-heading-color: var(--color-foreground);
+  --ifm-color-emphasis-300: oklch(1 0 0 / 10%);
+  --ifm-color-emphasis-200: oklch(1 0 0 / 6%);
+  --ifm-color-emphasis-100: oklch(1 0 0 / 4%);
 
-  /* Text */
-  --ifm-font-color-base: #f8f8fa;
-  --ifm-heading-color: #f8f8fa;
-  --ifm-color-emphasis-300: rgba(255, 255, 255, 0.1);
-  --ifm-color-emphasis-200: rgba(255, 255, 255, 0.06);
-  --ifm-color-emphasis-100: rgba(255, 255, 255, 0.04);
+  --ifm-color-border: var(--color-border);
+  --ifm-navbar-background-color: var(--color-background);
+  --ifm-navbar-shadow: var(--shadow-sm);
 
-  /* Borders */
-  --ifm-color-border: rgba(255, 255, 255, 0.1);
+  --ifm-link-color: var(--color-primary);
+  --ifm-link-hover-color: var(--color-primary);
 
-  /* Navbar */
-  --ifm-navbar-background-color: #1a1a2e;
-  --ifm-navbar-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+  --ifm-footer-background-color: var(--color-footer-bg);
+  --ifm-footer-color: var(--color-footer-text);
+  --ifm-footer-link-color: var(--color-footer-link);
+  --ifm-footer-link-hover-color: var(--color-footer-link-hover);
+  --ifm-footer-title-color: var(--color-footer-text);
 
-  /* Links */
-  --ifm-link-color: #34a870;
-  --ifm-link-hover-color: #4bb882;
+  --ifm-toc-link-color: var(--color-muted-foreground);
+  --ifm-toc-border-color: var(--color-border);
 
-  /* Footer */
-  --ifm-footer-background-color: #141424;
-  --ifm-footer-color: #a0a0b8;
-  --ifm-footer-link-color: #a0a0b8;
-  --ifm-footer-link-hover-color: #34a870;
-  --ifm-footer-title-color: #f8f8fa;
+  --ifm-pagination-nav-color-hover: var(--color-primary);
 
-  /* TOC */
-  --ifm-toc-link-color: #8888a0;
-  --ifm-toc-border-color: rgba(255, 255, 255, 0.1);
-
-  /* Pagination */
-  --ifm-pagination-nav-color-hover: #34a870;
-
-  /* Highlighted code line */
-  --docusaurus-highlighted-code-line-bg: rgba(52, 168, 112, 0.12);
+  --docusaurus-highlighted-code-line-bg: oklch(0.768 0.233 130.85 / 0.12);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Navbar
-   -------------------------------------------------------------------------- */
+/* Dark — Navbar */
 [data-theme='dark'] .navbar {
-  background-color: #1a1a2e;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: var(--color-background);
+  border-bottom-color: var(--color-border);
 }
 
 [data-theme='dark'] .navbar__brand {
-  color: #f8f8fa;
+  color: var(--color-footer-text);
 }
 
 [data-theme='dark'] .navbar__brand:hover {
-  color: #34a870;
+  color: var(--color-primary);
 }
 
 [data-theme='dark'] .navbar__link {
-  color: #8888a0;
+  color: var(--color-muted-foreground);
 }
 
 [data-theme='dark'] .navbar__link:hover,
 [data-theme='dark'] .navbar__link--active {
-  color: #34a870;
+  color: var(--color-primary);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Sidebar
-   -------------------------------------------------------------------------- */
+/* Dark — Sidebar */
 [data-theme='dark'] .menu__link {
-  color: #8888a0;
+  color: var(--color-muted-foreground);
 }
 
 [data-theme='dark'] .menu__link:hover {
-  color: #f8f8fa;
-  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--color-footer-text);
+  background-color: oklch(1 0 0 / 6%);
 }
 
 [data-theme='dark'] .menu__link--active {
-  color: #34a870;
-  background-color: rgba(52, 168, 112, 0.1);
+  color: var(--color-primary);
+  background-color: oklch(0.768 0.233 130.85 / 0.1);
 }
 
 [data-theme='dark'] .theme-doc-sidebar-container {
-  border-right-color: rgba(255, 255, 255, 0.1);
+  border-right-color: var(--color-border);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Code
-   -------------------------------------------------------------------------- */
+/* Dark — Code */
 [data-theme='dark'] code {
-  background-color: rgba(52, 168, 112, 0.1);
-  color: #5ec98e;
+  background-color: oklch(0.768 0.233 130.85 / 0.1);
+  color: oklch(0.75 0.15 130);
 }
 
 [data-theme='dark'] pre {
-  background-color: #2d2d44;
-  border-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--color-card);
+  border-color: var(--color-border);
 }
 
 [data-theme='dark'] pre code {
   background-color: transparent;
-  color: #d0d0e0;
+  color: oklch(0.85 0 0);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Tables
-   -------------------------------------------------------------------------- */
+/* Dark — Tables */
 [data-theme='dark'] table {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--color-border);
 }
 
 [data-theme='dark'] table thead {
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: oklch(1 0 0 / 4%);
 }
 
 [data-theme='dark'] table th {
-  color: #8888a0;
-  border-bottom-color: rgba(255, 255, 255, 0.1);
+  color: var(--color-muted-foreground);
+  border-bottom-color: var(--color-border);
 }
 
 [data-theme='dark'] table tr:nth-child(even) {
-  background-color: rgba(255, 255, 255, 0.02);
+  background-color: oklch(1 0 0 / 2%);
 }
 
 [data-theme='dark'] table tr:hover {
-  background-color: rgba(52, 168, 112, 0.06);
+  background-color: oklch(0.768 0.233 130.85 / 0.06);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Cards
-   -------------------------------------------------------------------------- */
+/* Dark — Cards */
 [data-theme='dark'] .card {
-  border-color: rgba(255, 255, 255, 0.1);
-  background-color: #2d2d44;
+  border-color: var(--color-border);
+  background-color: var(--color-card);
 }
 
 [data-theme='dark'] .card:hover {
-  border-color: #34a870;
+  border-color: var(--color-primary);
 }
 
 [data-theme='dark'] .card__header {
-  color: #f8f8fa;
+  color: var(--color-footer-text);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Buttons
-   -------------------------------------------------------------------------- */
+/* Dark — Buttons */
 [data-theme='dark'] .button--primary {
-  background-color: #34a870;
-  border-color: #34a870;
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 [data-theme='dark'] .button--primary:hover {
-  background-color: #2d9563;
-  border-color: #2d9563;
+  background-color: var(--color-primary-foreground);
+  border-color: var(--color-primary-foreground);
 }
 
 [data-theme='dark'] .button--secondary {
-  border-color: rgba(255, 255, 255, 0.15);
-  color: #f8f8fa;
+  border-color: oklch(1 0 0 / 15%);
+  color: var(--color-footer-text);
 }
 
 [data-theme='dark'] .button--secondary:hover {
-  border-color: #34a870;
-  color: #34a870;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Admonitions
-   -------------------------------------------------------------------------- */
+/* Dark — Admonitions */
 [data-theme='dark'] .admonition--info,
 [data-theme='dark'] .admonition--tip {
-  border-color: #34a870;
-  background-color: rgba(52, 168, 112, 0.08);
+  border-color: var(--color-primary);
+  background-color: oklch(0.768 0.233 130.85 / 0.08);
 }
 
 [data-theme='dark'] .admonition--info .admonition-heading,
 [data-theme='dark'] .admonition--tip .admonition-heading {
-  color: #5ec98e;
+  color: var(--color-primary);
 }
 
-[data-theme='dark'] .admonition--warning {
-  border-color: #e5a820;
-  background-color: rgba(229, 168, 32, 0.08);
-}
-
-[data-theme='dark'] .admonition--warning .admonition-heading {
-  color: #f0c040;
-}
-
-[data-theme='dark'] .admonition--danger,
-[data-theme='dark'] .admonition--caution {
-  border-color: #e55050;
-  background-color: rgba(229, 80, 80, 0.08);
-}
-
-[data-theme='dark'] .admonition--danger .admonition-heading,
-[data-theme='dark'] .admonition--caution .admonition-heading {
-  color: #f06060;
-}
-
-/* --------------------------------------------------------------------------
-   Dark Mode — Tabs
-   -------------------------------------------------------------------------- */
+/* Dark — Tabs */
 [data-theme='dark'] .tabs {
-  border-bottom-color: rgba(255, 255, 255, 0.1);
+  border-bottom-color: var(--color-border);
 }
 
 [data-theme='dark'] .tabs__item {
-  color: #8888a0;
+  color: var(--color-muted-foreground);
 }
 
 [data-theme='dark'] .tabs__item:hover {
-  color: #f8f8fa;
+  color: var(--color-footer-text);
 }
 
 [data-theme='dark'] .tabs__item--active {
-  color: #34a870;
-  border-bottom-color: #34a870;
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — TOC
-   -------------------------------------------------------------------------- */
+/* Dark — TOC */
 [data-theme='dark'] .table-of-contents {
-  border-left-color: rgba(255, 255, 255, 0.1);
+  border-left-color: var(--color-border);
 }
 
 [data-theme='dark'] .table-of-contents__link {
-  color: #8888a0;
+  color: var(--color-muted-foreground);
 }
 
 [data-theme='dark'] .table-of-contents__link:hover,
 [data-theme='dark'] .table-of-contents__link--active {
-  color: #34a870;
+  color: var(--color-primary);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Breadcrumbs
-   -------------------------------------------------------------------------- */
+/* Dark — Breadcrumbs */
 [data-theme='dark'] .breadcrumbs__link {
-  color: #8888a0;
+  color: var(--color-muted-foreground);
 }
 
 [data-theme='dark'] .breadcrumbs__link:hover {
-  color: #34a870;
+  color: var(--color-primary);
 }
 
 [data-theme='dark'] .breadcrumbs__item--active .breadcrumbs__link {
-  color: #f8f8fa;
+  color: var(--color-footer-text);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Pagination
-   -------------------------------------------------------------------------- */
+/* Dark — Pagination */
 [data-theme='dark'] .pagination-nav__link {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--color-border);
 }
 
 [data-theme='dark'] .pagination-nav__link:hover {
-  border-color: #34a870;
+  border-color: var(--color-primary);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Footer
-   -------------------------------------------------------------------------- */
+/* Dark — Footer */
 [data-theme='dark'] .footer {
-  background-color: #141424;
-  border-top-color: rgba(255, 255, 255, 0.06);
+  background-color: var(--color-footer-bg);
+  border-top-color: oklch(1 0 0 / 6%);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Search
-   -------------------------------------------------------------------------- */
+/* Dark — Search */
 [data-theme='dark'] .DocSearch-Button {
-  background-color: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
+  background-color: oklch(1 0 0 / 6%);
+  border-color: var(--color-border);
 }
 
 [data-theme='dark'] .DocSearch-Button:hover {
-  border-color: #34a870;
-  background-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-primary);
+  background-color: oklch(1 0 0 / 8%);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Details
-   -------------------------------------------------------------------------- */
+/* Dark — Details */
 [data-theme='dark'] details {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--color-border);
 }
 
 [data-theme='dark'] details summary {
-  color: #f8f8fa;
+  color: var(--color-footer-text);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Badge
-   -------------------------------------------------------------------------- */
+/* Dark — Badge */
 [data-theme='dark'] .badge--primary {
-  background-color: rgba(52, 168, 112, 0.15);
-  color: #5ec98e;
+  background-color: oklch(0.768 0.233 130.85 / 0.15);
+  color: var(--color-primary);
 }
 
 [data-theme='dark'] .badge--secondary {
-  background-color: rgba(255, 255, 255, 0.06);
-  color: #8888a0;
+  background-color: oklch(1 0 0 / 6%);
+  color: var(--color-muted-foreground);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Hero
-   -------------------------------------------------------------------------- */
-[data-theme='dark'] .hero__subtitle {
-  color: #8888a0;
-}
-
-/* --------------------------------------------------------------------------
-   Dark Mode — Back to Top
-   -------------------------------------------------------------------------- */
-[data-theme='dark'] .clean-btn.theme-back-to-top-button {
-  background-color: #34a870;
-}
-
-/* --------------------------------------------------------------------------
-   Dark Mode — Dropdown
-   -------------------------------------------------------------------------- */
-[data-theme='dark'] .dropdown__menu {
-  background-color: #2d2d44;
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-}
-
-/* --------------------------------------------------------------------------
-   Dark Mode — Scrollbar
-   -------------------------------------------------------------------------- */
-[data-theme='dark'] ::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.15);
-}
-
-[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.25);
-}
-
-/* --------------------------------------------------------------------------
-   Dark Mode — Announcement Bar
-   -------------------------------------------------------------------------- */
-[data-theme='dark'] div[class*='announcementBar'] {
-  background-color: #34a870;
-  color: #ffffff;
-}
-
-/* --------------------------------------------------------------------------
-   Dark Mode — General Text
-   -------------------------------------------------------------------------- */
+/* Dark — General text */
 [data-theme='dark'] h1,
 [data-theme='dark'] h2,
 [data-theme='dark'] h3,
 [data-theme='dark'] h4,
 [data-theme='dark'] h5,
 [data-theme='dark'] h6 {
-  color: #f8f8fa;
+  color: var(--color-footer-text);
 }
 
 [data-theme='dark'] p,
 [data-theme='dark'] li {
-  color: #c0c0d0;
+  color: oklch(0.8 0 0);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Anchors
-   -------------------------------------------------------------------------- */
+/* Dark — Anchors */
 [data-theme='dark'] .anchor {
-  color: #34a870;
+  color: var(--color-primary);
 }
 
 [data-theme='dark'] .anchor:hover {
-  color: #4bb882;
+  color: var(--color-primary);
 }
 
-/* --------------------------------------------------------------------------
-   Dark Mode — Selection
-   -------------------------------------------------------------------------- */
+/* Dark — Selection */
 [data-theme='dark'] ::selection {
-  background-color: rgba(52, 168, 112, 0.3);
+  background-color: oklch(0.768 0.233 130.85 / 0.3);
+}
+
+/* Dark — Back to Top */
+[data-theme='dark'] .clean-btn.theme-back-to-top-button {
+  background-color: var(--color-primary);
+}
+
+/* Dark — Dropdown */
+[data-theme='dark'] .dropdown__menu {
+  background-color: var(--color-card);
+  border-color: var(--color-border);
+  box-shadow: 0 4px 16px oklch(0 0 0 / 0.3);
+}
+
+/* Dark — Scrollbar */
+[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background-color: oklch(1 0 0 / 15%);
+}
+
+[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background-color: oklch(1 0 0 / 25%);
 }
