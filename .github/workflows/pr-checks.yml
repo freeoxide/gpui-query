@@ -1,0 +1,43 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/pr-checks.yml"
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: npx pnpm install --frozen-lockfile
+
+      - name: Type check and lint
+        run: export PATH="$(pwd)/node_modules/.bin:$HOME/.vite-plus/bin:$PATH" && vp check
+
+      - name: Build (dry run)
+        run: npx pnpm run build
+        env:
+          CLOUDFLARE_INCLUDE_PROCESS_ENV: "true"

@@ -8,240 +8,240 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root";
-import { Route as FaqRouteImport } from "./routes/faq";
-import { Route as DocsRouteImport } from "./routes/docs";
-import { Route as ChangelogRouteImport } from "./routes/changelog";
-import { Route as AboutRouteImport } from "./routes/about";
-import { Route as R404RouteImport } from "./routes/404";
-import { Route as IndexRouteImport } from "./routes/index";
-import { Route as DocsIndexRouteImport } from "./routes/docs/index";
-import { Route as BlogIndexRouteImport } from "./routes/blog/index";
-import { Route as DocsSlugRouteImport } from "./routes/docs/$slug";
-import { Route as BlogSlugRouteImport } from "./routes/blog/$slug";
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as FaqRouteImport } from './routes/faq'
+import { Route as DocsRouteImport } from './routes/docs'
+import { Route as ChangelogRouteImport } from './routes/changelog'
+import { Route as AboutRouteImport } from './routes/about'
+import { Route as R404RouteImport } from './routes/404'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as DocsIndexRouteImport } from './routes/docs/index'
+import { Route as BlogIndexRouteImport } from './routes/blog/index'
+import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
+import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
 
 const FaqRoute = FaqRouteImport.update({
-  id: "/faq",
-  path: "/faq",
+  id: '/faq',
+  path: '/faq',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const DocsRoute = DocsRouteImport.update({
-  id: "/docs",
-  path: "/docs",
+  id: '/docs',
+  path: '/docs',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const ChangelogRoute = ChangelogRouteImport.update({
-  id: "/changelog",
-  path: "/changelog",
+  id: '/changelog',
+  path: '/changelog',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AboutRoute = AboutRouteImport.update({
-  id: "/about",
-  path: "/about",
+  id: '/about',
+  path: '/about',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const R404Route = R404RouteImport.update({
-  id: "/404",
-  path: "/404",
+  id: '/404',
+  path: '/404',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const DocsIndexRoute = DocsIndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => DocsRoute,
-} as any);
+} as any)
 const BlogIndexRoute = BlogIndexRouteImport.update({
-  id: "/blog/",
-  path: "/blog/",
+  id: '/blog/',
+  path: '/blog/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const DocsSlugRoute = DocsSlugRouteImport.update({
-  id: "/$slug",
-  path: "/$slug",
+  id: '/$slug',
+  path: '/$slug',
   getParentRoute: () => DocsRoute,
-} as any);
+} as any)
 const BlogSlugRoute = BlogSlugRouteImport.update({
-  id: "/blog/$slug",
-  path: "/blog/$slug",
+  id: '/blog/$slug',
+  path: '/blog/$slug',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute;
-  "/404": typeof R404Route;
-  "/about": typeof AboutRoute;
-  "/changelog": typeof ChangelogRoute;
-  "/docs": typeof DocsRouteWithChildren;
-  "/faq": typeof FaqRoute;
-  "/blog/$slug": typeof BlogSlugRoute;
-  "/docs/$slug": typeof DocsSlugRoute;
-  "/blog/": typeof BlogIndexRoute;
-  "/docs/": typeof DocsIndexRoute;
+  '/': typeof IndexRoute
+  '/404': typeof R404Route
+  '/about': typeof AboutRoute
+  '/changelog': typeof ChangelogRoute
+  '/docs': typeof DocsRouteWithChildren
+  '/faq': typeof FaqRoute
+  '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
+  '/blog/': typeof BlogIndexRoute
+  '/docs/': typeof DocsIndexRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute;
-  "/404": typeof R404Route;
-  "/about": typeof AboutRoute;
-  "/changelog": typeof ChangelogRoute;
-  "/faq": typeof FaqRoute;
-  "/blog/$slug": typeof BlogSlugRoute;
-  "/docs/$slug": typeof DocsSlugRoute;
-  "/blog": typeof BlogIndexRoute;
-  "/docs": typeof DocsIndexRoute;
+  '/': typeof IndexRoute
+  '/404': typeof R404Route
+  '/about': typeof AboutRoute
+  '/changelog': typeof ChangelogRoute
+  '/faq': typeof FaqRoute
+  '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
+  '/blog': typeof BlogIndexRoute
+  '/docs': typeof DocsIndexRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  "/": typeof IndexRoute;
-  "/404": typeof R404Route;
-  "/about": typeof AboutRoute;
-  "/changelog": typeof ChangelogRoute;
-  "/docs": typeof DocsRouteWithChildren;
-  "/faq": typeof FaqRoute;
-  "/blog/$slug": typeof BlogSlugRoute;
-  "/docs/$slug": typeof DocsSlugRoute;
-  "/blog/": typeof BlogIndexRoute;
-  "/docs/": typeof DocsIndexRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/404': typeof R404Route
+  '/about': typeof AboutRoute
+  '/changelog': typeof ChangelogRoute
+  '/docs': typeof DocsRouteWithChildren
+  '/faq': typeof FaqRoute
+  '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
+  '/blog/': typeof BlogIndexRoute
+  '/docs/': typeof DocsIndexRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
+  fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | "/"
-    | "/404"
-    | "/about"
-    | "/changelog"
-    | "/docs"
-    | "/faq"
-    | "/blog/$slug"
-    | "/docs/$slug"
-    | "/blog/"
-    | "/docs/";
-  fileRoutesByTo: FileRoutesByTo;
+    | '/'
+    | '/404'
+    | '/about'
+    | '/changelog'
+    | '/docs'
+    | '/faq'
+    | '/blog/$slug'
+    | '/docs/$slug'
+    | '/blog/'
+    | '/docs/'
+  fileRoutesByTo: FileRoutesByTo
   to:
-    | "/"
-    | "/404"
-    | "/about"
-    | "/changelog"
-    | "/faq"
-    | "/blog/$slug"
-    | "/docs/$slug"
-    | "/blog"
-    | "/docs";
+    | '/'
+    | '/404'
+    | '/about'
+    | '/changelog'
+    | '/faq'
+    | '/blog/$slug'
+    | '/docs/$slug'
+    | '/blog'
+    | '/docs'
   id:
-    | "__root__"
-    | "/"
-    | "/404"
-    | "/about"
-    | "/changelog"
-    | "/docs"
-    | "/faq"
-    | "/blog/$slug"
-    | "/docs/$slug"
-    | "/blog/"
-    | "/docs/";
-  fileRoutesById: FileRoutesById;
+    | '__root__'
+    | '/'
+    | '/404'
+    | '/about'
+    | '/changelog'
+    | '/docs'
+    | '/faq'
+    | '/blog/$slug'
+    | '/docs/$slug'
+    | '/blog/'
+    | '/docs/'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
-  R404Route: typeof R404Route;
-  AboutRoute: typeof AboutRoute;
-  ChangelogRoute: typeof ChangelogRoute;
-  DocsRoute: typeof DocsRouteWithChildren;
-  FaqRoute: typeof FaqRoute;
-  BlogSlugRoute: typeof BlogSlugRoute;
-  BlogIndexRoute: typeof BlogIndexRoute;
+  IndexRoute: typeof IndexRoute
+  R404Route: typeof R404Route
+  AboutRoute: typeof AboutRoute
+  ChangelogRoute: typeof ChangelogRoute
+  DocsRoute: typeof DocsRouteWithChildren
+  FaqRoute: typeof FaqRoute
+  BlogSlugRoute: typeof BlogSlugRoute
+  BlogIndexRoute: typeof BlogIndexRoute
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/faq": {
-      id: "/faq";
-      path: "/faq";
-      fullPath: "/faq";
-      preLoaderRoute: typeof FaqRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/docs": {
-      id: "/docs";
-      path: "/docs";
-      fullPath: "/docs";
-      preLoaderRoute: typeof DocsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/changelog": {
-      id: "/changelog";
-      path: "/changelog";
-      fullPath: "/changelog";
-      preLoaderRoute: typeof ChangelogRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/about": {
-      id: "/about";
-      path: "/about";
-      fullPath: "/about";
-      preLoaderRoute: typeof AboutRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/404": {
-      id: "/404";
-      path: "/404";
-      fullPath: "/404";
-      preLoaderRoute: typeof R404RouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/": {
-      id: "/";
-      path: "/";
-      fullPath: "/";
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/docs/": {
-      id: "/docs/";
-      path: "/";
-      fullPath: "/docs/";
-      preLoaderRoute: typeof DocsIndexRouteImport;
-      parentRoute: typeof DocsRoute;
-    };
-    "/blog/": {
-      id: "/blog/";
-      path: "/blog";
-      fullPath: "/blog/";
-      preLoaderRoute: typeof BlogIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/docs/$slug": {
-      id: "/docs/$slug";
-      path: "/$slug";
-      fullPath: "/docs/$slug";
-      preLoaderRoute: typeof DocsSlugRouteImport;
-      parentRoute: typeof DocsRoute;
-    };
-    "/blog/$slug": {
-      id: "/blog/$slug";
-      path: "/blog/$slug";
-      fullPath: "/blog/$slug";
-      preLoaderRoute: typeof BlogSlugRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+    '/faq': {
+      id: '/faq'
+      path: '/faq'
+      fullPath: '/faq'
+      preLoaderRoute: typeof FaqRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/changelog': {
+      id: '/changelog'
+      path: '/changelog'
+      fullPath: '/changelog'
+      preLoaderRoute: typeof ChangelogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/404': {
+      id: '/404'
+      path: '/404'
+      fullPath: '/404'
+      preLoaderRoute: typeof R404RouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/': {
+      id: '/docs/'
+      path: '/'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DocsIndexRouteImport
+      parentRoute: typeof DocsRoute
+    }
+    '/blog/': {
+      id: '/blog/'
+      path: '/blog'
+      fullPath: '/blog/'
+      preLoaderRoute: typeof BlogIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/$slug': {
+      id: '/docs/$slug'
+      path: '/$slug'
+      fullPath: '/docs/$slug'
+      preLoaderRoute: typeof DocsSlugRouteImport
+      parentRoute: typeof DocsRoute
+    }
+    '/blog/$slug': {
+      id: '/blog/$slug'
+      path: '/blog/$slug'
+      fullPath: '/blog/$slug'
+      preLoaderRoute: typeof BlogSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 interface DocsRouteChildren {
-  DocsSlugRoute: typeof DocsSlugRoute;
-  DocsIndexRoute: typeof DocsIndexRoute;
+  DocsSlugRoute: typeof DocsSlugRoute
+  DocsIndexRoute: typeof DocsIndexRoute
 }
 
 const DocsRouteChildren: DocsRouteChildren = {
   DocsSlugRoute: DocsSlugRoute,
   DocsIndexRoute: DocsIndexRoute,
-};
+}
 
-const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren);
+const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -252,16 +252,16 @@ const rootRouteChildren: RootRouteChildren = {
   FaqRoute: FaqRoute,
   BlogSlugRoute: BlogSlugRoute,
   BlogIndexRoute: BlogIndexRoute,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()
 
-import type { getRouter } from "./router.tsx";
-import type { createStart } from "@tanstack/react-start";
-declare module "@tanstack/react-start" {
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
   interface Register {
-    ssr: true;
-    router: Awaited<ReturnType<typeof getRouter>>;
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
   }
 }
