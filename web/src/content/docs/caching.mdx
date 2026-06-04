@@ -1,0 +1,208 @@
+---
+title: "Caching"
+description: "Cache policies and request strategies for controlling data freshness in gpui-query"
+category: "Guides"
+order: 8
+---
+
+# Caching
+
+gpui-query provides flexible caching strategies to balance data freshness with performance. The cache policy determines how long data is considered valid, and the request policy controls concurrent fetch behavior.
+
+## CachePolicy
+
+`CachePolicy` is specified per-query via `QueryOptions`. It controls how data is stored and when it is considered stale.
+
+### NoCache
+
+Every access triggers a fresh fetch. Use for data that must always be current and is cheap to fetch.
+
+```rust
+let query = use_query(
+    cx,
+    QueryKey::from("server-time"),
+    |_| async move { get_server_time().await },
+    QueryOptions {
+        cache_policy: CachePolicy::NoCache,
+        ..Default::default()
+    },
+);
+```
+
+**When to use:**
+
+- Real-time data (timestamps, counters)
+- Highly volatile data
+- Debug and development
+
+### TTL (Time To Live)
+
+Data is valid for a fixed duration. After expiration, the next access triggers a refetch.
+
+```rust
+let query = use_query(
+    cx,
+    QueryKey::from("notifications"),
+    |_| async move { fetch_notifications().await },
+    QueryOptions {
+        cache_policy: CachePolicy::TTL(Duration::from_secs(30)),
+        ..Default::default()
+    },
+);
+```
+
+**When to use:**
+
+- Semi-static data that changes at known intervals
+- API rate-limited endpoints
+- Data that can tolerate short staleness
+
+### StaleWhileRevalidate (Recommended)
+
+Serves cached data immediately if available, then fetches fresh data in the background. The UI never blocks waiting for data.
+
+```rust
+let query = use_query(
+    cx,
+    QueryKey::from("user-profile"),
+    |_| async move { fetch_profile().await },
+    QueryOptions {
+        cache_policy: CachePolicy::StaleWhileRevalidate {
+            cache_time: Duration::from_secs(300),  // Keep for 5 minutes
+            stale_time: Duration::from_secs(60),    // Refetch after 1 minute
+        },
+        ..Default::default()
+    },
+);
+```
+
+**How it works:**
+
+1. First access: fetch and cache the data
+2. Subsequent access within `stale_time`: serve from cache, no fetch
+3. Access after `stale_time` but before `cache_time`: serve stale data immediately, trigger background refetch
+4. Access after `cache_time`: data is gone, fetch fresh
+
+**When to use:**
+
+- Most user-facing data (default choice)
+- When you want instant responses with eventual consistency
+- Data that changes infrequently but should stay reasonably fresh
+
+## RequestPolicy
+
+`RequestPolicy` controls how multiple concurrent fetches for the same key are handled.
+
+### LatestWins (Default)
+
+When a new fetch is initiated while another is in progress, the previous fetch is cancelled. The latest request always wins.
+
+```rust
+use_query(
+    cx,
+    QueryKey::from("search"),
+    |signal| async move { search(query).await },
+    QueryOptions {
+        request_policy: RequestPolicy::LatestWins,
+        ..Default::default()
+    },
+);
+```
+
+**When to use:**
+
+- Search inputs where only the latest query matters
+- Type-ahead autocomplete
+- Rapidly changing parameters
+
+### IgnoreWhileLoading
+
+If a fetch is already in progress, new requests for the same key are ignored. The existing fetch completes normally.
+
+```rust
+use_query(
+    cx,
+    QueryKey::from("export-report"),
+    |signal| async move { generate_report().await },
+    QueryOptions {
+        request_policy: RequestPolicy::IgnoreWhileLoading,
+        ..Default::default()
+    },
+);
+```
+
+**When to use:**
+
+- Expensive operations (report generation, exports)
+- Mutations that should not be interrupted
+- Side-effect-heavy fetches
+
+## Combining Policies
+
+```rust
+let options = QueryOptions {
+    cache_policy: CachePolicy::StaleWhileRevalidate {
+        cache_time: Duration::from_secs(600),
+        stale_time: Duration::from_secs(120),
+    },
+    request_policy: RequestPolicy::LatestWins,
+    retry_policy: RetryPolicy {
+        max_retries: 2,
+        retry_delay: Duration::from_millis(500),
+        backoff_multiplier: 2.0,
+        max_retry_delay: Duration::from_secs(10),
+    },
+    enabled: true,
+};
+```
+
+## Manual Cache Operations
+
+### Invalidate Queries
+
+Mark cached data as stale, triggering a refetch on next access:
+
+```rust
+// Invalidate specific query
+client.invalidate_queries(&QueryKeyFilter::exact("user-profile"));
+
+// Invalidate all queries with a prefix
+client.invalidate_queries(&QueryKeyFilter::prefix("users"));
+```
+
+### Reset Queries
+
+Clear cached data and set status back to Idle:
+
+```rust
+client.reset_queries(&QueryKeyFilter::prefix("todos"));
+```
+
+### Remove Queries
+
+Remove queries from the cache entirely:
+
+```rust
+client.remove_queries(&QueryKeyFilter::exact(("temp", session_id)));
+```
+
+### Set Query Data Directly
+
+Update cached data without a fetch, useful for optimistic updates:
+
+```rust
+client.set_query_data(
+    &QueryKey::from(("users", user_id)),
+    updated_user,
+);
+```
+
+<Callout type="tip">
+  Start with `StaleWhileRevalidate` as your default. It provides the best user experience: instant
+  cached data with automatic background freshness.
+</Callout>
+
+<Callout type="info">
+  Cache policies are per-query, not global. You can mix different policies for different data types
+  in the same application.
+</Callout>

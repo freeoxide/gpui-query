@@ -38,6 +38,7 @@ function BlogPostPage() {
               day: "numeric",
             })}
           </time>
+          {post.frontmatter.readingTime && <span>{post.frontmatter.readingTime} min read</span>}
           {post.frontmatter.tags && post.frontmatter.tags.length > 0 && (
             <>
               <span aria-hidden="true">&middot;</span>

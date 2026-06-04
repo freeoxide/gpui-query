@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from "./routes/__root";
 import { Route as FaqRouteImport } from "./routes/faq";
+import { Route as DocsRouteImport } from "./routes/docs";
 import { Route as ChangelogRouteImport } from "./routes/changelog";
 import { Route as AboutRouteImport } from "./routes/about";
 import { Route as R404RouteImport } from "./routes/404";
@@ -22,6 +23,11 @@ import { Route as BlogSlugRouteImport } from "./routes/blog/$slug";
 const FaqRoute = FaqRouteImport.update({
   id: "/faq",
   path: "/faq",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const DocsRoute = DocsRouteImport.update({
+  id: "/docs",
+  path: "/docs",
   getParentRoute: () => rootRouteImport,
 } as any);
 const ChangelogRoute = ChangelogRouteImport.update({
@@ -45,9 +51,9 @@ const IndexRoute = IndexRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any);
 const DocsIndexRoute = DocsIndexRouteImport.update({
-  id: "/docs/",
-  path: "/docs/",
-  getParentRoute: () => rootRouteImport,
+  id: "/",
+  path: "/",
+  getParentRoute: () => DocsRoute,
 } as any);
 const BlogIndexRoute = BlogIndexRouteImport.update({
   id: "/blog/",
@@ -55,9 +61,9 @@ const BlogIndexRoute = BlogIndexRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any);
 const DocsSlugRoute = DocsSlugRouteImport.update({
-  id: "/docs/$slug",
-  path: "/docs/$slug",
-  getParentRoute: () => rootRouteImport,
+  id: "/$slug",
+  path: "/$slug",
+  getParentRoute: () => DocsRoute,
 } as any);
 const BlogSlugRoute = BlogSlugRouteImport.update({
   id: "/blog/$slug",
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   "/404": typeof R404Route;
   "/about": typeof AboutRoute;
   "/changelog": typeof ChangelogRoute;
+  "/docs": typeof DocsRouteWithChildren;
   "/faq": typeof FaqRoute;
   "/blog/$slug": typeof BlogSlugRoute;
   "/docs/$slug": typeof DocsSlugRoute;
@@ -93,6 +100,7 @@ export interface FileRoutesById {
   "/404": typeof R404Route;
   "/about": typeof AboutRoute;
   "/changelog": typeof ChangelogRoute;
+  "/docs": typeof DocsRouteWithChildren;
   "/faq": typeof FaqRoute;
   "/blog/$slug": typeof BlogSlugRoute;
   "/docs/$slug": typeof DocsSlugRoute;
@@ -106,6 +114,7 @@ export interface FileRouteTypes {
     | "/404"
     | "/about"
     | "/changelog"
+    | "/docs"
     | "/faq"
     | "/blog/$slug"
     | "/docs/$slug"
@@ -128,6 +137,7 @@ export interface FileRouteTypes {
     | "/404"
     | "/about"
     | "/changelog"
+    | "/docs"
     | "/faq"
     | "/blog/$slug"
     | "/docs/$slug"
@@ -140,11 +150,10 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route;
   AboutRoute: typeof AboutRoute;
   ChangelogRoute: typeof ChangelogRoute;
+  DocsRoute: typeof DocsRouteWithChildren;
   FaqRoute: typeof FaqRoute;
   BlogSlugRoute: typeof BlogSlugRoute;
-  DocsSlugRoute: typeof DocsSlugRoute;
   BlogIndexRoute: typeof BlogIndexRoute;
-  DocsIndexRoute: typeof DocsIndexRoute;
 }
 
 declare module "@tanstack/react-router" {
@@ -154,6 +163,13 @@ declare module "@tanstack/react-router" {
       path: "/faq";
       fullPath: "/faq";
       preLoaderRoute: typeof FaqRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/docs": {
+      id: "/docs";
+      path: "/docs";
+      fullPath: "/docs";
+      preLoaderRoute: typeof DocsRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/changelog": {
@@ -186,10 +202,10 @@ declare module "@tanstack/react-router" {
     };
     "/docs/": {
       id: "/docs/";
-      path: "/docs";
+      path: "/";
       fullPath: "/docs/";
       preLoaderRoute: typeof DocsIndexRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof DocsRoute;
     };
     "/blog/": {
       id: "/blog/";
@@ -200,10 +216,10 @@ declare module "@tanstack/react-router" {
     };
     "/docs/$slug": {
       id: "/docs/$slug";
-      path: "/docs/$slug";
+      path: "/$slug";
       fullPath: "/docs/$slug";
       preLoaderRoute: typeof DocsSlugRouteImport;
-      parentRoute: typeof rootRouteImport;
+      parentRoute: typeof DocsRoute;
     };
     "/blog/$slug": {
       id: "/blog/$slug";
@@ -215,16 +231,27 @@ declare module "@tanstack/react-router" {
   }
 }
 
+interface DocsRouteChildren {
+  DocsSlugRoute: typeof DocsSlugRoute;
+  DocsIndexRoute: typeof DocsIndexRoute;
+}
+
+const DocsRouteChildren: DocsRouteChildren = {
+  DocsSlugRoute: DocsSlugRoute,
+  DocsIndexRoute: DocsIndexRoute,
+};
+
+const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren);
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   R404Route: R404Route,
   AboutRoute: AboutRoute,
   ChangelogRoute: ChangelogRoute,
+  DocsRoute: DocsRouteWithChildren,
   FaqRoute: FaqRoute,
   BlogSlugRoute: BlogSlugRoute,
-  DocsSlugRoute: DocsSlugRoute,
   BlogIndexRoute: BlogIndexRoute,
-  DocsIndexRoute: DocsIndexRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

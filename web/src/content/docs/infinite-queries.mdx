@@ -1,0 +1,181 @@
+---
+title: "Infinite Queries"
+description: "Paginate and load data incrementally with use_infinite_query"
+category: "API Reference"
+order: 6
+---
+
+# Infinite Queries
+
+`use_infinite_query` is designed for paginated data that loads incrementally. It manages page cursors, tracks fetch direction, and supports both forward and backward pagination.
+
+## Signature
+
+```rust
+pub fn use_infinite_query<TPage, E>(
+    cx: &mut ViewContext<impl 'static>,
+    key: impl Into<QueryKey>,
+    fetcher: impl Fn(InfiniteQueryPageParam, QuerySignal) -> impl Future<Output = Result<InfiniteQueryPage<TPage>, E>> + 'static,
+    options: InfiniteQueryOptions,
+) -> InfiniteQueryResource<TPage, E>
+```
+
+## InfiniteQueryPage
+
+Each page returned by the fetcher must include pagination metadata:
+
+```rust
+pub struct InfiniteQueryPage<T> {
+    pub data: T,
+    pub next_cursor: Option<String>,
+    pub prev_cursor: Option<String>,
+}
+```
+
+## InfiniteQueryOptions
+
+| Option           | Type             | Default                | Description                     |
+| ---------------- | ---------------- | ---------------------- | ------------------------------- |
+| `cache_policy`   | `CachePolicy`    | `StaleWhileRevalidate` | Cache behavior                  |
+| `max_pages`      | `Option<usize>`  | `None`                 | Maximum pages to keep in memory |
+| `initial_cursor` | `Option<String>` | `None`                 | Starting cursor for first fetch |
+| `retry_policy`   | `RetryPolicy`    | Default                | Retry behavior on error         |
+
+## InfiniteQueryResource
+
+The returned resource provides access to all pages and pagination controls:
+
+| Field                       | Type          | Description                     |
+| --------------------------- | ------------- | ------------------------------- |
+| `pages`                     | `Vec<TPage>`  | All loaded pages                |
+| `data`                      | `Vec<TPage>`  | Alias for `pages`               |
+| `is_fetching`               | `bool`        | Any fetch in progress           |
+| `is_fetching_next_page`     | `bool`        | Next page fetch in progress     |
+| `is_fetching_previous_page` | `bool`        | Previous page fetch in progress |
+| `has_next_page`             | `bool`        | More pages available forward    |
+| `has_previous_page`         | `bool`        | More pages available backward   |
+| `status`                    | `QueryStatus` | Overall query status            |
+| `error`                     | `Option<E>`   | Latest error                    |
+
+## FetchDirection
+
+Used internally and for callbacks to indicate pagination direction:
+
+```rust
+pub enum FetchDirection {
+    Forward,
+    Backward,
+}
+```
+
+## Examples
+
+### Forward Pagination (Cursor-Based)
+
+```rust
+fn message_list(cx: &mut ViewContext<App>) {
+    let query = use_infinite_query(
+        cx,
+        QueryKey::from("messages"),
+        |cursor, signal| async move {
+            let url = match cursor {
+                Some(c) => format!("/api/messages?after={}", c),
+                None => "/api/messages".to_string(),
+            };
+            let response = http_client.get(&url).send().await?;
+            Ok::<_, AppError>(response.json::<InfiniteQueryPage<Vec<Message>>>().await?)
+        },
+        InfiniteQueryOptions::default(),
+    );
+
+    cx.render(|_| {
+        div()
+            .children(
+                query.pages().iter().flat_map(|page| {
+                    page.data.iter().map(|msg| {
+                        div().child(&msg.text)
+                    })
+                })
+            )
+            .when(query.has_next_page(), |el| {
+                el.child(
+                    button()
+                        .on_click(|_event, cx| {
+                            query.fetch_next_page();
+                        })
+                        .child(
+                            if query.is_fetching_next_page() {
+                                "Loading more..."
+                            } else {
+                                "Load more"
+                            }
+                        )
+                )
+            })
+    });
+}
+```
+
+### Backward Pagination
+
+```rust
+fn paginated_table(cx: &mut ViewContext<App>) {
+    let query = use_infinite_query(
+        cx,
+        QueryKey::from("orders"),
+        |cursor, _signal| async move {
+            let url = match cursor {
+                Some(before) => format!("/api/orders?before={}", before),
+                None => "/api/orders?limit=20".to_string(),
+            };
+            let response = http_client.get(&url).send().await?;
+            Ok::<_, AppError>(response.json().await?)
+        },
+        InfiniteQueryOptions::default(),
+    );
+
+    // Load previous pages
+    if query.has_previous_page() {
+        query.fetch_previous_page();
+    }
+}
+```
+
+### Bounded Pages with max_pages
+
+Limit the number of pages kept in memory. When the limit is exceeded, the oldest pages are evicted.
+
+```rust
+let query = use_infinite_query(
+    cx,
+    QueryKey::from("feed"),
+    |cursor, signal| async move {
+        fetch_feed_page(cursor).await
+    },
+    InfiniteQueryOptions {
+        max_pages: Some(10),
+        ..Default::default()
+    },
+);
+```
+
+### Accessing All Page Data
+
+```rust
+// Flatten all pages into a single list
+let all_items: Vec<Item> = query
+    .pages()
+    .iter()
+    .flat_map(|page| page.data.clone())
+    .collect();
+```
+
+<Callout type="tip">
+  Use `max_pages` for infinite scrolling lists to prevent unbounded memory growth. A value of 10-20
+  pages is usually sufficient for a good user experience.
+</Callout>
+
+<Callout type="info">
+  `fetch_next_page` and `fetch_previous_page` are no-ops if there are no more pages in that
+  direction. You can safely call them without checking `has_next_page` / `has_previous_page`.
+</Callout>

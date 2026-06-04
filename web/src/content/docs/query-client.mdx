@@ -1,0 +1,200 @@
+---
+title: "Query Client"
+description: "The central registry for managing query state, caching, and lifecycle in gpui-query"
+category: "API Reference"
+order: 10
+---
+
+# Query Client
+
+`QueryClient` is the central hub that manages all query state, caching, and coordination. Every gpui-query application creates at least one `QueryClient`.
+
+## Creating a Client
+
+```rust
+let client = QueryClient::new();
+```
+
+The client is typically registered as a GPUI global:
+
+```rust
+cx.set_global(client);
+
+// Access it later
+let client = cx.global::<QueryClient>();
+```
+
+## resource()
+
+Get or create a `QueryResource` for a given key. This is the primary way to access query state.
+
+```rust
+let resource = client.resource::<UserData, AppError>(
+    QueryKey::from(("users", user_id)),
+);
+```
+
+## query()
+
+Execute a query through the client directly. This is used internally by hooks but can also be called imperatively.
+
+```rust
+let result = client.query::<UserData, AppError>(
+    QueryKey::from("config"),
+    |signal| async move { load_config().await },
+).await;
+```
+
+## Cache Operations
+
+### invalidate_queries
+
+Mark queries as stale, triggering a refetch on next access. Accepts a `QueryKeyFilter` for exact or prefix matching.
+
+```rust
+// Invalidate a single query
+client.invalidate_queries(&QueryKeyFilter::exact("user-profile"));
+
+// Invalidate all queries matching a prefix
+client.invalidate_queries(&QueryKeyFilter::prefix("users"));
+
+// Invalidate everything
+client.invalidate_queries(&QueryKeyFilter::all());
+```
+
+### reset_queries
+
+Reset queries to their initial state (Idle with no data). Useful for clearing data after logout.
+
+```rust
+// Reset all user data on logout
+client.reset_queries(&QueryKeyFilter::prefix("users"));
+
+// Reset everything
+client.reset_queries(&QueryKeyFilter::all());
+```
+
+### remove_queries
+
+Remove queries from the cache entirely. The query will not be refetched until it is accessed again.
+
+```rust
+// Remove temporary session data
+client.remove_queries(&QueryKeyFilter::prefix("session"));
+
+// Remove a specific query
+client.remove_queries(&QueryKeyFilter::exact(("temp-cache", id)));
+```
+
+### cancel_queries
+
+Cancel in-flight fetches for matching queries. The fetcher receives a cancellation signal.
+
+```rust
+// Cancel all pending searches when the user navigates away
+client.cancel_queries(&QueryKeyFilter::prefix("search"));
+```
+
+## Garbage Collection
+
+### gc()
+
+Run garbage collection on the cache. Removes queries that have no active subscribers and have exceeded their cache time.
+
+```rust
+client.gc();
+```
+
+This is typically called periodically or on specific events (e.g., window focus, navigation):
+
+```rust
+// Run GC every 30 seconds
+cx.spawn(|mut cx| async move {
+    loop {
+        cx.background_executor().timer(Duration::from_secs(30)).await;
+        let client = cx.read_global::<QueryClient>();
+        client.gc();
+    }
+}).detach();
+```
+
+## Data Access
+
+### get_query_data
+
+Read cached data directly without subscribing to changes.
+
+```rust
+if let Some(user) = client.get_query_data::<UserData>(&QueryKey::from(("users", 42))) {
+    // Use the cached user data
+}
+```
+
+### set_query_data
+
+Set cached data directly without a fetch. Useful for optimistic updates or prepopulating the cache.
+
+```rust
+// Optimistic update
+let mut updated = user.clone();
+updated.name = new_name.clone();
+client.set_query_data(
+    &QueryKey::from(("users", user.id)),
+    updated,
+);
+```
+
+### prepare_fetch
+
+Prepare a fetch without executing it immediately. Returns a handle that can be awaited later.
+
+```rust
+let handle = client.prepare_fetch(
+    QueryKey::from("preload-data"),
+    |signal| async move { fetch_data().await },
+);
+// Execute when ready
+let result = handle.await;
+```
+
+### prefetch_query
+
+Fetch data and cache it without subscribing. Used for preloading data the user is likely to need.
+
+```rust
+// Prefetch the next page of results
+client.prefetch_query(
+    QueryKey::from(("articles", page + 1)),
+    |signal| async move { fetch_page(page + 1).await },
+);
+```
+
+## Serialization
+
+### dehydrate
+
+Serialize the current cache state for persistence or transfer.
+
+```rust
+let serialized = client.dehydrate();
+// Save to disk, send over network, etc.
+```
+
+### hydrate
+
+Restore cache state from a previously dehydrated snapshot.
+
+```rust
+let client = QueryClient::new();
+client.hydrate(&serialized);
+```
+
+<Callout type="tip">
+  Use `prefetch_query` to preload data for likely next navigation. For example, prefetch a user's
+  profile when they hover over their avatar.
+</Callout>
+
+<Callout type="info">
+  `gc()` only removes queries with no active subscribers. Queries currently being used by components
+  will not be garbage collected.
+</Callout>

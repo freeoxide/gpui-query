@@ -1,0 +1,199 @@
+---
+title: "Queries"
+description: "Complete API reference for use_query, the primary data-fetching hook in gpui-query"
+category: "API Reference"
+order: 3
+---
+
+# Queries
+
+`use_query` is the primary hook for fetching and managing asynchronous data in GPUI components. It handles caching, deduplication, retries, and background refreshes automatically.
+
+## Signature
+
+```rust
+pub fn use_query<T, E>(
+    cx: &mut ViewContext<impl 'static>,
+    key: impl Into<QueryKey>,
+    fetcher: impl Fn(QuerySignal) -> impl Future<Output = Result<T, E>> + 'static,
+    options: QueryOptions,
+) -> QueryResource<T, E>
+where
+    T: 'static,
+    E: 'static,
+```
+
+## Parameters
+
+### key: QueryKey
+
+The unique identifier for this query. Used for caching, deduplication, and sharing data across components.
+
+```rust
+// Simple string key
+QueryKey::from("user-list")
+
+// Hierarchical tuple key for related data
+QueryKey::from(("projects", project_id, "members"))
+```
+
+### fetcher
+
+An async function that performs the actual data fetching. Receives a `QuerySignal` for cancellation support.
+
+```rust
+let query = use_query(
+    cx,
+    QueryKey::from("todos"),
+    |signal| async move {
+        let response = http_client
+            .get("/api/todos")
+            .signal(signal)
+            .await?;
+        Ok(response.json().await?)
+    },
+    QueryOptions::default(),
+);
+```
+
+### QueryOptions
+
+Configuration for query behavior:
+
+| Option           | Type            | Default                | Description                      |
+| ---------------- | --------------- | ---------------------- | -------------------------------- |
+| `cache_policy`   | `CachePolicy`   | `StaleWhileRevalidate` | How data is cached               |
+| `request_policy` | `RequestPolicy` | `LatestWins`           | Concurrent request handling      |
+| `retry_policy`   | `RetryPolicy`   | 3 retries              | Error retry behavior             |
+| `enabled`        | `bool`          | `true`                 | Whether the query should execute |
+
+```rust
+let options = QueryOptions {
+    cache_policy: CachePolicy::TTL(Duration::from_secs(300)),
+    request_policy: RequestPolicy::LatestWins,
+    retry_policy: RetryPolicy::default(),
+    enabled: true,
+};
+```
+
+## Return Type: QueryResource
+
+`QueryResource<T, E>` provides reactive access to the query state:
+
+```rust
+let query = use_query(cx, key, fetcher, options);
+
+// Access data
+if let Some(users) = query.data() {
+    // Render users
+}
+
+// Check status
+match query.status() {
+    QueryStatus::Idle => {}
+    QueryStatus::Pending => { /* Show loading */ }
+    QueryStatus::Success => { /* Show data */ }
+    QueryStatus::Error => { /* Show error */ }
+}
+
+// Granular checks
+query.is_fetching();   // Any fetch in progress
+query.is_refetching(); // Background refetch in progress
+query.error();         // Latest error
+query.updated_at();    // Last data update timestamp
+```
+
+## Examples
+
+### Basic Data Fetching
+
+```rust
+fn todo_list(cx: &mut ViewContext<App>) {
+    let query = use_query(
+        cx,
+        QueryKey::from("todos"),
+        |_| async move {
+            fetch_todos().await
+        },
+        QueryOptions::default(),
+    );
+
+    cx.render(|_| {
+        if query.is_loading() {
+            div().child("Loading...")
+        } else if let Some(error) = query.error() {
+            div().child(format!("Error: {}", error))
+        } else if let Some(todos) = query.data() {
+            div().children(
+                todos.iter().map(|todo| div().child(&todo.title))
+            )
+        } else {
+            div()
+        }
+    });
+}
+```
+
+### Parameterized Query with Tuple Key
+
+```rust
+fn user_detail(user_id: u64, cx: &mut ViewContext<App>) {
+    let query = use_query(
+        cx,
+        QueryKey::from(("users", user_id)),
+        |_| async move {
+            fetch_user(user_id).await
+        },
+        QueryOptions::default(),
+    );
+}
+```
+
+### Cancellation-Aware Fetcher
+
+```rust
+let query = use_query(
+    cx,
+    QueryKey::from("search-results"),
+    |signal| async move {
+        // Check if cancelled before heavy work
+        if signal.is_cancelled() {
+            return Err(QueryError::Cancelled);
+        }
+
+        let results = search_index.search(query_text).await;
+
+        // Check again after async work
+        if signal.is_cancelled() {
+            return Err(QueryError::Cancelled);
+        }
+
+        Ok(results)
+    },
+    QueryOptions::default(),
+);
+```
+
+### Conditional / Disabled Query
+
+```rust
+let query = use_query(
+    cx,
+    QueryKey::from(("user-profile", user_id)),
+    |cx| async move { fetch_profile(user_id).await },
+    QueryOptions {
+        enabled: user_id.is_some(),
+        ..Default::default()
+    },
+);
+```
+
+<Callout type="tip">
+  Use tuple keys like `("users", id)` instead of formatted strings like `"users/123"`. Tuple keys
+  are type-safe and enable prefix matching for bulk operations.
+</Callout>
+
+<Callout type="info">
+  `use_query` automatically deduplicates concurrent requests with the same key. If two components
+  request the same data, only one network request is made.
+</Callout>

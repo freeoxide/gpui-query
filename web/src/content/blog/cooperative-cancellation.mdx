@@ -1,11 +1,191 @@
 ---
 title: "Cooperative Cancellation with QuerySignal"
-description: "How Arc AtomicBool enables clean cancellation in gpui-query"
-date: "2026-06-02"
+description: "Deep dive into how Arc<AtomicBool> enables clean async cancellation in gpui-query"
+date: "2026-05-25"
 author: "hmziq"
 tags: ["rust", "async", "cancellation"]
+readingTime: 7
 ---
 
 # Cooperative Cancellation with QuerySignal
 
-Content to be written in U6.
+Async cancellation is hard. In JavaScript, `AbortController` gives you a cooperative mechanism — pass the signal, check it in your fetch, and the runtime handles the rest. In Rust, there's no built-in equivalent. GPUI's `cx.spawn()` returns a `Task`, but dropping a task doesn't guarantee cleanup — your future may continue running until the next `.await` point.
+
+gpui-query solves this with **QuerySignal** — an `Arc<AtomicBool>` that provides cooperative cancellation across the entire query lifecycle.
+
+## The Cancellation Problem
+
+Consider a query that fetches user data with a retry policy:
+
+```rust
+let query = use_query(cx, "user-profile", || async {
+    fetch_user_profile(user_id).await
+});
+```
+
+What happens when:
+
+1. The user navigates away — the component unmounts, but the fetch is still running
+2. A new query supersedes the old one — `LatestWins` policy means the old result should be discarded
+3. The query retries — each retry attempt should check whether it's still wanted
+
+Without cooperative cancellation, you get resource leaks, stale data overwrites, and wasted network calls.
+
+## How QuerySignal Works
+
+Every query in gpui-query is associated with a `QuerySignal` — an `Arc<AtomicBool>` that starts as `false` and is set to `true` when the query should be cancelled:
+
+```rust
+// Simplified QuerySignal
+type QuerySignal = Arc<AtomicBool>;
+
+// The signal is shared between:
+// 1. The QueryClient (sets it to true on cancel/invalidate)
+// 2. The fetcher (checks it between attempts)
+// 3. The retry logic (checks it before each retry)
+```
+
+When a query is cancelled — whether by component unmount, cache invalidation, or the `LatestWins` policy — the signal is atomically set to `true`. The fetcher and retry logic cooperatively check this signal at well-defined points.
+
+## The Signal Lifecycle
+
+### 1. Creation
+
+When a query is first registered with the `QueryClient`, a fresh `QuerySignal` is created:
+
+```rust
+let signal = Arc::new(AtomicBool::new(false));
+// Signal is false — query is active
+```
+
+### 2. Checking in Fetchers
+
+For long-running fetchers, you should periodically check the signal:
+
+```rust
+use_query(cx, "large-dataset", || async {
+    let mut results = Vec::new();
+    let mut page = 0;
+
+    while let Some(batch) = fetch_batch(page).await? {
+        results.extend(batch);
+        page += 1;
+
+        // Check if cancelled between pages
+        if signal.load(Ordering::Relaxed) {
+            return Err(QueryError::cancelled("Query was cancelled"));
+        }
+    }
+
+    Ok(results)
+});
+```
+
+### 3. Retry Integration
+
+The retry logic automatically checks the signal between attempts. With a `RetryPolicy` configured:
+
+```rust
+let query = use_query(cx, "flaky-endpoint", || async {
+    fetch_from_api().await
+}).with_retry(RetryPolicy {
+    max_retries: 3,
+    retry_delay: Duration::from_millis(100),
+    backoff_multiplier: 2.0,
+    max_retry_delay: Duration::from_secs(5),
+});
+```
+
+Between each retry attempt, gpui-query checks the signal. If it's `true`, retries stop immediately — no wasted attempts on a cancelled query.
+
+### 4. Cleanup
+
+When the signal is set, the query transitions to a terminal state. Resources are cleaned up, and the `QueryResource` reflects the cancellation in its status.
+
+## Interaction with LatestWins
+
+The `LatestWins` request policy is where cooperative cancellation shines. When two queries for the same key are in flight:
+
+```rust
+// First query starts
+use_query(cx, "search", || async { search("rust").await });
+
+// User types again — second query starts with same key
+use_query(cx, "search", || async { search("rust lang").await });
+```
+
+With `LatestWins`:
+
+1. The first query's signal is set to `true`
+2. The second query runs with a fresh signal (`false`)
+3. If the first query's fetcher checks the signal, it aborts early
+4. Only the second query's result updates the cache
+
+This prevents stale results from overwriting fresh data — a common bug in naive async implementations.
+
+## Best Practices
+
+### Check at Natural Boundaries
+
+Don't sprinkle signal checks everywhere. Check at natural suspension points:
+
+```rust
+// Good — check between major operations
+async fn complex_fetch(signal: &QuerySignal) -> Result<Data> {
+    let step1 = step_one().await?;
+
+    if signal.load(Ordering::Relaxed) {
+        return Err(QueryError::cancelled("Cancelled after step one"));
+    }
+
+    let step2 = step_two(step1).await?;
+    Ok(step2)
+}
+```
+
+### Use Relaxed Ordering
+
+`Ordering::Relaxed` is sufficient for signal checks. We don't need strong memory ordering — we just need to know "should I stop?". The `Relaxed` ordering has minimal performance overhead.
+
+### Don't Block on Signal Checks
+
+Signal checks should be quick atomic reads, not blocking operations:
+
+```rust
+// Good — non-blocking atomic read
+if signal.load(Ordering::Relaxed) {
+    return Err(QueryError::cancelled("Cancelled"));
+}
+
+// Bad — don't do this
+while !signal.load(Ordering::Relaxed) {
+    tokio::time::sleep(Duration::from_millis(10)).await;
+}
+```
+
+### Handle Cancellation Gracefully
+
+When a fetcher detects cancellation, return a meaningful error:
+
+```rust
+if signal.load(Ordering::Relaxed) {
+    return Err(QueryError::cancelled(
+        "User query was cancelled due to component unmount"
+    ));
+}
+```
+
+This ensures the `QueryResource` status reflects the actual cancellation reason, which is useful for debugging.
+
+## Summary
+
+QuerySignal provides a lightweight, cooperative cancellation mechanism that integrates with every layer of gpui-query:
+
+- **Hook layer:** Components automatically cancel queries on unmount
+- **Client layer:** `invalidate_queries()` and `remove_queries()` set signals atomically
+- **Core layer:** Retry logic checks signals between attempts
+- **Fetcher:** Your async code checks at natural boundaries
+
+This is cancellation that respects Rust's ownership model, works with GPUI's render loop, and doesn't require runtime magic. Just cooperative checks on a shared `Arc<AtomicBool>`.
+
+For more on how cancellation interacts with cache policies, see the [Caching guide](/docs/caching). For retry configuration, see [Retry Policies](/docs/retry).

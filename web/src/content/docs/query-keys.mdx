@@ -1,0 +1,174 @@
+---
+title: "Query Keys"
+description: "Hierarchical key system for cache identification and bulk operations"
+category: "Guides"
+order: 7
+---
+
+# Query Keys
+
+Query keys are the foundation of gpui-query's caching and deduplication system. Every query is identified by its key, and the key determines how data is stored, matched, and invalidated.
+
+## Creating Keys
+
+### Simple String Keys
+
+For single-purpose queries, a simple string key works:
+
+```rust
+let key = QueryKey::from("current-user");
+let key = QueryKey::from("app-settings");
+```
+
+### Hierarchical Tuple Keys
+
+For related data with parameters, use tuple keys. The tuple creates a natural hierarchy:
+
+```rust
+// User-related queries
+let key = QueryKey::from(("users", "list"));
+let key = QueryKey::from(("users", "detail", user_id));
+let key = QueryKey::from(("users", "detail", user_id, "posts"));
+
+// Project-related queries
+let key = QueryKey::from(("projects", project_id));
+let key = QueryKey::from(("projects", project_id, "members"));
+let key = QueryKey::from(("projects", project_id, "settings"));
+```
+
+### Nested Tuples
+
+Tuples can be nested to create deeper hierarchies:
+
+```rust
+let key = QueryKey::from(("org", org_id, ("team", team_id, "members")));
+```
+
+## Key Requirements
+
+Keys must implement `Clone`, `Hash`, and `Eq`. The following types are supported:
+
+- `String` and `&str`
+- Numeric types (`u64`, `i32`, etc.)
+- Tuples of supported types
+- `Vec` of supported types
+
+## Exact Matching
+
+When you read or update a query, exact matching is used:
+
+```rust
+// Only matches the exact key ("users", 42)
+let resource = client.resource::<User, Error>(
+    QueryKey::from(("users", 42))
+);
+
+// Only invalidates the exact key
+client.invalidate_queries(&QueryKeyFilter::exact(("users", 42)));
+```
+
+## Prefix Matching with QueryKeyFilter
+
+`QueryKeyFilter` enables bulk operations on related queries. It matches all keys that start with the given prefix.
+
+### Invalidating All Queries in a Group
+
+```rust
+// Invalidate ALL user queries
+client.invalidate_queries(&QueryKeyFilter::prefix("users"));
+
+// This matches:
+// - ("users", "list")
+// - ("users", "detail", 1)
+// - ("users", "detail", 1, "posts")
+// - etc.
+```
+
+### Resetting a Subset
+
+```rust
+// Reset only a specific user's queries
+client.reset_queries(&QueryKeyFilter::prefix(("users", "detail", user_id)));
+```
+
+### Removing Queries
+
+```rust
+// Remove all project member queries from cache
+client.remove_queries(&QueryKeyFilter::prefix(("projects", "*", "members")));
+```
+
+## Key Design Patterns
+
+### Entity + ID Pattern
+
+Structure keys as `(entity_type, entity_id, sub_type)`:
+
+```rust
+// Good: hierarchical and prefix-matchable
+("todos", todo_id)
+("todos", todo_id, "comments")
+("todos", todo_id, "attachments")
+
+// Avoid: flat strings that cannot be prefix-matched
+format!("todo-{}-comments", todo_id)
+```
+
+### List + Filter Pattern
+
+For filtered lists, include filter parameters in the key:
+
+```rust
+("todos", "list", ("status", "active"))
+("todos", "list", ("status", "completed"), ("assignee", user_id))
+```
+
+### Shared Key Constants
+
+Define key factories to avoid duplication:
+
+```rust
+mod keys {
+    use gpui_query::QueryKey;
+
+    pub fn user_list() -> QueryKey {
+        QueryKey::from(("users", "list"))
+    }
+
+    pub fn user_detail(id: u64) -> QueryKey {
+        QueryKey::from(("users", "detail", id))
+    }
+
+    pub fn user_posts(id: u64) -> QueryKey {
+        QueryKey::from(("users", "detail", id, "posts"))
+    }
+
+    pub fn all_users_filter() -> QueryKeyFilter {
+        QueryKeyFilter::prefix("users")
+    }
+}
+```
+
+Then use them consistently:
+
+```rust
+let query = use_query(
+    cx,
+    keys::user_detail(user_id),
+    |_| async move { fetch_user(user_id).await },
+    QueryOptions::default(),
+);
+
+// Invalidate all user queries after a mutation
+client.invalidate_queries(&keys::all_users_filter());
+```
+
+<Callout type="tip">
+  Invest time in designing your key hierarchy upfront. A good key structure makes cache invalidation
+  straightforward and prevents stale data bugs.
+</Callout>
+
+<Callout type="warning">
+  Avoid using floating-point numbers in keys. Floating-point equality comparisons can produce
+  unexpected results due to precision issues. Use integers or strings instead.
+</Callout>

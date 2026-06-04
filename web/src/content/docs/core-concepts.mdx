@@ -1,39 +1,161 @@
 ---
-title: Core Concepts
-description: Understanding the three-layer architecture of gpui-query
-category: Getting Started
+title: "Core Concepts"
+description: "Understanding the three-layer architecture of gpui-query"
+category: "Getting Started"
 order: 2
 ---
 
 # Core Concepts
 
-gpui-query follows a three-layer architecture inspired by TanStack Query:
+gpui-query follows a three-layer architecture inspired by TanStack Query, adapted for Rust and the GPUI framework. Understanding these layers helps you use the library effectively.
 
 ## The Three Layers
 
 ### 1. Core Layer
 
-The core layer provides the fundamental types and state management. `QueryResource` represents a single query's lifecycle with states: `Loading`, `Success`, `Error`, and `Cancelled`.
+The core layer provides the fundamental types and state management primitives. These are framework-agnostic and could be used outside GPUI.
+
+**QueryResource** represents a single query's lifecycle:
+
+```rust
+pub struct QueryResource<T, E> {
+    data: Option<T>,
+    status: QueryStatus,
+    is_fetching: bool,
+    is_refetching: bool,
+    error: Option<E>,
+    updated_at: Option<Instant>,
+}
+```
+
+**QueryStatus** tracks the lifecycle:
+
+```rust
+pub enum QueryStatus {
+    Idle,
+    Pending,
+    Success,
+    Error,
+}
+```
+
+The core layer also defines `QueryKey`, `CachePolicy`, `RetryPolicy`, and `QueryError`.
 
 ### 2. Client Layer
 
-`QueryClient` is the central registry. It manages all active queries, handles caching via `CachePolicy`, and coordinates query lifecycle events.
+`QueryClient` is the central registry. It manages all active queries and coordinates:
+
+- **Caching** via `CachePolicy` (NoCache, TTL, SWR)
+- **Deduplication** of concurrent identical requests
+- **Lifecycle events** through a subscription system
+- **Garbage collection** of stale queries
+
+```rust
+let client = QueryClient::new();
+
+// Register a query resource
+let resource = client.resource::<UserData, AppError>(
+    QueryKey::from("user-42"),
+);
+
+// Perform operations on the client
+client.invalidate_queries(&filter);
+client.gc();
+```
 
 ### 3. Hook Layer
 
-Hooks like `use_query`, `use_mutation`, and `use_infinite_query` provide the ergonomic API that GPUI components consume. They automatically subscribe to query state changes.
+Hooks provide the ergonomic API that GPUI components consume. They automatically subscribe to query state changes and trigger re-renders when data updates.
+
+```rust
+// The primary hook
+let query = use_query(
+    cx,
+    QueryKey::from("todos"),
+    |cx| async move { fetch_todos().await },
+    QueryOptions::default(),
+);
+```
+
+<Callout type="info">
+  The hook layer is what makes gpui-query feel like TanStack Query. Under the hood, it bridges
+  GPUI's reactive system with the client layer's state management.
+</Callout>
 
 ## Query Keys
 
 Query keys use a hierarchical system (`QueryKey`) that supports:
 
-- Exact matching for single query operations
-- Prefix matching for bulk operations like invalidation
+- **Exact matching** for single query operations (fetch, read, update)
+- **Prefix matching** for bulk operations (invalidate, reset, remove)
+
+```rust
+// Simple string key
+let key = QueryKey::from("users");
+
+// Hierarchical tuple key
+let key = QueryKey::from(("users", "list"));
+let key = QueryKey::from(("users", "detail", user_id));
+
+// Prefix matching invalidates all user queries
+client.invalidate_queries(&QueryKeyFilter::prefix("users"));
+```
 
 ## Cache Policies
 
-gpui-query supports multiple cache policies:
+gpui-query supports three cache policies that control how query data is stored and refreshed:
 
-- **NoCache** — no caching, always refetch
-- **TTL** — time-to-live based expiration
-- **StaleWhileRevalidate** — serve stale while fetching fresh data
+### NoCache
+
+No caching at all. Every access triggers a fresh fetch.
+
+```rust
+CachePolicy::NoCache
+```
+
+### TTL (Time To Live)
+
+Data is considered fresh for a specified duration. After expiration, the next access triggers a refetch.
+
+```rust
+CachePolicy::TTL(Duration::from_secs(300))
+```
+
+### StaleWhileRevalidate
+
+Serves stale data immediately while fetching fresh data in the background. This provides the best user experience.
+
+```rust
+CachePolicy::StaleWhileRevalidate {
+    cache_time: Duration::from_secs(300),
+    stale_time: Duration::from_secs(60),
+}
+```
+
+## Request Policies
+
+Request policies control how concurrent fetches for the same key are handled:
+
+```rust
+// Cancel in-flight requests when a new one arrives (default)
+RequestPolicy::LatestWins
+
+// Ignore new requests while one is already in flight
+RequestPolicy::IgnoreWhileLoading
+```
+
+## Data Flow
+
+Here is how data flows through the system:
+
+1. A component calls `use_query` with a key and fetcher
+2. The hook registers the query with `QueryClient`
+3. If no cached data exists (or it is stale), the fetcher runs
+4. The `QueryResource` updates its status through `Pending` to `Success` or `Error`
+5. GPUI reactivity triggers a re-render of subscribed components
+6. Data is cached according to the `CachePolicy`
+
+<Callout type="tip">
+  Choose `StaleWhileRevalidate` as your default cache policy. It gives users instant responses while
+  keeping data fresh in the background.
+</Callout>

@@ -1,11 +1,169 @@
 ---
 title: "Cache Policies Explained: TTL vs Stale-While-Revalidate"
-description: "Concrete examples of when each cache policy excels in GPUI"
-date: "2026-06-03"
+description: "When to use each cache policy in gpui-query, with concrete examples and GPUI-specific considerations"
+date: "2026-05-20"
 author: "hmziq"
 tags: ["rust", "caching", "performance"]
+readingTime: 8
 ---
 
-# Cache Policies Explained
+# Cache Policies Explained: TTL vs Stale-While-Revalidate
 
-Content to be written in U6.
+One of gpui-query's most powerful features is its caching system. But with three cache policies and two request policies, choosing the right combination can feel overwhelming. This post walks through each policy with concrete examples and GPUI-specific considerations.
+
+## Why Caching Matters
+
+Every async operation in a GPUI application has a cost: CPU time for serialization, memory for the result, and latency for the user. Without caching:
+
+- Navigating away and back triggers a full refetch
+- Multiple components reading the same data make duplicate requests
+- Background data that hasn't changed still costs a full fetch cycle
+
+gpui-query's caching layer solves all three problems, but the right policy depends on your data's characteristics.
+
+## The Three Cache Policies
+
+### NoCache — Fresh Data, Always
+
+`NoCache` means exactly what it says: no caching. Every access triggers a fresh fetch.
+
+```rust
+use_query(cx, "live-clock", || async {
+    get_current_time().await
+}).with_cache_policy(CachePolicy::NoCache);
+```
+
+**When to use it:**
+
+- Real-time data where staleness is never acceptable (stock tickers, live clocks)
+- One-time operations where caching provides no benefit
+- Development and debugging — forces fresh data on every render
+
+**GPUI consideration:** NoCache is expensive in GPUI because each fetch may trigger `cx.notify()` and a full re-render. Use sparingly.
+
+### TTL — Time-Based Invalidation
+
+`TTL` (Time To Live) caches data for a fixed duration. After the TTL expires, the next access triggers a fresh fetch.
+
+```rust
+use_query(cx, "user-settings", || async {
+    fetch_user_settings().await
+}).with_cache_policy(CachePolicy::TTL(Duration::from_secs(300)));
+```
+
+This caches user settings for 5 minutes. Within that window, any component accessing the "user-settings" query gets the cached result instantly.
+
+**When to use it:**
+
+- Data that changes at predictable intervals (config fetched every 5 minutes)
+- APIs with known cache headers you want to respect client-side
+- Semi-static content that tolerates brief staleness
+
+**GPUI consideration:** TTL is a great default for most GPUI queries. User preferences, project settings, and file trees all benefit from time-based caching.
+
+### StaleWhileRevalidate — Show Old, Fetch New
+
+`StaleWhileRevalidate` (SWR) is the most sophisticated policy. It has two timers:
+
+- **`stale_time`:** How long data is considered fresh
+- **`cache_time`:** How long data is kept in cache (even if stale)
+
+```rust
+use_query(cx, "project-files", || async {
+    list_project_files().await
+}).with_cache_policy(CachePolicy::StaleWhileRevalidate {
+    stale_time: Duration::from_secs(30),
+    cache_time: Duration::from_secs(300),
+});
+```
+
+Here's what happens:
+
+1. **First fetch:** Data is fetched and cached. It's fresh for 30 seconds.
+2. **Within 30 seconds:** Cache hit — instant response, no fetch.
+3. **After 30 seconds, before 300 seconds:** Cache hit — instant response with stale data, but a background refetch is triggered. When the refetch completes, the cache updates and the component re-renders with fresh data.
+4. **After 300 seconds:** Cache miss — full blocking fetch.
+
+**When to use it:**
+
+- Data that changes unpredictably but where showing slightly stale data is acceptable
+- Lists and collections where the user expects recent data but instant feedback matters more
+- Any scenario where background refresh provides a better UX than blocking
+
+**GPUI consideration:** SWR is ideal for file trees, search results, and workspace data in Zed-like editors. Users see instant results from the cache while fresh data loads silently in the background.
+
+## Request Policies: Controlling Concurrent Requests
+
+Cache policies determine _when_ to fetch. Request policies determine _how_ concurrent fetches interact.
+
+### LatestWins
+
+When a new fetch starts while another is in flight, the old fetch is cancelled (via QuerySignal) and only the new fetch's result is used.
+
+```rust
+use_query(cx, "search", || async { search(query).await })
+    .with_request_policy(RequestPolicy::LatestWins);
+```
+
+**Perfect for:** Search inputs, autocomplete, any rapidly-changing query key where only the latest result matters.
+
+### IgnoreWhileLoading
+
+When a fetch is in flight, new fetch requests are ignored. The in-flight fetch completes and its result is used.
+
+```rust
+use_query(cx, "save-document", || async { save(doc).await })
+    .with_request_policy(RequestPolicy::IgnoreWhileLoading);
+```
+
+**Perfect for:** Mutations, save operations, any scenario where you want to avoid duplicate work.
+
+## Decision Matrix
+
+| Scenario            | Cache Policy    | Request Policy       |
+| ------------------- | --------------- | -------------------- |
+| Real-time data      | `NoCache`       | `LatestWins`         |
+| User settings       | `TTL(5min)`     | `IgnoreWhileLoading` |
+| File tree           | `SWR(30s/5min)` | `LatestWins`         |
+| Search/autocomplete | `TTL(30s)`      | `LatestWins`         |
+| Project config      | `TTL(10min)`    | `IgnoreWhileLoading` |
+| Notifications       | `SWR(10s/2min)` | `LatestWins`         |
+| Document save       | `NoCache`       | `IgnoreWhileLoading` |
+
+## GPUI-Specific Considerations
+
+### Render Loop Integration
+
+GPUI's render loop is synchronous — components re-render when `cx.notify()` is called. gpui-query integrates by:
+
+1. **Synchronous cache reads:** If cached data is fresh, the query returns immediately without triggering a fetch. No async, no re-render needed.
+2. **Background refetch re-renders:** SWR's background refetch calls `cx.notify()` when new data arrives, triggering a re-render with fresh data.
+3. **Status transitions:** Status changes (Pending → Success, Pending → Error) also trigger `cx.notify()` so your component can update loading indicators.
+
+### Memory Pressure
+
+GPUI applications (like Zed) manage large workspace state. Be mindful of `cache_time` — keeping stale data in cache consumes memory. For rarely-accessed data, use shorter `cache_time` values or `TTL` instead of `SWR`.
+
+### Query Key Design
+
+Cache policies are per-query, determined by the query key. Design your keys to match your caching needs:
+
+```rust
+// Good — separate cache per search query
+use_query(cx, &format!("search:{}", query), || async { search(query).await });
+
+// Bad — all searches share one cache entry
+use_query(cx, "search", || async { search(query).await });
+```
+
+## Summary
+
+- **NoCache** for real-time data where staleness is unacceptable
+- **TTL** for predictable data that tolerates fixed staleness windows
+- **StaleWhileRevalidate** for the best user experience — instant cache hits with background refresh
+- **LatestWins** for rapidly-changing queries (search, autocomplete)
+- **IgnoreWhileLoading** for operations where duplicate work should be avoided
+
+The right combination depends on your data's freshness requirements, your users' expectations, and your application's memory constraints. Start with SWR as a default and tune from there.
+
+For the complete API reference, see [Caching](/docs/caching) and [Query Keys](/docs/query-keys).
