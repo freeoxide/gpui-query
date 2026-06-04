@@ -17,7 +17,20 @@ export const Route = createFileRoute("/blog/")({
         name: "description",
         content: "Articles about async state management in GPUI with gpui-query",
       },
+      { property: "og:title", content: "Blog - gpui-query" },
+      {
+        property: "og:description",
+        content: "Articles about async state management in GPUI with gpui-query",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "Blog - gpui-query" },
+      {
+        name: "twitter:description",
+        content: "Articles about async state management in GPUI with gpui-query",
+      },
     ],
+    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/blog" }],
   }),
   component: BlogIndex,
 });

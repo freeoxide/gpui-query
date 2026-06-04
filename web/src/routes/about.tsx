@@ -11,7 +11,22 @@ export const Route = createFileRoute("/about")({
         content:
           "About gpui-query — zero-boilerplate async state management for the GPUI framework.",
       },
+      { property: "og:title", content: "About - gpui-query" },
+      {
+        property: "og:description",
+        content:
+          "About gpui-query — zero-boilerplate async state management for the GPUI framework.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "About - gpui-query" },
+      {
+        name: "twitter:description",
+        content:
+          "About gpui-query — zero-boilerplate async state management for the GPUI framework.",
+      },
     ],
+    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/about" }],
   }),
   component: AboutPage,
 });

@@ -68,7 +68,20 @@ export const Route = createFileRoute("/faq")({
         name: "description",
         content: "Frequently asked questions about gpui-query — async state management for GPUI.",
       },
+      { property: "og:title", content: "FAQ - gpui-query" },
+      {
+        property: "og:description",
+        content: "Frequently asked questions about gpui-query — async state management for GPUI.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "FAQ - gpui-query" },
+      {
+        name: "twitter:description",
+        content: "Frequently asked questions about gpui-query — async state management for GPUI.",
+      },
     ],
+    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/faq" }],
     scripts: [
       {
         type: "application/ld+json",

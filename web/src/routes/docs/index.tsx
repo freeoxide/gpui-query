@@ -18,7 +18,16 @@ export const Route = createFileRoute("/docs/")({
         content:
           "Complete documentation for gpui-query, async state management for GPUI applications",
       },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "Documentation - gpui-query" },
+      {
+        name: "twitter:description",
+        content:
+          "Complete documentation for gpui-query, async state management for GPUI applications",
+      },
     ],
+    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/docs" }],
   }),
   component: DocsIndex,
 });

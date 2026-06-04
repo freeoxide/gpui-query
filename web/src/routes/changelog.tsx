@@ -27,7 +27,20 @@ export const Route = createFileRoute("/changelog")({
         name: "description",
         content: "Release history and changelog for gpui-query.",
       },
+      { property: "og:title", content: "Changelog - gpui-query" },
+      {
+        property: "og:description",
+        content: "Release history and changelog for gpui-query.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "Changelog - gpui-query" },
+      {
+        name: "twitter:description",
+        content: "Release history and changelog for gpui-query.",
+      },
     ],
+    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/changelog" }],
   }),
   component: ChangelogPage,
 });
