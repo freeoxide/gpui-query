@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Menu, Github, Search } from "lucide-react";
+import { ListIcon, GithubLogoIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { Button } from "#/components/ui/button";
 import { ThemeToggle } from "#/components/theme-toggle";
 import { MobileNav } from "#/components/mobile-nav";
@@ -82,7 +82,7 @@ export function Navbar() {
               className="hidden h-8 gap-2 text-muted-foreground md:flex"
               onClick={() => setSearchOpen(true)}
             >
-              <Search className="h-3.5 w-3.5" />
+              <MagnifyingGlassIcon size={14} />
               <span className="text-xs">Search</span>
               <kbd className="pointer-events-none ml-1 rounded border bg-muted px-1 py-0.5 text-[10px]">
                 ⌘K
@@ -96,7 +96,7 @@ export function Navbar() {
                 rel="noopener noreferrer"
                 aria-label="GitHub repository"
               >
-                <Github className="h-5 w-5" />
+                <GithubLogoIcon size={20} />
               </a>
             </Button>
             <Button
@@ -106,7 +106,7 @@ export function Navbar() {
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation menu"
             >
-              <Menu className="h-5 w-5" />
+              <ListIcon size={20} />
             </Button>
           </div>
         </div>

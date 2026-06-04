@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { CheckIcon, CopyIcon } from "@phosphor-icons/react";
 import { Button } from "#/components/ui/button";
 import { useState, useRef, type ReactNode } from "react";
 
@@ -40,9 +40,9 @@ export function CodeBlock({ children, title }: CodeBlockProps) {
           aria-label={copied ? "Copied" : "Copy code"}
         >
           {copied ? (
-            <Check className="h-3.5 w-3.5 text-green-500" />
+            <CheckIcon size={14} className="text-green-500" />
           ) : (
-            <Copy className="h-3.5 w-3.5" />
+            <CopyIcon size={14} />
           )}
         </Button>
         <div ref={codeRef}>{children}</div>

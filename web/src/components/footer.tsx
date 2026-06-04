@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Github } from "lucide-react";
+import { GithubLogoIcon } from "@phosphor-icons/react";
 
 const docLinks = [
   { label: "Getting Started", href: "/docs/getting-started/installation" },
@@ -63,7 +63,7 @@ export function Footer() {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
                 >
-                  <Github className="h-4 w-4" />
+                  <GithubLogoIcon size={16} />
                   GitHub
                 </a>
               </li>

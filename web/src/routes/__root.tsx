@@ -3,7 +3,7 @@ import { HeadContent, Scripts, Link, createRootRoute } from "@tanstack/react-rou
 import appCss from "../styles.css?url";
 import { Navbar } from "#/components/navbar";
 import { Footer } from "#/components/footer";
-import { Home, BookOpen } from "lucide-react";
+import { HouseIcon, BookOpenIcon } from "@phosphor-icons/react";
 import { Button } from "#/components/ui/button";
 
 export const Route = createRootRoute({
@@ -27,7 +27,7 @@ export const Route = createRootRoute({
       },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Oxanium:wght@400;500;600;700&display=swap",
       },
     ],
     scripts: [],
@@ -81,13 +81,13 @@ function NotFoundPage() {
         <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
           <Button asChild>
             <Link to="/">
-              <Home className="mr-1 h-4 w-4" />
+              <HouseIcon size={16} className="mr-1" />
               Go Home
             </Link>
           </Button>
           <Button variant="outline" asChild>
             <a href="/docs/">
-              <BookOpen className="mr-1 h-4 w-4" />
+              <BookOpenIcon size={16} className="mr-1" />
               Documentation
             </a>
           </Button>
