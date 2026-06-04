@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import {
   Zap,
   ArrowRightLeft,
@@ -148,10 +148,10 @@ function HeroSection() {
               asChild
               className="px-6 text-base font-semibold shadow-lg shadow-primary/20"
             >
-              <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
+              <a href="/docs/">
                 Get Started
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </a>
             </Button>
 
             <Button variant="outline" size="lg" asChild className="px-6 text-base font-semibold">
@@ -299,10 +299,10 @@ fn render_user_list(cx: &mut ViewContext<App>) -> impl IntoElement {
 
           <div className="mt-8 text-center">
             <Button variant="outline" asChild>
-              <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
+              <a href="/docs/">
                 Read the full guide
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </a>
             </Button>
           </div>
         </div>
@@ -532,10 +532,10 @@ function CtaFooterSection() {
               asChild
               className="px-6 text-base font-semibold shadow-lg shadow-primary/20"
             >
-              <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
+              <a href="/docs/">
                 Get Started
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </a>
             </Button>
 
             <Button variant="outline" size="lg" asChild className="px-6 text-base font-semibold">

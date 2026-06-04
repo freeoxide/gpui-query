@@ -3,8 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "#/components/ui/sh
 import { Github } from "lucide-react";
 
 const navLinks = [
-  { href: "/docs", label: "Docs" },
-  { href: "/blog", label: "Blog" },
+  { href: "/docs/", label: "Docs" },
   { href: "/faq", label: "FAQ" },
   { href: "/about", label: "About" },
 ];

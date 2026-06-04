@@ -7,8 +7,7 @@ import { SearchDialog } from "#/components/search-dialog";
 import { useState, useEffect } from "react";
 
 const navLinks = [
-  { href: "/docs", label: "Docs" },
-  { href: "/blog", label: "Blog" },
+  { href: "/docs/", label: "Docs" },
   { href: "/faq", label: "FAQ" },
 ];
 

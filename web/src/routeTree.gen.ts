@@ -10,24 +10,14 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as FaqRouteImport } from './routes/faq'
-import { Route as DocsRouteImport } from './routes/docs'
 import { Route as ChangelogRouteImport } from './routes/changelog'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as DocsIndexRouteImport } from './routes/docs/index'
-import { Route as BlogIndexRouteImport } from './routes/blog/index'
-import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
-import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
 
 const FaqRoute = FaqRouteImport.update({
   id: '/faq',
   path: '/faq',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsRoute = DocsRouteImport.update({
-  id: '/docs',
-  path: '/docs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChangelogRoute = ChangelogRouteImport.update({
@@ -50,38 +40,13 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DocsIndexRoute = DocsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => DocsRoute,
-} as any)
-const BlogIndexRoute = BlogIndexRouteImport.update({
-  id: '/blog/',
-  path: '/blog/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsSlugRoute = DocsSlugRouteImport.update({
-  id: '/$slug',
-  path: '/$slug',
-  getParentRoute: () => DocsRoute,
-} as any)
-const BlogSlugRoute = BlogSlugRouteImport.update({
-  id: '/blog/$slug',
-  path: '/blog/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/404': typeof R404Route
   '/about': typeof AboutRoute
   '/changelog': typeof ChangelogRoute
-  '/docs': typeof DocsRouteWithChildren
   '/faq': typeof FaqRoute
-  '/blog/$slug': typeof BlogSlugRoute
-  '/docs/$slug': typeof DocsSlugRoute
-  '/blog/': typeof BlogIndexRoute
-  '/docs/': typeof DocsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -89,10 +54,6 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/changelog': typeof ChangelogRoute
   '/faq': typeof FaqRoute
-  '/blog/$slug': typeof BlogSlugRoute
-  '/docs/$slug': typeof DocsSlugRoute
-  '/blog': typeof BlogIndexRoute
-  '/docs': typeof DocsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -100,49 +61,14 @@ export interface FileRoutesById {
   '/404': typeof R404Route
   '/about': typeof AboutRoute
   '/changelog': typeof ChangelogRoute
-  '/docs': typeof DocsRouteWithChildren
   '/faq': typeof FaqRoute
-  '/blog/$slug': typeof BlogSlugRoute
-  '/docs/$slug': typeof DocsSlugRoute
-  '/blog/': typeof BlogIndexRoute
-  '/docs/': typeof DocsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/404'
-    | '/about'
-    | '/changelog'
-    | '/docs'
-    | '/faq'
-    | '/blog/$slug'
-    | '/docs/$slug'
-    | '/blog/'
-    | '/docs/'
+  fullPaths: '/' | '/404' | '/about' | '/changelog' | '/faq'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/404'
-    | '/about'
-    | '/changelog'
-    | '/faq'
-    | '/blog/$slug'
-    | '/docs/$slug'
-    | '/blog'
-    | '/docs'
-  id:
-    | '__root__'
-    | '/'
-    | '/404'
-    | '/about'
-    | '/changelog'
-    | '/docs'
-    | '/faq'
-    | '/blog/$slug'
-    | '/docs/$slug'
-    | '/blog/'
-    | '/docs/'
+  to: '/' | '/404' | '/about' | '/changelog' | '/faq'
+  id: '__root__' | '/' | '/404' | '/about' | '/changelog' | '/faq'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -150,10 +76,7 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   AboutRoute: typeof AboutRoute
   ChangelogRoute: typeof ChangelogRoute
-  DocsRoute: typeof DocsRouteWithChildren
   FaqRoute: typeof FaqRoute
-  BlogSlugRoute: typeof BlogSlugRoute
-  BlogIndexRoute: typeof BlogIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -163,13 +86,6 @@ declare module '@tanstack/react-router' {
       path: '/faq'
       fullPath: '/faq'
       preLoaderRoute: typeof FaqRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs': {
-      id: '/docs'
-      path: '/docs'
-      fullPath: '/docs'
-      preLoaderRoute: typeof DocsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/changelog': {
@@ -200,58 +116,15 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/docs/': {
-      id: '/docs/'
-      path: '/'
-      fullPath: '/docs/'
-      preLoaderRoute: typeof DocsIndexRouteImport
-      parentRoute: typeof DocsRoute
-    }
-    '/blog/': {
-      id: '/blog/'
-      path: '/blog'
-      fullPath: '/blog/'
-      preLoaderRoute: typeof BlogIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs/$slug': {
-      id: '/docs/$slug'
-      path: '/$slug'
-      fullPath: '/docs/$slug'
-      preLoaderRoute: typeof DocsSlugRouteImport
-      parentRoute: typeof DocsRoute
-    }
-    '/blog/$slug': {
-      id: '/blog/$slug'
-      path: '/blog/$slug'
-      fullPath: '/blog/$slug'
-      preLoaderRoute: typeof BlogSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
-
-interface DocsRouteChildren {
-  DocsSlugRoute: typeof DocsSlugRoute
-  DocsIndexRoute: typeof DocsIndexRoute
-}
-
-const DocsRouteChildren: DocsRouteChildren = {
-  DocsSlugRoute: DocsSlugRoute,
-  DocsIndexRoute: DocsIndexRoute,
-}
-
-const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   R404Route: R404Route,
   AboutRoute: AboutRoute,
   ChangelogRoute: ChangelogRoute,
-  DocsRoute: DocsRouteWithChildren,
   FaqRoute: FaqRoute,
-  BlogSlugRoute: BlogSlugRoute,
-  BlogIndexRoute: BlogIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -367,17 +367,17 @@ function LinksSection() {
             />
           </a>
 
-          <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
+          <a href="/docs/">
             <LinkCard
               icon={BookOpen}
               label="Documentation"
               description="Guides, API reference, and examples"
             />
-          </Link>
+          </a>
 
-          <Link to="/blog" search={{ tag: undefined }}>
+          <a href="https://gpui.rs/blog">
             <LinkCard icon={PenLine} label="Blog" description="Announcements and deep dives" />
-          </Link>
+          </a>
 
           <Link to="/changelog">
             <LinkCard

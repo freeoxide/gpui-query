@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import {
   Accordion,
   AccordionItem,
@@ -176,7 +176,7 @@ function FAQPage() {
 
                 {/* Accordion for this category */}
                 <div className="mt-6">
-                  <Accordion type="multiple">
+                  <Accordion multiple>
                     {category.items.map((item, idx) => (
                       <AccordionItem
                         key={idx}
@@ -223,10 +223,10 @@ function FAQPage() {
             </Button>
 
             <Button variant="outline" size="lg" asChild className="px-6 text-base font-semibold">
-              <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
+              <a href="/docs/">
                 Read the Docs
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </a>
             </Button>
           </div>
         </div>

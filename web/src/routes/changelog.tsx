@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge";
 
 /* ─── Changelog Data ────────────────────────────────────────────── */
@@ -238,10 +238,9 @@ function ChangelogEntryCard({
               Docs
             </span>
             {entry.links.map((link) => (
-              <Link
+              <a
                 key={link.slug}
-                to="/docs/$slug"
-                params={{ slug: link.slug }}
+                href={`/docs/${link.slug}`}
                 className="inline-flex items-center text-sm font-medium text-primary transition-colors hover:text-primary/80"
               >
                 {link.label}
@@ -259,7 +258,7 @@ function ChangelogEntryCard({
                     d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"
                   />
                 </svg>
-              </Link>
+              </a>
             ))}
           </div>
         )}

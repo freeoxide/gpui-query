@@ -2,9 +2,9 @@ import { Link } from "@tanstack/react-router";
 import { Github } from "lucide-react";
 
 const docLinks = [
-  { label: "Getting Started", slug: "getting-started" },
-  { label: "Core Concepts", slug: "core-concepts" },
-  { label: "API", slug: "api-reference" },
+  { label: "Getting Started", href: "/docs/getting-started/installation" },
+  { label: "Core Concepts", href: "/docs/" },
+  { label: "API", href: "/docs/api/queries" },
 ] as const;
 
 export function Footer() {
@@ -37,15 +37,14 @@ export function Footer() {
               Documentation
             </h3>
             <ul className="space-y-2.5">
-              {docLinks.map(({ label, slug }) => (
-                <li key={slug}>
-                  <Link
-                    to="/docs/$slug"
-                    params={{ slug }}
+              {docLinks.map(({ label, href }) => (
+                <li key={href}>
+                  <a
+                    href={href}
                     className="text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
                   >
                     {label}
-                  </Link>
+                  </a>
                 </li>
               ))}
             </ul>
@@ -70,11 +69,10 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  to="/blog"
-                  search={{ tag: undefined }}
+                  to="/about"
                   className="inline-block text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
                 >
-                  Blog
+                  About
                 </Link>
               </li>
             </ul>

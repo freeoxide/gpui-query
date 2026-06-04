@@ -3,12 +3,10 @@ import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'gpui-query',
+  title: 'gpui-query Docs',
   tagline: 'Zero-boilerplate async state management for GPUI',
   url: 'https://gpui-query.hmziq.xyz',
-  baseUrl: '/',
-  organizationName: 'hmziqrs',
-  projectName: 'gpui-query',
+  baseUrl: '/docs/',
   favicon: 'img/favicon.ico',
 
   future: {
@@ -26,14 +24,9 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/hmziqrs/gpui-query/edit/main/website/',
+          routeBasePath: '/',
         },
-        blog: {
-          showReadingTime: true,
-          feedOptions: {
-            type: ['rss', 'atom'],
-          },
-        },
+        blog: false,
         theme: {
           customCss: './src/css/custom.css',
         },
@@ -60,14 +53,9 @@ const config: Config = {
           label: 'Docs',
         },
         {
-          to: '/blog',
-          position: 'left',
-          label: 'Blog',
-        },
-        {
           href: 'https://github.com/hmziqrs/gpui-query',
-          position: 'right',
           label: 'GitHub',
+          position: 'right',
         },
       ],
     },
@@ -79,11 +67,15 @@ const config: Config = {
           items: [
             {
               label: 'Getting Started',
-              to: '/docs/',
+              to: '/getting-started/installation',
             },
             {
               label: 'API Reference',
-              to: '/docs/api/queries',
+              to: '/api/queries',
+            },
+            {
+              label: 'Guides',
+              to: '/guides/caching',
             },
           ],
         },
@@ -96,29 +88,14 @@ const config: Config = {
             },
           ],
         },
-        {
-          title: 'More',
-          items: [
-            {
-              label: 'Blog',
-              to: '/blog',
-            },
-          ],
-        },
       ],
-      copyright: 'Copyright &copy; 2024 hmziqrs. Built with Docusaurus.',
+      copyright: 'Copyright &copy; 2024 hmziqrs.',
     },
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
       additionalLanguages: ['rust', 'toml'],
     },
-    // algolia: {
-    //   appId: 'YOUR_APP_ID',
-    //   apiKey: 'YOUR_SEARCH_API_KEY',
-    //   indexName: 'gpui-query',
-    //   contextualSearch: true,
-    // },
   } satisfies Preset.ThemeConfig,
 };
 
