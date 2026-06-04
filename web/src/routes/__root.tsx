@@ -11,6 +11,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "theme-color", content: "#1E6B5A" },
       { title: "gpui-query - Async State Management for GPUI" },
     ],
     links: [
@@ -29,11 +30,7 @@ export const Route = createRootRoute({
         href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
       },
     ],
-    scripts: [
-      {
-        children: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.classList.add('dark')}}catch(e){}})()`,
-      },
-    ],
+    scripts: [],
   }),
   shellComponent: RootDocument,
   notFoundComponent: NotFoundPage,
@@ -43,6 +40,11 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.classList.add('dark');document.querySelector('meta[name=theme-color]')?.setAttribute('content','#0C1222')}}catch(e){}})()`,
+          }}
+        />
         <HeadContent />
       </head>
       <body>

@@ -13,34 +13,45 @@ export function CodeBlock({ children, title }: CodeBlockProps) {
 
   const handleCopy = async () => {
     const text = codeRef.current?.textContent ?? "";
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      document.execCommand("copy");
-    }
+    await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div className="group relative">
+    <div className="group shadow-sm">
       {title && (
-        <div className="flex items-center justify-between rounded-t-lg border border-b-0 bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
-          <span>{title}</span>
+        <div className="flex items-center justify-between rounded-t-lg bg-muted/80 px-4 py-2 text-xs text-muted-foreground">
+          <span className="font-mono">{title}</span>
         </div>
       )}
-      <div className="relative">
+      <div
+        className={[
+          "relative overflow-x-auto font-mono text-sm",
+          "bg-[var(--color-code-background)] border border-border",
+          title ? "rounded-b-lg border-t-0" : "rounded-lg",
+        ].join(" ")}
+      >
         <Button
           variant="ghost"
           size="icon"
-          className="absolute right-2 top-2 z-10 h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+          className="absolute right-2 top-2 z-10 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
           onClick={handleCopy}
           aria-label={copied ? "Copied" : "Copy code"}
         >
-          {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+          {copied ? (
+            <Check className="h-3.5 w-3.5 text-green-500" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
         </Button>
         <div ref={codeRef}>{children}</div>
       </div>
+      {copied && (
+        <span className="pointer-events-none absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-xs text-primary-foreground shadow-sm transition-opacity">
+          Copied!
+        </span>
+      )}
     </div>
   );
 }

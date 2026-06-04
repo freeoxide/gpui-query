@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getBlogBySlug } from "#/lib/content";
+import { Callout } from "#/components/callout";
 import { blogPost } from "#/lib/seo";
 
 export const Route = createFileRoute("/blog/$slug")({
@@ -65,7 +66,7 @@ function BlogPostPage() {
 
   return (
     <article className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-      <header className="mb-8">
+      <header className="mb-12 -mx-4 -mt-8 px-4 pt-10 pb-10 sm:-mx-6 sm:px-6 bg-gradient-to-b from-primary/5 via-primary/[0.02] to-transparent rounded-b-xl">
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{frontmatter.title}</h1>
         <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
           <time dateTime={frontmatter.date}>
@@ -94,7 +95,16 @@ function BlogPostPage() {
         </div>
       </header>
       <div className="prose prose-neutral dark:prose-invert max-w-none">
-        <Content />
+        <Content components={{ Callout }} />
+      </div>
+      <div className="mt-12 rounded-lg border bg-muted/30 p-6 flex items-center gap-4">
+        <div className="h-12 w-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+          {(frontmatter.author ?? "hmziq").charAt(0).toUpperCase()}
+        </div>
+        <div>
+          <p className="font-medium">{frontmatter.author ?? "hmziq"}</p>
+          <p className="text-sm text-muted-foreground">Maintainer of gpui-query</p>
+        </div>
       </div>
       <footer className="mt-12 border-t pt-6">
         <a

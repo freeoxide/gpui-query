@@ -1,11 +1,44 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Search, X, FileText, ArrowRight, ArrowLeft, Command } from "lucide-react";
+import { Search, X, FileText, ArrowUp, ArrowDown, Command, FileSearch } from "lucide-react";
 
 interface SearchResult {
   url: string;
   title: string;
   excerpt: string;
   score: number;
+}
+
+const backdropAnimation = {
+  animation: "searchBackdropIn 150ms ease-out forwards",
+};
+
+const dialogAnimation = {
+  animation: "searchDialogIn 200ms ease-out forwards",
+};
+
+const keyframeStyles = `
+@keyframes searchBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes searchDialogIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+`;
+
+function KeyboardHint({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex items-center gap-0.5 rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground shadow-sm">
+      {children}
+    </kbd>
+  );
 }
 
 export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -21,8 +54,10 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
     if (!open || pagefind) return;
     async function load() {
       try {
+        // Dynamic non-literal path to bypass Vite import analysis
+        const pagefindPath = ["/pagefind", "pagefind.js"].join("/");
         // @ts-expect-error Pagefind is loaded at runtime
-        const pf = await import(/* @vite-ignore */ "/pagefind/pagefind.js");
+        const pf = await import(/* @vite-ignore */ pagefindPath);
         await pf.init();
         setPagefind(pf);
       } catch {
@@ -110,11 +145,29 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
       className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
       onKeyDown={handleKeyDown}
     >
+      <style>{keyframeStyles}</style>
+
       {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+        style={backdropAnimation}
+        onClick={onClose}
+      />
 
       {/* Dialog */}
-      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border bg-background shadow-2xl">
+      <div
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border bg-background shadow-2xl"
+        style={dialogAnimation}
+      >
+        {/* Gradient top border */}
+        <div
+          className="h-0.5 w-full"
+          style={{
+            background:
+              "linear-gradient(to right, hsl(var(--primary)), hsl(var(--primary) / 0.1), transparent)",
+          }}
+        />
+
         {/* Search input */}
         <div className="flex items-center border-b px-4">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -146,9 +199,20 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
                     window.location.href = result.url;
                     onClose();
                   }}
-                  className={`flex items-start gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                  className={`relative flex items-start gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                     i === selectedIndex ? "bg-accent text-accent-foreground" : "hover:bg-muted"
                   }`}
+                  style={
+                    i === selectedIndex
+                      ? {
+                          borderLeft: "2px solid hsl(var(--primary))",
+                          paddingLeft: "10px",
+                        }
+                      : {
+                          borderLeft: "2px solid transparent",
+                          paddingLeft: "10px",
+                        }
+                  }
                 >
                   <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
@@ -163,34 +227,52 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
             ))}
           </ul>
         ) : query && pagefind ? (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            No results found for &ldquo;{query}&rdquo;
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+            <FileSearch className="h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">
+              No results found for &ldquo;{query}&rdquo;
+            </p>
           </div>
         ) : !pagefind ? (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            Search requires a build. Run{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">vp build</code> first.
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+            <Search className="h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">
+              Search requires a build. Run{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">vp build</code> first.
+            </p>
           </div>
         ) : (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            Type to search documentation...
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+            <Search className="h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">Type to search documentation...</p>
           </div>
         )}
 
         {/* Footer */}
-        {results.length > 0 && (
-          <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1">
-                <ArrowLeft className="h-3 w-3" />
-                <ArrowRight className="h-3 w-3" />
+        <div className="flex items-center justify-between border-t px-4 py-2.5">
+          {results.length > 0 ? (
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <KeyboardHint>
+                  <ArrowUp className="h-2.5 w-2.5" />
+                  <ArrowDown className="h-2.5 w-2.5" />
+                </KeyboardHint>
                 Navigate
               </span>
-              <span>Enter to open</span>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <KeyboardHint>Enter</KeyboardHint>
+                Open
+              </span>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <KeyboardHint>Esc</KeyboardHint>
+                Close
+              </span>
             </div>
-            <span>Esc to close</span>
-          </div>
-        )}
+          ) : (
+            <div />
+          )}
+          <span className="text-[10px] text-muted-foreground/50">Powered by Pagefind</span>
+        </div>
       </div>
     </div>
   );

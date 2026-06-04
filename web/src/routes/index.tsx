@@ -1,15 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
-  Search,
-  RefreshCw,
-  List,
-  Database,
   Zap,
+  ArrowRightLeft,
+  Infinity as InfinityIcon,
+  Database,
+  XCircle,
   HardDrive,
   ArrowRight,
   Github,
   Check,
   X,
+  Layers,
+  Cpu,
+  Code2,
+  Terminal,
 } from "lucide-react";
 import { Button } from "#/components/ui/button";
 import { Card, CardHeader, CardContent } from "#/components/ui/card";
@@ -77,44 +81,86 @@ function HeroSection() {
   return (
     <section className="relative overflow-hidden">
       {/* Animated gradient background */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute left-1/2 top-0 h-[600px] w-[800px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-br from-primary/20 via-primary/5 to-transparent blur-3xl animate-pulse [animation-duration:6s]" />
-        <div className="absolute right-0 bottom-0 h-[400px] w-[400px] translate-x-1/3 translate-y-1/3 rounded-full bg-gradient-to-tl from-primary/10 to-transparent blur-2xl animate-pulse [animation-duration:8s]" />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          backgroundSize: "200% 200%",
+          animation: "gradient-shift 8s ease infinite",
+        }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-emerald-500/5" />
       </div>
 
-      <div className="mx-auto max-w-7xl px-4 pb-24 pt-20 sm:px-6 sm:pb-32 sm:pt-28 lg:px-8">
+      {/* Dot grid overlay */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 opacity-[0.35]"
+        style={{
+          backgroundImage: "radial-gradient(circle, var(--color-primary) 0.5px, transparent 0.5px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
+
+      {/* Top radial glow */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-0 -z-10 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/3 rounded-full opacity-40 blur-3xl"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, var(--color-primary) 0%, transparent 70%)",
+        }}
+      />
+
+      <div className="mx-auto max-w-7xl px-4 pb-28 pt-24 sm:px-6 sm:pb-36 sm:pt-32 lg:px-8">
         <div className="mx-auto max-w-3xl text-center">
-          <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
-            <span className="bg-gradient-to-r from-foreground via-foreground to-muted-foreground bg-clip-text text-transparent">
-              gpui-query
+          {/* Badge */}
+          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm font-medium text-primary">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
             </span>
+            Open-source async state for Rust GPUI
+          </div>
+
+          <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
+            <span
+              className="bg-gradient-to-r from-primary via-primary/80 to-emerald-400 bg-clip-text text-transparent"
+              style={{
+                backgroundSize: "200% auto",
+                animation: "gradient-shift 6s ease infinite",
+              }}
+            >
+              Zero-boilerplate
+            </span>
+            <br />
+            <span className="text-foreground">async state for GPUI</span>
           </h1>
 
-          <p className="mt-4 text-xl font-medium text-muted-foreground sm:text-2xl">
-            Zero-boilerplate async state management for GPUI
-          </p>
-
-          <p className="mx-auto mt-6 max-w-2xl text-base text-muted-foreground sm:text-lg">
-            gpui-query brings the reactive query patterns you love from the web world into Rust GPUI
-            applications. Fetch, cache, and synchronize async data with a single hook — no manual
-            lifecycle management required.
+          <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground sm:text-xl">
+            Fetch, cache, and synchronize async data with a single hook. No manual lifecycle
+            management. Built for the Zed editor framework.
           </p>
 
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Button size="lg" asChild>
+            <Button
+              size="lg"
+              asChild
+              className="px-6 text-base font-semibold shadow-lg shadow-primary/20"
+            >
               <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
                 Get Started
-                <ArrowRight className="ml-1 h-4 w-4" />
+                <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
 
-            <Button variant="outline" size="lg" asChild>
+            <Button variant="outline" size="lg" asChild className="px-6 text-base font-semibold">
               <a
                 href="https://github.com/hmziqrs/gpui-query"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                <Github className="mr-1 h-4 w-4" />
+                <Github className="mr-2 h-4 w-4" />
                 GitHub
               </a>
             </Button>
@@ -129,19 +175,19 @@ function HeroSection() {
 
 const features = [
   {
-    icon: Search,
+    icon: Zap,
     title: "Declarative Queries",
     description:
       "Write queries declaratively. gpui-query handles fetching, caching, and state updates automatically.",
   },
   {
-    icon: RefreshCw,
+    icon: ArrowRightLeft,
     title: "Mutations",
     description:
       "First-class mutation support with success/error callbacks and optimistic updates.",
   },
   {
-    icon: List,
+    icon: InfinityIcon,
     title: "Infinite Queries",
     description:
       "Paginate effortlessly with built-in infinite query support and bidirectional fetching.",
@@ -153,8 +199,8 @@ const features = [
       "TTL, Stale-While-Revalidate, LatestWins, IgnoreWhileLoading — cache policies for every use case.",
   },
   {
-    icon: Zap,
-    title: "Cooperative Cancellation",
+    icon: XCircle,
+    title: "Cancellation",
     description:
       "Signal-checked retries and cooperative cancellation via Arc<AtomicBool> for clean async lifecycle management.",
   },
@@ -167,26 +213,31 @@ const features = [
 
 function FeatureGrid() {
   return (
-    <section className="border-t bg-muted/30 py-20 sm:py-24">
+    <section className="border-t border-primary/5 bg-muted/30 py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <h2 className="text-center text-3xl font-bold tracking-tight sm:text-4xl">
-          Everything you need for async state
-        </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-muted-foreground">
-          A complete toolkit for managing asynchronous data flows in your GPUI applications.
-        </p>
+        <div className="text-center">
+          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            Everything you need for async state
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-muted-foreground">
+            A complete toolkit for managing asynchronous data flows in your GPUI applications.
+          </p>
+        </div>
 
-        <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-16 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((feature) => (
-            <Card key={feature.title} className="group transition-shadow hover:shadow-md">
+            <Card
+              key={feature.title}
+              className="group border-primary/10 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/5"
+            >
               <CardHeader>
-                <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary/20">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
                   <feature.icon className="h-5 w-5" />
                 </div>
                 <h3 className="text-lg font-semibold">{feature.title}</h3>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground leading-relaxed">
+                <p className="text-sm leading-relaxed text-muted-foreground">
                   {feature.description}
                 </p>
               </CardContent>
@@ -202,18 +253,36 @@ function FeatureGrid() {
 
 function QuickStartSection() {
   return (
-    <section className="py-20 sm:py-24">
+    <section className="py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-2xl">
-          <h2 className="text-center text-3xl font-bold tracking-tight sm:text-4xl">Quick Start</h2>
-          <p className="mt-4 text-center text-muted-foreground">
-            Start fetching data in just a few lines of Rust.
-          </p>
+          <div className="border-l-4 border-primary pl-5">
+            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Quick Start</h2>
+            <p className="mt-2 text-muted-foreground">
+              Start fetching data in just a few lines of Rust.
+            </p>
+          </div>
 
-          <div className="mt-10">
-            <CodeBlock title="src/main.rs">
+          <div className="mt-10 rounded-xl bg-muted/30 p-6">
+            <div className="mb-4 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Terminal className="h-4 w-4" />
+              Install the crate
+            </div>
+            <CodeBlock title="Cargo.toml">
               <pre className="overflow-x-auto rounded-b-lg border border-t-0 bg-muted/50 p-4 text-sm font-mono">
-                <code>{`use gpui_query::prelude::*;
+                <code>{`[dependencies]
+gpui-query = "0.1"`}</code>
+              </pre>
+            </CodeBlock>
+
+            <div className="mt-6 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Code2 className="h-4 w-4" />
+              Use it in your view
+            </div>
+            <div className="mt-3">
+              <CodeBlock title="src/main.rs">
+                <pre className="overflow-x-auto rounded-b-lg border border-t-0 bg-muted/50 p-4 text-sm font-mono">
+                  <code>{`use gpui_query::prelude::*;
 
 fn render_user_list(cx: &mut ViewContext<App>) -> impl IntoElement {
     let query = use_query(cx, "user-list", || async {
@@ -225,15 +294,16 @@ fn render_user_list(cx: &mut ViewContext<App>) -> impl IntoElement {
         None => vec![div().child("Loading...")],
     })
 }`}</code>
-              </pre>
-            </CodeBlock>
+                </pre>
+              </CodeBlock>
+            </div>
           </div>
 
           <div className="mt-8 text-center">
             <Button variant="outline" asChild>
               <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
                 Read the full guide
-                <ArrowRight className="ml-1 h-4 w-4" />
+                <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
           </div>
@@ -260,7 +330,7 @@ const comparisonRows: Row[] = [
 
 function ComparisonTable() {
   return (
-    <section className="border-t bg-muted/30 py-20 sm:py-24">
+    <section className="border-t border-primary/5 bg-muted/30 py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <h2 className="text-center text-3xl font-bold tracking-tight sm:text-4xl">
           Why gpui-query?
@@ -269,35 +339,43 @@ function ComparisonTable() {
           See how gpui-query compares to the alternatives for managing async state in GPUI.
         </p>
 
-        <div className="mx-auto mt-12 max-w-3xl overflow-x-auto">
+        <div className="mx-auto mt-14 max-w-3xl overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b">
-                <th className="py-3 pr-4 text-left font-semibold">Feature</th>
-                <th className="px-4 py-3 text-center font-semibold">
-                  <span className="rounded-full bg-primary/10 px-3 py-1 text-primary">
-                    gpui-query
-                  </span>
+              <tr className="border-b border-border">
+                <th className="py-4 pr-4 text-left font-semibold">Feature</th>
+                <th className="px-4 py-4 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-4 py-1.5 text-sm font-semibold text-primary">
+                      gpui-query
+                    </span>
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                      Recommended
+                    </span>
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-center font-semibold text-muted-foreground">
+                <th className="px-4 py-4 text-center font-semibold text-muted-foreground">
                   Manual cx.spawn()
                 </th>
-                <th className="pl-4 py-3 text-center font-semibold text-muted-foreground">
+                <th className="pl-4 py-4 text-center font-semibold text-muted-foreground">
                   Raw Futures
                 </th>
               </tr>
             </thead>
             <tbody>
               {comparisonRows.map(([feature, a, b, c]) => (
-                <tr key={feature} className="border-b last:border-0">
-                  <td className="py-3 pr-4 font-medium">{feature}</td>
-                  <td className="px-4 py-3 text-center">
+                <tr
+                  key={feature}
+                  className="border-b border-border last:border-0 transition-colors hover:bg-muted/50"
+                >
+                  <td className="py-3.5 pr-4 font-medium">{feature}</td>
+                  <td className="bg-primary/5 px-4 py-3.5 text-center">
                     <SupportCell value={a} />
                   </td>
-                  <td className="px-4 py-3 text-center">
+                  <td className="px-4 py-3.5 text-center">
                     <SupportCell value={b} />
                   </td>
-                  <td className="pl-4 py-3 text-center">
+                  <td className="pl-4 py-3.5 text-center">
                     <SupportCell value={c} />
                   </td>
                 </tr>
@@ -319,7 +397,7 @@ function SupportCell({ value }: { value: boolean }) {
     );
   }
   return (
-    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground">
+    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground/50">
       <X className="h-3.5 w-3.5" />
     </span>
   );
@@ -327,67 +405,101 @@ function SupportCell({ value }: { value: boolean }) {
 
 /* ─── Architecture ─────────────────────────────────────────────── */
 
+const archLayers = [
+  {
+    label: "Hook Layer",
+    items: "use_query / use_mutation / use_infinite_query",
+    icon: Layers,
+    bgClass: "bg-primary/10 border border-primary/20",
+    textClass: "text-primary",
+    iconBgClass: "bg-primary/15 text-primary",
+  },
+  {
+    label: "Client Layer",
+    items: "QueryClient / Registry / GC",
+    icon: Cpu,
+    bgClass: "bg-emerald-500/10 border border-emerald-500/20",
+    textClass: "text-emerald-600 dark:text-emerald-400",
+    iconBgClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  },
+  {
+    label: "Core Layer",
+    items: "QueryResource / CachePolicy / QueryKey",
+    icon: Database,
+    bgClass: "bg-teal-500/10 border border-teal-500/20",
+    textClass: "text-teal-600 dark:text-teal-400",
+    iconBgClass: "bg-teal-500/15 text-teal-600 dark:text-teal-400",
+  },
+];
+
 function ArchitectureSection() {
   return (
-    <section className="py-20 sm:py-24">
+    <section className="py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <h2 className="text-center text-3xl font-bold tracking-tight sm:text-4xl">
-          Layered Architecture
+          Three-Layer Architecture
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-muted-foreground">
           Designed in three clean layers, each with a clear responsibility.
         </p>
 
-        <div className="mx-auto mt-14 flex max-w-4xl flex-col items-center gap-4">
-          <ArchLayer
-            label="Hook Layer"
-            items="use_query / use_mutation / use_infinite_query"
-            accent="bg-primary text-primary-foreground"
-          />
+        <div className="mx-auto mt-16 max-w-3xl">
+          <div className="grid gap-0">
+            {archLayers.map((layer, i) => (
+              <div key={layer.label}>
+                {/* Connecting line */}
+                {i > 0 && (
+                  <div className="flex justify-center">
+                    <div className="flex h-10 w-px flex-col items-center">
+                      <div className="h-full w-px bg-gradient-to-b from-primary/30 to-primary/10" />
+                      <div
+                        className="h-0 w-0"
+                        style={{
+                          borderLeft: "5px solid transparent",
+                          borderRight: "5px solid transparent",
+                          borderTop: "6px solid var(--color-primary)",
+                          opacity: 0.3,
+                          marginTop: "-1px",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
 
-          <ArchArrow />
+                {/* Layer box */}
+                <div
+                  className={`flex items-center gap-4 rounded-xl px-6 py-5 ${layer.bgClass} transition-all duration-200 hover:scale-[1.02]`}
+                >
+                  <div
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${layer.iconBgClass}`}
+                  >
+                    <layer.icon className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-widest opacity-60">
+                      {layer.label}
+                    </p>
+                    <p className={`mt-0.5 truncate font-mono text-sm ${layer.textClass}`}>
+                      {layer.items}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
 
-          <ArchLayer
-            label="Client Layer"
-            items="QueryClient / Registry / GC"
-            accent="bg-secondary text-secondary-foreground border"
-          />
-
-          <ArchArrow />
-
-          <ArchLayer
-            label="Core Layer"
-            items="QueryResource / CachePolicy / QueryKey"
-            accent="bg-muted text-foreground border"
-          />
+          {/* Flow arrows between layers */}
+          <div className="mt-8 flex items-center justify-center gap-3 text-sm text-muted-foreground">
+            <span className="font-medium">Data flows</span>
+            <span className="text-primary">Hook</span>
+            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            <span className="text-emerald-600 dark:text-emerald-400">Client</span>
+            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            <span className="text-teal-600 dark:text-teal-400">Core</span>
+          </div>
         </div>
       </div>
     </section>
-  );
-}
-
-function ArchLayer({ label, items, accent }: { label: string; items: string; accent: string }) {
-  return (
-    <div className={`w-full rounded-lg px-6 py-5 text-center shadow-sm ${accent}`}>
-      <p className="text-xs font-semibold uppercase tracking-widest opacity-70">{label}</p>
-      <p className="mt-1 font-mono text-sm">{items}</p>
-    </div>
-  );
-}
-
-function ArchArrow() {
-  return (
-    <div className="flex h-8 items-center justify-center text-muted-foreground">
-      <svg width="24" height="32" viewBox="0 0 24 32" fill="none" aria-hidden="true">
-        <path
-          d="M12 0v26m-6-6 6 6 6-6"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </div>
   );
 }
 
@@ -395,34 +507,48 @@ function ArchArrow() {
 
 function CtaFooterSection() {
   return (
-    <section className="border-t bg-muted/30 py-20 sm:py-24">
+    <section className="border-t border-primary/5 py-20 sm:py-28">
+      <div
+        className="absolute inset-0 -z-10 opacity-[0.03]"
+        aria-hidden="true"
+        style={{
+          backgroundImage: "radial-gradient(circle, var(--color-primary) 1px, transparent 1px)",
+          backgroundSize: "20px 20px",
+        }}
+      />
       <div className="mx-auto max-w-7xl px-4 text-center sm:px-6 lg:px-8">
-        <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          Ready to simplify async state in GPUI?
-        </h2>
-        <p className="mx-auto mt-4 max-w-xl text-muted-foreground">
-          Get started with gpui-query in minutes and focus on building great applications, not
-          managing async boilerplate.
-        </p>
+        <div className="mx-auto max-w-2xl rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-emerald-500/10 px-8 py-16 sm:px-16">
+          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            Ready to simplify async state?
+          </h2>
+          <p className="mx-auto mt-4 max-w-lg text-muted-foreground">
+            Get started with gpui-query in minutes and focus on building great applications, not
+            managing async boilerplate.
+          </p>
 
-        <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <Button size="lg" asChild>
-            <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
-              Get Started
-              <ArrowRight className="ml-1 h-4 w-4" />
-            </Link>
-          </Button>
-
-          <Button variant="outline" size="lg" asChild>
-            <a
-              href="https://github.com/hmziqrs/gpui-query"
-              target="_blank"
-              rel="noopener noreferrer"
+          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <Button
+              size="lg"
+              asChild
+              className="px-6 text-base font-semibold shadow-lg shadow-primary/20"
             >
-              <Github className="mr-1 h-4 w-4" />
-              Star on GitHub
-            </a>
-          </Button>
+              <Link to="/docs/$slug" params={{ slug: "getting-started" }}>
+                Get Started
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
+
+            <Button variant="outline" size="lg" asChild className="px-6 text-base font-semibold">
+              <a
+                href="https://github.com/hmziqrs/gpui-query"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Github className="mr-2 h-4 w-4" />
+                View on GitHub
+              </a>
+            </Button>
+          </div>
         </div>
       </div>
     </section>

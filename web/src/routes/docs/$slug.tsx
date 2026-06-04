@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { getDocBySlug, getAllDocs } from "#/lib/content";
 import { DocsPagination } from "#/components/docs-pagination";
+import { Callout } from "#/components/callout";
 import { techArticle, howTo } from "#/lib/seo";
 import { Button } from "#/components/ui/button";
 import { Home, BookOpen } from "lucide-react";
@@ -124,7 +125,7 @@ function DocPage() {
         <p className="mt-2 text-lg text-muted-foreground">{frontmatter.description}</p>
       </header>
       <div className="prose prose-neutral dark:prose-invert max-w-none">
-        <Content />
+        <Content components={{ Callout }} />
       </div>
       <DocsPagination prev={prev} next={next} />
     </article>
