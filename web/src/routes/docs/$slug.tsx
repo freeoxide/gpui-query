@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { getDocBySlug, getAllDocs } from "#/lib/content";
 import { DocsPagination } from "#/components/docs-pagination";
-import { techArticle } from "#/lib/seo";
+import { techArticle, howTo } from "#/lib/seo";
 import { Button } from "#/components/ui/button";
 import { Home, BookOpen } from "lucide-react";
 import { useMemo } from "react";
@@ -12,12 +12,59 @@ export const Route = createFileRoute("/docs/$slug")({
     if (!doc) {
       throw new Error(`Doc not found: ${slug}`);
     }
-    return doc;
+    // Only return serializable data — Content component is resolved in the component
+    return { frontmatter: doc.frontmatter, slug };
   },
-  head: ({ loaderData }) => {
+  head: ({ loaderData, params }) => {
     if (!loaderData) return { meta: [], links: [], scripts: [] };
     const fm = loaderData.frontmatter;
-    const slug = fm.title.toLowerCase().replace(/\s+/g, "-");
+    const slug = params.slug;
+    const canonicalSlug = fm.title.toLowerCase().replace(/\s+/g, "-");
+
+    const scripts: Array<{ type: string; children: string }> = [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify(
+          techArticle({
+            headline: fm.title,
+            description: fm.description,
+            url: `https://gpui-query.hmziq.xyz/docs/${slug}`,
+          }),
+        ),
+      },
+    ];
+
+    // Add HowTo structured data for the getting-started guide
+    if (slug === "getting-started") {
+      scripts.push({
+        type: "application/ld+json",
+        children: JSON.stringify(
+          howTo({
+            name: "Get started with gpui-query",
+            description: "Install gpui-query and write your first query in a GPUI application",
+            steps: [
+              {
+                name: "Install gpui-query",
+                text: 'Add gpui-query = "2.0" to your Cargo.toml dependencies',
+              },
+              {
+                name: "Import the prelude",
+                text: "Add use gpui_query::prelude::* to your Rust files",
+              },
+              {
+                name: "Create a QueryClient",
+                text: "Create a QueryClient with QueryClient::new() and register it as a global in your GPUI application",
+              },
+              {
+                name: "Write your first query",
+                text: "Use use_query with a QueryKey and async fetcher to fetch data reactively in your view",
+              },
+            ],
+          }),
+        ),
+      });
+    }
+
     return {
       meta: [
         { title: `${fm.title} - gpui-query Docs` },
@@ -32,21 +79,10 @@ export const Route = createFileRoute("/docs/$slug")({
       links: [
         {
           rel: "canonical",
-          href: `https://gpui-query.hmziq.xyz/docs/${slug}`,
+          href: `https://gpui-query.hmziq.xyz/docs/${canonicalSlug}`,
         },
       ],
-      scripts: [
-        {
-          type: "application/ld+json",
-          children: JSON.stringify(
-            techArticle({
-              headline: fm.title,
-              description: fm.description,
-              url: `https://gpui-query.hmziq.xyz/docs/${slug}`,
-            }),
-          ),
-        },
-      ],
+      scripts,
     };
   },
   component: DocPage,
@@ -54,11 +90,16 @@ export const Route = createFileRoute("/docs/$slug")({
 });
 
 function DocPage() {
-  const doc = Route.useLoaderData();
+  const { slug } = Route.useParams();
+  const { frontmatter } = Route.useLoaderData();
+
+  // Resolve Content component directly — avoids Seroval serialization failure
+  const doc = getDocBySlug(slug);
+  if (!doc) return null;
   const Content = doc.Content;
 
   const allDocs = getAllDocs();
-  const currentIndex = allDocs.findIndex((d) => d.slug === Route.useParams().slug);
+  const currentIndex = allDocs.findIndex((d) => d.slug === slug);
 
   const prev = useMemo(() => {
     if (currentIndex > 0) {
@@ -79,8 +120,8 @@ function DocPage() {
   return (
     <article>
       <header className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{doc.frontmatter.title}</h1>
-        <p className="mt-2 text-lg text-muted-foreground">{doc.frontmatter.description}</p>
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{frontmatter.title}</h1>
+        <p className="mt-2 text-lg text-muted-foreground">{frontmatter.description}</p>
       </header>
       <div className="prose prose-neutral dark:prose-invert max-w-none">
         <Content />
