@@ -2,3 +2,7 @@ User-agent: *
 Allow: /
 
 Sitemap: https://gpui-query.hmziq.xyz/sitemap.xml
+
+# AI agent files
+# llms.txt: https://gpui-query.hmziq.xyz/llms.txt
+# llms-full.txt: https://gpui-query.hmziq.xyz/llms-full.txt

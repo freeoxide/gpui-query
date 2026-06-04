@@ -14,8 +14,49 @@ import {
 import { Button } from "#/components/ui/button";
 import { Card, CardHeader, CardContent } from "#/components/ui/card";
 import { CodeBlock } from "#/components/code-block";
+import { softwareSourceCode } from "#/lib/seo";
 
-export const Route = createFileRoute("/")({ component: Home });
+export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "gpui-query — Async State Management for GPUI" },
+      {
+        name: "description",
+        content:
+          "Zero-boilerplate async state management for GPUI. Caching, retry, cooperative cancellation, and persistence for the Zed editor's framework.",
+      },
+      { property: "og:title", content: "gpui-query — Async State Management for GPUI" },
+      {
+        property: "og:description",
+        content:
+          "Zero-boilerplate async state management for GPUI. Caching, retry, cooperative cancellation, and persistence.",
+      },
+      { property: "og:type", content: "website" },
+      { property: "og:url", content: "https://gpui-query.hmziq.xyz" },
+      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.svg" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "gpui-query — Async State Management for GPUI" },
+      { name: "twitter:description", content: "Zero-boilerplate async state management for GPUI." },
+    ],
+    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz" }],
+    scripts: [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify(
+          softwareSourceCode({
+            name: "gpui-query",
+            description: "Zero-boilerplate async state management for GPUI",
+            programmingLanguage: "Rust",
+            codeRepository: "https://github.com/hmziqrs/gpui-query",
+            url: "https://gpui-query.hmziq.xyz",
+            license: "MIT",
+          }),
+        ),
+      },
+    ],
+  }),
+  component: Home,
+});
 
 function Home() {
   return (
