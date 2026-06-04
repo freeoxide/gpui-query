@@ -123,7 +123,7 @@ function HeroSection() {
             Open-source async state for Rust GPUI
           </div>
 
-          <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
+          <h1 className="text-4xl font-black tracking-tight sm:text-5xl lg:text-6xl">
             <span
               className="bg-gradient-to-r from-primary via-primary/80 to-emerald-400 bg-clip-text text-transparent"
               style={{
@@ -219,27 +219,25 @@ function FeatureGrid() {
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
             Everything you need for async state
           </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-muted-foreground">
+          <p className="mx-auto mt-4 max-w-2xl text-foreground/60">
             A complete toolkit for managing asynchronous data flows in your GPUI applications.
           </p>
         </div>
 
-        <div className="mt-16 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((feature) => (
             <Card
               key={feature.title}
-              className="group border-primary/10 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/5"
+              className="group border border-border bg-card shadow-md transition-all duration-200 hover:-translate-y-1 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/10"
             >
               <CardHeader>
-                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/12 text-primary transition-colors group-hover:bg-primary/20">
                   <feature.icon className="h-5 w-5" />
                 </div>
                 <h3 className="text-lg font-semibold">{feature.title}</h3>
               </CardHeader>
               <CardContent>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  {feature.description}
-                </p>
+                <p className="text-sm leading-relaxed text-foreground/70">{feature.description}</p>
               </CardContent>
             </Card>
           ))}
@@ -269,7 +267,7 @@ function QuickStartSection() {
               Install the crate
             </div>
             <CodeBlock title="Cargo.toml">
-              <pre className="overflow-x-auto rounded-b-lg border border-t-0 bg-muted/50 p-4 text-sm font-mono">
+              <pre className="overflow-x-auto rounded-b-lg border border-t-0 bg-muted/50 p-4 text-sm leading-relaxed font-mono">
                 <code>{`[dependencies]
 gpui-query = "0.1"`}</code>
               </pre>
@@ -281,7 +279,7 @@ gpui-query = "0.1"`}</code>
             </div>
             <div className="mt-3">
               <CodeBlock title="src/main.rs">
-                <pre className="overflow-x-auto rounded-b-lg border border-t-0 bg-muted/50 p-4 text-sm font-mono">
+                <pre className="overflow-x-auto rounded-b-lg border border-t-0 bg-muted/50 p-4 text-sm leading-relaxed font-mono">
                   <code>{`use gpui_query::prelude::*;
 
 fn render_user_list(cx: &mut ViewContext<App>) -> impl IntoElement {
@@ -335,47 +333,49 @@ function ComparisonTable() {
         <h2 className="text-center text-3xl font-bold tracking-tight sm:text-4xl">
           Why gpui-query?
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-muted-foreground">
+        <p className="mx-auto mt-4 max-w-2xl text-center text-foreground/60">
           See how gpui-query compares to the alternatives for managing async state in GPUI.
         </p>
 
-        <div className="mx-auto mt-14 max-w-3xl overflow-x-auto">
+        <div className="mx-auto mt-14 max-w-3xl overflow-hidden rounded-xl border border-border shadow-sm">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b border-border">
-                <th className="py-4 pr-4 text-left font-semibold">Feature</th>
+              <tr className="bg-muted/80">
+                <th className="py-4 pr-4 pl-5 text-left text-sm font-semibold text-foreground">
+                  Feature
+                </th>
                 <th className="px-4 py-4 text-center">
                   <div className="flex flex-col items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-4 py-1.5 text-sm font-semibold text-primary">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-4 py-1.5 text-sm font-bold text-primary">
                       gpui-query
                     </span>
-                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                    <span className="rounded-full bg-primary/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
                       Recommended
                     </span>
                   </div>
                 </th>
-                <th className="px-4 py-4 text-center font-semibold text-muted-foreground">
+                <th className="px-4 py-4 text-center text-sm font-semibold text-foreground/60">
                   Manual cx.spawn()
                 </th>
-                <th className="pl-4 py-4 text-center font-semibold text-muted-foreground">
+                <th className="pl-4 pr-5 py-4 text-center text-sm font-semibold text-foreground/60">
                   Raw Futures
                 </th>
               </tr>
             </thead>
             <tbody>
-              {comparisonRows.map(([feature, a, b, c]) => (
+              {comparisonRows.map(([feature, a, b, c], i) => (
                 <tr
                   key={feature}
-                  className="border-b border-border last:border-0 transition-colors hover:bg-muted/50"
+                  className={`border-b border-border last:border-0 transition-colors hover:bg-muted/40 ${i % 2 === 0 ? "bg-background" : "bg-muted/30"}`}
                 >
-                  <td className="py-3.5 pr-4 font-medium">{feature}</td>
-                  <td className="bg-primary/5 px-4 py-3.5 text-center">
+                  <td className="py-4 pr-4 pl-5 text-sm font-medium text-foreground">{feature}</td>
+                  <td className="bg-primary/[0.04] px-4 py-4 text-center">
                     <SupportCell value={a} />
                   </td>
-                  <td className="px-4 py-3.5 text-center">
+                  <td className="px-4 py-4 text-center">
                     <SupportCell value={b} />
                   </td>
-                  <td className="pl-4 py-3.5 text-center">
+                  <td className="pl-4 pr-5 py-4 text-center">
                     <SupportCell value={c} />
                   </td>
                 </tr>
@@ -391,14 +391,14 @@ function ComparisonTable() {
 function SupportCell({ value }: { value: boolean }) {
   if (value) {
     return (
-      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <Check className="h-3.5 w-3.5" />
+      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-primary">
+        <Check className="h-4 w-4" strokeWidth={3} />
       </span>
     );
   }
   return (
-    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground/50">
-      <X className="h-3.5 w-3.5" />
+    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-destructive/12 text-destructive/70">
+      <X className="h-4 w-4" strokeWidth={3} />
     </span>
   );
 }
@@ -410,25 +410,25 @@ const archLayers = [
     label: "Hook Layer",
     items: "use_query / use_mutation / use_infinite_query",
     icon: Layers,
-    bgClass: "bg-primary/10 border border-primary/20",
+    bgClass: "bg-primary/[0.08] border-2 border-primary/30 shadow-sm",
     textClass: "text-primary",
-    iconBgClass: "bg-primary/15 text-primary",
+    iconBgClass: "bg-primary/20 text-primary",
   },
   {
     label: "Client Layer",
     items: "QueryClient / Registry / GC",
     icon: Cpu,
-    bgClass: "bg-emerald-500/10 border border-emerald-500/20",
+    bgClass: "bg-emerald-500/[0.08] border-2 border-emerald-500/30 shadow-sm",
     textClass: "text-emerald-600 dark:text-emerald-400",
-    iconBgClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+    iconBgClass: "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400",
   },
   {
     label: "Core Layer",
     items: "QueryResource / CachePolicy / QueryKey",
     icon: Database,
-    bgClass: "bg-teal-500/10 border border-teal-500/20",
+    bgClass: "bg-teal-500/[0.08] border-2 border-teal-500/30 shadow-sm",
     textClass: "text-teal-600 dark:text-teal-400",
-    iconBgClass: "bg-teal-500/15 text-teal-600 dark:text-teal-400",
+    iconBgClass: "bg-teal-500/20 text-teal-600 dark:text-teal-400",
   },
 ];
 
@@ -439,7 +439,7 @@ function ArchitectureSection() {
         <h2 className="text-center text-3xl font-bold tracking-tight sm:text-4xl">
           Three-Layer Architecture
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-muted-foreground">
+        <p className="mx-auto mt-4 max-w-2xl text-center text-foreground/60">
           Designed in three clean layers, each with a clear responsibility.
         </p>
 
@@ -450,15 +450,15 @@ function ArchitectureSection() {
                 {/* Connecting line */}
                 {i > 0 && (
                   <div className="flex justify-center">
-                    <div className="flex h-10 w-px flex-col items-center">
-                      <div className="h-full w-px bg-gradient-to-b from-primary/30 to-primary/10" />
+                    <div className="flex h-12 w-px flex-col items-center">
+                      <div className="h-full w-px bg-gradient-to-b from-primary/40 to-primary/20" />
                       <div
                         className="h-0 w-0"
                         style={{
-                          borderLeft: "5px solid transparent",
-                          borderRight: "5px solid transparent",
-                          borderTop: "6px solid var(--color-primary)",
-                          opacity: 0.3,
+                          borderLeft: "6px solid transparent",
+                          borderRight: "6px solid transparent",
+                          borderTop: "7px solid var(--color-primary)",
+                          opacity: 0.5,
                           marginTop: "-1px",
                         }}
                       />
@@ -476,7 +476,7 @@ function ArchitectureSection() {
                     <layer.icon className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase tracking-widest opacity-60">
+                    <p className="text-xs font-bold uppercase tracking-widest opacity-80">
                       {layer.label}
                     </p>
                     <p className={`mt-0.5 truncate font-mono text-sm ${layer.textClass}`}>

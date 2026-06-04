@@ -67,7 +67,7 @@ export function Navbar() {
               <Link
                 key={link.href}
                 to={link.href}
-                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground relative after:absolute after:bottom-[-2px] after:left-0 after:h-0.5 after:w-0 after:bg-primary after:transition-all after:duration-200 hover:after:w-full"
+                className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground relative after:absolute after:bottom-[-2px] after:left-0 after:h-0.5 after:w-0 after:bg-primary after:transition-all after:duration-200 hover:after:w-full"
                 activeOptions={{ exact: false }}
                 activeProps={{ className: "text-primary" }}
               >
