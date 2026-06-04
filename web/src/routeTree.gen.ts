@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from "./routes/__root";
 import { Route as FaqRouteImport } from "./routes/faq";
 import { Route as ChangelogRouteImport } from "./routes/changelog";
 import { Route as AboutRouteImport } from "./routes/about";
+import { Route as R404RouteImport } from "./routes/404";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as DocsIndexRouteImport } from "./routes/docs/index";
 import { Route as BlogIndexRouteImport } from "./routes/blog/index";
@@ -31,6 +32,11 @@ const ChangelogRoute = ChangelogRouteImport.update({
 const AboutRoute = AboutRouteImport.update({
   id: "/about",
   path: "/about",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const R404Route = R404RouteImport.update({
+  id: "/404",
+  path: "/404",
   getParentRoute: () => rootRouteImport,
 } as any);
 const IndexRoute = IndexRouteImport.update({
@@ -61,6 +67,7 @@ const BlogSlugRoute = BlogSlugRouteImport.update({
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
+  "/404": typeof R404Route;
   "/about": typeof AboutRoute;
   "/changelog": typeof ChangelogRoute;
   "/faq": typeof FaqRoute;
@@ -71,6 +78,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
+  "/404": typeof R404Route;
   "/about": typeof AboutRoute;
   "/changelog": typeof ChangelogRoute;
   "/faq": typeof FaqRoute;
@@ -82,6 +90,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
+  "/404": typeof R404Route;
   "/about": typeof AboutRoute;
   "/changelog": typeof ChangelogRoute;
   "/faq": typeof FaqRoute;
@@ -94,6 +103,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
     | "/"
+    | "/404"
     | "/about"
     | "/changelog"
     | "/faq"
@@ -102,10 +112,20 @@ export interface FileRouteTypes {
     | "/blog/"
     | "/docs/";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/about" | "/changelog" | "/faq" | "/blog/$slug" | "/docs/$slug" | "/blog" | "/docs";
+  to:
+    | "/"
+    | "/404"
+    | "/about"
+    | "/changelog"
+    | "/faq"
+    | "/blog/$slug"
+    | "/docs/$slug"
+    | "/blog"
+    | "/docs";
   id:
     | "__root__"
     | "/"
+    | "/404"
     | "/about"
     | "/changelog"
     | "/faq"
@@ -117,6 +137,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
+  R404Route: typeof R404Route;
   AboutRoute: typeof AboutRoute;
   ChangelogRoute: typeof ChangelogRoute;
   FaqRoute: typeof FaqRoute;
@@ -147,6 +168,13 @@ declare module "@tanstack/react-router" {
       path: "/about";
       fullPath: "/about";
       preLoaderRoute: typeof AboutRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/404": {
+      id: "/404";
+      path: "/404";
+      fullPath: "/404";
+      preLoaderRoute: typeof R404RouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/": {
@@ -189,6 +217,7 @@ declare module "@tanstack/react-router" {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  R404Route: R404Route,
   AboutRoute: AboutRoute,
   ChangelogRoute: ChangelogRoute,
   FaqRoute: FaqRoute,

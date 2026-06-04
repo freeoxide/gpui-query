@@ -18,7 +18,11 @@ export function Footer() {
           <Link to="/docs" className="hover:text-foreground transition-colors">
             Docs
           </Link>
-          <Link to="/blog" className="hover:text-foreground transition-colors">
+          <Link
+            to="/blog"
+            search={{ tag: undefined }}
+            className="hover:text-foreground transition-colors"
+          >
             Blog
           </Link>
           <Link to="/faq" className="hover:text-foreground transition-colors">

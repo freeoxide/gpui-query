@@ -13,6 +13,7 @@ interface BlogFrontmatter {
   date: string;
   author?: string;
   tags?: string[];
+  readingTime?: number;
 }
 
 interface MdxModule<T> {
