@@ -63,7 +63,7 @@ export function QuickStart() {
           </div>
 
           {/* Right — code blocks */}
-          <div data-reveal data-reveal="slide-right">
+          <div data-reveal="slide-right">
             <CodeBlock title="Cargo.toml">
               <pre className="overflow-x-auto border border-t-0 bg-muted/50 p-4 text-sm leading-relaxed font-mono">
                 <code>{`[dependencies]

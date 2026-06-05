@@ -5,6 +5,8 @@ import { useEffect, useRef } from "react";
  * All descendant elements with `[data-reveal]` will animate in when they enter
  * the viewport. Uses IntersectionObserver — no animation library required.
  *
+ * Progressive enhancement: content is visible by default (SEO/no-JS safe).
+ * The hook adds `js-reveal` to enable animations only when JS runs.
  * Respects `prefers-reduced-motion` by immediately showing all elements.
  */
 export function useScrollReveal() {
@@ -14,10 +16,13 @@ export function useScrollReveal() {
     const container = ref.current;
     if (!container) return;
 
+    // Enable reveal animations (content is visible without this class)
+    container.classList.add("js-reveal");
+
     const elements = container.querySelectorAll("[data-reveal]");
     if (!elements.length) return;
 
-    // Respect reduced motion
+    // Respect reduced motion — show everything immediately
     const prefersReduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;

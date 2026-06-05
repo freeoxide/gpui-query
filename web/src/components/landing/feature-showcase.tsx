@@ -26,7 +26,7 @@ const features: Feature[] = [
     title: "Declarative Queries",
     description:
       "Write queries declaratively. gpui-query handles fetching, caching, and state updates automatically.",
-    span: "sm:col-span-2",
+    span: "lg:col-span-2",
     extra: (
       <div className="mt-4 bg-muted/50 px-4 py-3 font-mono text-xs leading-relaxed text-muted-foreground">
         <pre className="whitespace-pre">{snippetCode}</pre>
@@ -62,7 +62,7 @@ const features: Feature[] = [
     title: "Smart Caching",
     description:
       "TTL, Stale-While-Revalidate, LatestWins, IgnoreWhileLoading — cache policies for every use case.",
-    span: "sm:col-span-2",
+    span: "lg:col-span-2",
     extra: (
       <div className="mt-4 flex flex-wrap gap-2">
         {["TTL", "SWR", "LatestWins", "IgnoreWhileLoading"].map((policy) => (

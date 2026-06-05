@@ -26,7 +26,7 @@ export function HeroSection() {
       <div className="mx-auto max-w-7xl px-4 pb-20 pt-24 sm:px-6 sm:pb-28 sm:pt-32 lg:px-8">
         <div className="flex items-start gap-16">
           {/* Left column */}
-          <div className="max-w-xl flex-shrink-0">
+          <div className="max-w-2xl lg:max-w-xl">
             {/* Badge — static, no ping */}
             <div className="mb-8 inline-flex items-center gap-2 border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium tracking-wider uppercase text-primary">
               <span className="inline-flex h-1.5 w-1.5 bg-primary" />

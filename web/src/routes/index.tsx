@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { HeroSection } from "#/components/landing/hero-section";
-import { FeatureShowcase } from "#/components/landing/feature-showcase";
-import { QuickStart } from "#/components/landing/quick-start";
-import { ComparisonSection } from "#/components/landing/comparison-section";
-import { ArchitectureSection } from "#/components/landing/architecture-section";
-import { CtaSection } from "#/components/landing/cta-section";
+import {
+  HeroSection,
+  FeatureShowcase,
+  QuickStart,
+  ComparisonSection,
+  ArchitectureSection,
+  CtaSection,
+} from "#/components/landing";
 import { useScrollReveal } from "#/hooks/use-scroll-reveal";
 import { softwareSourceCode } from "#/lib/seo";
 

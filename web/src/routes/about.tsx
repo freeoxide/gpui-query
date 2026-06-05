@@ -1,19 +1,22 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
-  Github,
-  ExternalLink,
-  Layers,
-  BookOpen,
-  Cpu,
-  Database,
-  Code2,
-  Package,
-  Shield,
-  FileText,
-  PenLine,
-  User,
-  Heart,
-} from "lucide-react";
+  GithubLogoIcon,
+  ArrowUpRightIcon,
+  StackIcon,
+  BookOpenIcon,
+  CpuIcon,
+  DatabaseIcon,
+  CodeIcon,
+  PackageIcon,
+  ShieldCheckIcon,
+  FileTextIcon,
+  NotePencilIcon,
+  UserIcon,
+  HeartIcon,
+  GlobeIcon,
+  XLogoIcon,
+  LightningIcon,
+} from "@phosphor-icons/react";
 import { Button } from "#/components/ui/button";
 import { Card, CardHeader, CardContent } from "#/components/ui/card";
 import { Badge } from "#/components/ui/badge";
@@ -68,19 +71,13 @@ function HeroSection() {
     <section className="bg-gradient-to-b from-primary/5 to-transparent py-16 text-center">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm font-medium text-primary">
-            <Heart className="h-3.5 w-3.5" />
+          <div className="mb-4 inline-flex items-center gap-2 border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium tracking-wider uppercase text-primary">
+            <HeartIcon size={14} />
             Built with care for the Rust ecosystem
           </div>
           <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
             About{" "}
-            <span
-              className="bg-gradient-to-r from-primary via-primary/80 to-emerald-400 bg-clip-text text-transparent"
-              style={{
-                backgroundSize: "200% auto",
-                animation: "gradient-shift 6s ease infinite",
-              }}
-            >
+            <span className="text-primary">
               gpui-query
             </span>
           </h1>
@@ -97,14 +94,14 @@ function HeroSection() {
 
 function WhatIsSection() {
   return (
-    <section className="border-t border-primary/5 py-20 sm:py-28">
+    <section className="border-t border-border py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl">
           <Card className="border-primary/10">
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Layers className="h-5 w-5" />
+                <div className="flex h-10 w-10 items-center justify-center bg-primary/10 text-primary">
+                  <StackIcon size={20} />
                 </div>
                 <h2 className="text-2xl font-bold tracking-tight">What is gpui-query?</h2>
               </div>
@@ -146,22 +143,22 @@ function WhatIsSection() {
 
 function AuthorSection() {
   return (
-    <section className="border-t border-primary/5 bg-muted/30 py-20 sm:py-28">
+    <section className="border-t border-border bg-muted/30 py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl">
           <Card className="border-primary/10">
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <User className="h-5 w-5" />
+                <div className="flex h-10 w-10 items-center justify-center bg-primary/10 text-primary">
+                  <UserIcon size={20} />
                 </div>
                 <h2 className="text-2xl font-bold tracking-tight">The Author</h2>
               </div>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
-                {/* Avatar placeholder */}
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-emerald-500/20 text-2xl font-bold text-primary ring-2 ring-primary/10">
+                {/* Avatar */}
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center bg-gradient-to-br from-primary/20 to-emerald-500/20 text-2xl font-bold text-primary ring-2 ring-primary/10">
                   H
                 </div>
                 <div className="space-y-3 text-center sm:text-left">
@@ -176,17 +173,74 @@ function AuthorSection() {
                     tools that make complex async patterns accessible to everyone in the Rust
                     ecosystem.
                   </p>
-                  <Button variant="outline" size="sm" asChild>
-                    <a href="https://github.com/hmziqrs" target="_blank" rel="noopener noreferrer">
-                      <Github className="mr-1.5 h-4 w-4" />
-                      @hmziqrs
-                      <ExternalLink className="ml-1 h-3 w-3" />
-                    </a>
-                  </Button>
+                  {/* Author links */}
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" asChild>
+                      <a href="https://github.com/hmziqrs" target="_blank" rel="noopener noreferrer">
+                        <GithubLogoIcon size={16} className="mr-1.5" />
+                        @hmziqrs
+                      </a>
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href="https://x.com/hmziqrs" target="_blank" rel="noopener noreferrer">
+                        <XLogoIcon size={16} className="mr-1.5" />
+                        @hmziqrs
+                      </a>
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href="https://hmziq.rs" target="_blank" rel="noopener noreferrer">
+                        <GlobeIcon size={16} className="mr-1.5" />
+                        hmziq.rs
+                      </a>
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardContent>
           </Card>
+
+          {/* Related projects */}
+          <div className="mt-8 grid gap-4 sm:grid-cols-2">
+            <a
+              href="https://freeoxide.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-start gap-4 bg-card p-5 ring-1 ring-foreground/8 transition-colors duration-200 hover:ring-primary/25"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center bg-primary/10 text-primary">
+                <LightningIcon size={20} weight="duotone" />
+              </div>
+              <div>
+                <h3 className="flex items-center gap-1.5 font-semibold text-sm">
+                  freeoxide.com
+                  <ArrowUpRightIcon size={12} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  A project born from the gpui-query initiative
+                </p>
+              </div>
+            </a>
+
+            <a
+              href="https://hmziq.xyz"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-start gap-4 bg-card p-5 ring-1 ring-foreground/8 transition-colors duration-200 hover:ring-primary/25"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center bg-primary/10 text-primary">
+                <GlobeIcon size={20} weight="duotone" />
+              </div>
+              <div>
+                <h3 className="flex items-center gap-1.5 font-semibold text-sm">
+                  hmziq.xyz
+                  <ArrowUpRightIcon size={12} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  More projects and experiments
+                </p>
+              </div>
+            </a>
+          </div>
         </div>
       </div>
     </section>
@@ -197,32 +251,32 @@ function AuthorSection() {
 
 const techStack = [
   {
-    icon: Cpu,
+    icon: CpuIcon,
     label: "GPUI",
     description: "Zed's GPU-accelerated UI framework",
   },
   {
-    icon: Code2,
+    icon: CodeIcon,
     label: "Rust",
     description: "Memory-safe, blazing fast",
   },
   {
-    icon: Database,
+    icon: DatabaseIcon,
     label: "Query Cache",
     description: "TTL, SWR, LatestWins policies",
   },
   {
-    icon: Layers,
+    icon: StackIcon,
     label: "3-Layer Arch",
     description: "Core, Client, Hook separation",
   },
   {
-    icon: Shield,
+    icon: ShieldCheckIcon,
     label: "Type Safe",
     description: "Compile-time guarantees",
   },
   {
-    icon: Package,
+    icon: PackageIcon,
     label: "Crate.io",
     description: "Published Rust package",
   },
@@ -230,7 +284,7 @@ const techStack = [
 
 function TechStackSection() {
   return (
-    <section className="border-t border-primary/5 py-20 sm:py-28">
+    <section className="border-t border-border py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Technology Stack</h2>
@@ -243,10 +297,10 @@ function TechStackSection() {
           {techStack.map((tech) => (
             <div
               key={tech.label}
-              className="group flex flex-col items-center rounded-xl border border-primary/10 bg-card p-5 text-center transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/5"
+              className="group flex flex-col items-center ring-1 ring-foreground/8 bg-card p-5 text-center transition-all duration-200 hover:ring-primary/25"
             >
-              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
-                <tech.icon className="h-6 w-6" />
+              <div className="mb-3 flex h-12 w-12 items-center justify-center bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                <tech.icon size={24} />
               </div>
               <h3 className="text-sm font-semibold">{tech.label}</h3>
               <p className="mt-1 text-xs text-muted-foreground">{tech.description}</p>
@@ -262,14 +316,14 @@ function TechStackSection() {
 
 function OpenSourceSection() {
   return (
-    <section className="border-t border-primary/5 bg-muted/30 py-20 sm:py-28">
+    <section className="border-t border-border bg-muted/30 py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl">
           <Card className="border-primary/10">
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                  <Heart className="h-5 w-5" />
+                <div className="flex h-10 w-10 items-center justify-center bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <HeartIcon size={20} />
                 </div>
                 <h2 className="text-2xl font-bold tracking-tight">Open Source</h2>
               </div>
@@ -297,7 +351,7 @@ function OpenSourceSection() {
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    <Github className="mr-1.5 h-4 w-4" />
+                    <GithubLogoIcon size={16} className="mr-1.5" />
                     Star on GitHub
                   </a>
                 </Button>
@@ -308,7 +362,7 @@ function OpenSourceSection() {
                     rel="noopener noreferrer"
                   >
                     Report an Issue
-                    <ExternalLink className="ml-1.5 h-3 w-3" />
+                    <ArrowUpRightIcon size={12} className="ml-1.5" />
                   </a>
                 </Button>
               </div>
@@ -327,19 +381,19 @@ function LinkCard({
   label,
   description,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
   label: string;
   description: string;
 }) {
   return (
-    <div className="group flex items-start gap-4 rounded-xl border border-primary/10 bg-card p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/5">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
-        <Icon className="h-5 w-5" />
+    <div className="group flex items-start gap-4 ring-1 ring-foreground/8 bg-card p-5 transition-all duration-200 hover:ring-primary/25">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+        <Icon size={20} />
       </div>
       <div className="min-w-0">
         <h3 className="flex items-center gap-1.5 font-semibold">
           {label}
-          <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+          <ArrowUpRightIcon size={12} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </div>
@@ -349,7 +403,7 @@ function LinkCard({
 
 function LinksSection() {
   return (
-    <section className="border-t border-primary/5 py-20 sm:py-28">
+    <section className="border-t border-border py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Explore More</h2>
