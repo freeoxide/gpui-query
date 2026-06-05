@@ -13,7 +13,7 @@ export function Footer() {
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         {/* Logo + tagline */}
         <div className="mb-10 flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded bg-primary text-primary-foreground">
+          <div className="flex h-8 w-8 items-center justify-center bg-primary text-primary-foreground">
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -65,6 +65,16 @@ export function Footer() {
                 >
                   <GithubLogoIcon size={16} />
                   GitHub
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://gpui.rs/blog"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
+                >
+                  Blog
                 </a>
               </li>
               <li>

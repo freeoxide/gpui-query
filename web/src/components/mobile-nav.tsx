@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "#/components/ui/sheet";
-import { Github } from "lucide-react";
+import { GithubLogoIcon } from "@phosphor-icons/react";
 
 const navLinks = [
   { href: "/docs/", label: "Docs" },
@@ -32,12 +32,20 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
             </Link>
           ))}
           <a
+            href="https://gpui.rs/blog"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Blog
+          </a>
+          <a
             href="https://github.com/hmziqrs/gpui-query"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
-            <Github className="h-5 w-5" />
+            <GithubLogoIcon size={20} />
             GitHub
           </a>
         </nav>

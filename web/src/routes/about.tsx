@@ -415,7 +415,7 @@ function LinksSection() {
         <div className="mx-auto mt-14 grid max-w-3xl gap-4 sm:grid-cols-2">
           <a href="https://github.com/hmziqrs/gpui-query" target="_blank" rel="noopener noreferrer">
             <LinkCard
-              icon={Github}
+              icon={GithubLogoIcon}
               label="GitHub"
               description="Source code, issues, and releases"
             />
@@ -423,19 +423,19 @@ function LinksSection() {
 
           <a href="/docs/">
             <LinkCard
-              icon={BookOpen}
+              icon={BookOpenIcon}
               label="Documentation"
               description="Guides, API reference, and examples"
             />
           </a>
 
           <a href="https://gpui.rs/blog">
-            <LinkCard icon={PenLine} label="Blog" description="Announcements and deep dives" />
+            <LinkCard icon={NotePencilIcon} label="Blog" description="Announcements and deep dives" />
           </a>
 
           <Link to="/changelog">
             <LinkCard
-              icon={FileText}
+              icon={FileTextIcon}
               label="Changelog"
               description="Release history and breaking changes"
             />
