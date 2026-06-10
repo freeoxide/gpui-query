@@ -23,9 +23,7 @@ export function useScrollReveal() {
     if (!elements.length) return;
 
     // Respect reduced motion — show everything immediately
-    const prefersReduced = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReduced) {
       elements.forEach((el) => el.classList.add("is-visible"));
       return;

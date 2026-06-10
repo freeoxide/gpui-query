@@ -76,10 +76,7 @@ function HeroSection() {
             Built with care for the Rust ecosystem
           </div>
           <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-            About{" "}
-            <span className="text-primary">
-              gpui-query
-            </span>
+            About <span className="text-primary">gpui-query</span>
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-lg text-muted-foreground">
             The story behind async state management for GPUI
@@ -176,7 +173,11 @@ function AuthorSection() {
                   {/* Author links */}
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" asChild>
-                      <a href="https://github.com/hmziqrs" target="_blank" rel="noopener noreferrer">
+                      <a
+                        href="https://github.com/hmziqrs"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
                         <GithubLogoIcon size={16} className="mr-1.5" />
                         @hmziqrs
                       </a>
@@ -213,7 +214,10 @@ function AuthorSection() {
               <div>
                 <h3 className="flex items-center gap-1.5 font-semibold text-sm">
                   freeoxide.com
-                  <ArrowUpRightIcon size={12} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                  <ArrowUpRightIcon
+                    size={12}
+                    className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                  />
                 </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
                   A project born from the gpui-query initiative
@@ -233,11 +237,12 @@ function AuthorSection() {
               <div>
                 <h3 className="flex items-center gap-1.5 font-semibold text-sm">
                   hmziq.xyz
-                  <ArrowUpRightIcon size={12} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                  <ArrowUpRightIcon
+                    size={12}
+                    className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                  />
                 </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  More projects and experiments
-                </p>
+                <p className="mt-1 text-xs text-muted-foreground">More projects and experiments</p>
               </div>
             </a>
           </div>
@@ -393,7 +398,10 @@ function LinkCard({
       <div className="min-w-0">
         <h3 className="flex items-center gap-1.5 font-semibold">
           {label}
-          <ArrowUpRightIcon size={12} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+          <ArrowUpRightIcon
+            size={12}
+            className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+          />
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </div>
@@ -430,7 +438,11 @@ function LinksSection() {
           </a>
 
           <a href="https://gpui.rs/blog">
-            <LinkCard icon={NotePencilIcon} label="Blog" description="Announcements and deep dives" />
+            <LinkCard
+              icon={NotePencilIcon}
+              label="Blog"
+              description="Announcements and deep dives"
+            />
           </a>
 
           <Link to="/changelog">

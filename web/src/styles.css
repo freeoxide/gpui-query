@@ -95,6 +95,88 @@
   }
 }
 
+/* ── Landing: instrument-panel decor ─────────────────────────────── */
+.bg-dot-grid {
+  background-image: radial-gradient(
+    color-mix(in oklab, var(--color-foreground) 14%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+}
+
+@keyframes cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-cursor-blink {
+  animation: cursor-blink 1.1s step-end infinite;
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 36s linear infinite;
+}
+
+@keyframes flow-down {
+  0% {
+    top: -4px;
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    top: calc(100% - 4px);
+    opacity: 0;
+  }
+}
+
+.animate-flow-down {
+  animation: flow-down 2.4s ease-in-out infinite;
+}
+
+@keyframes status-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-status-in {
+  animation: status-in 0.25s var(--ease-reveal) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee,
+  .animate-flow-down,
+  .animate-cursor-blink,
+  .animate-status-in {
+    animation: none;
+  }
+}
+
 /* Custom keyframes */
 @keyframes gradient-shift {
   0% {
@@ -135,8 +217,9 @@
 .js-reveal [data-reveal] {
   opacity: 0;
   transform: translateY(20px);
-  transition: opacity 0.7s var(--ease-reveal),
-              transform 0.7s var(--ease-reveal);
+  transition:
+    opacity 0.7s var(--ease-reveal),
+    transform 0.7s var(--ease-reveal);
 }
 
 .js-reveal [data-reveal="fade"] {
@@ -157,12 +240,24 @@
 }
 
 /* Stagger children */
-[data-reveal-delay="1"] { transition-delay: 75ms; }
-[data-reveal-delay="2"] { transition-delay: 150ms; }
-[data-reveal-delay="3"] { transition-delay: 225ms; }
-[data-reveal-delay="4"] { transition-delay: 300ms; }
-[data-reveal-delay="5"] { transition-delay: 375ms; }
-[data-reveal-delay="6"] { transition-delay: 450ms; }
+[data-reveal-delay="1"] {
+  transition-delay: 75ms;
+}
+[data-reveal-delay="2"] {
+  transition-delay: 150ms;
+}
+[data-reveal-delay="3"] {
+  transition-delay: 225ms;
+}
+[data-reveal-delay="4"] {
+  transition-delay: 300ms;
+}
+[data-reveal-delay="5"] {
+  transition-delay: 375ms;
+}
+[data-reveal-delay="6"] {
+  transition-delay: 450ms;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .js-reveal [data-reveal] {

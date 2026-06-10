@@ -1,86 +1,65 @@
-import {
-  StackIcon,
-  CpuIcon,
-  DatabaseIcon,
-  ArrowRightIcon,
-} from "@phosphor-icons/react";
+import { StackIcon, CpuIcon, DatabaseIcon, ArrowRightIcon } from "@phosphor-icons/react";
+import { SectionHeading } from "./decor";
 
 const archLayers = [
   {
+    index: "L1",
+    icon: StackIcon,
     label: "Hook Layer",
     items: "use_query / use_mutation / use_infinite_query",
-    color: "primary",
+    tint: "bg-primary/[0.07]",
   },
   {
+    index: "L2",
+    icon: CpuIcon,
     label: "Client Layer",
     items: "QueryClient / Registry / GC",
-    color: "emerald",
+    tint: "bg-primary/[0.04]",
   },
   {
+    index: "L3",
+    icon: DatabaseIcon,
     label: "Core Layer",
     items: "QueryResource / CachePolicy / QueryKey",
-    color: "teal",
+    tint: "bg-primary/[0.02]",
   },
-] as const;
+];
 
-const colorMap: Record<string, { border: string; bg: string; text: string }> =
-  {
-    primary: {
-      border: "border-primary/40",
-      bg: "bg-primary/5",
-      text: "text-primary",
-    },
-    emerald: {
-      border: "border-emerald-500/40",
-      bg: "bg-emerald-500/5",
-      text: "text-emerald-600 dark:text-emerald-400",
-    },
-    teal: {
-      border: "border-teal-500/40",
-      bg: "bg-teal-500/5",
-      text: "text-teal-600 dark:text-teal-400",
-    },
-  };
-
-const layerIcons = [StackIcon, CpuIcon, DatabaseIcon];
+function Connector() {
+  return (
+    <div className="relative mx-auto h-9 w-px bg-border" aria-hidden="true">
+      <span className="animate-flow-down absolute -left-[1.5px] h-1 w-1 bg-primary" />
+    </div>
+  );
+}
 
 export function ArchitectureSection() {
   return (
-    <section className="border-t border-border py-20 sm:py-28">
+    <section className="py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div data-reveal>
-          <p className="text-xs font-medium tracking-widest uppercase text-primary">
-            Architecture
-          </p>
-          <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-            Three-layer design
-          </h2>
-          <p className="mt-4 max-w-2xl text-muted-foreground">
-            Designed in three clean layers, each with a clear responsibility.
-          </p>
-        </div>
+        <SectionHeading
+          eyebrow="architecture"
+          title="Three layers, one direction"
+          description="Each layer has a single responsibility. Data flows down, results flow back up."
+        />
 
         <div className="mx-auto mt-14 max-w-2xl">
           {archLayers.map((layer, i) => {
-            const Icon = layerIcons[i];
-            const colors = colorMap[layer.color];
+            const Icon = layer.icon;
             return (
               <div key={layer.label} data-reveal data-reveal-delay={String(i + 1)}>
-                {/* Connecting line */}
-                {i > 0 && (
-                  <div className="mx-auto h-8 w-px bg-border" />
-                )}
+                {i > 0 && <Connector />}
 
-                {/* Layer bar */}
                 <div
-                  className={`flex items-center gap-4 border-l-4 ${colors.border} ${colors.bg} px-6 py-5 transition-colors duration-200 hover:bg-opacity-100`}
+                  className={`flex items-center gap-5 border border-border border-l-2 border-l-primary ${layer.tint} px-6 py-5`}
                 >
-                  <Icon size={20} weight="duotone" className={`shrink-0 ${colors.text}`} />
+                  <span className="font-mono text-xs text-primary/60">{layer.index}</span>
+                  <Icon size={20} weight="duotone" className="shrink-0 text-primary" />
                   <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase tracking-widest text-foreground/80">
+                    <p className="font-display text-sm font-bold tracking-widest uppercase text-foreground">
                       {layer.label}
                     </p>
-                    <p className={`mt-0.5 truncate font-mono text-sm ${colors.text}`}>
+                    <p className="mt-0.5 truncate font-mono text-sm text-muted-foreground">
                       {layer.items}
                     </p>
                   </div>
@@ -89,18 +68,17 @@ export function ArchitectureSection() {
             );
           })}
 
-          {/* Data flow summary */}
-          <div className="mt-10 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <span className="font-medium">Data flows</span>
+          <div
+            className="mt-10 flex flex-wrap items-center justify-center gap-2 font-mono text-xs text-muted-foreground"
+            data-reveal
+            data-reveal-delay="4"
+          >
+            <span className="text-muted-foreground/60">data flows</span>
             <span className="text-primary">use_query</span>
-            <ArrowRightIcon size={14} className="text-muted-foreground" />
-            <span className="text-emerald-600 dark:text-emerald-400">
-              QueryClient
-            </span>
-            <ArrowRightIcon size={14} className="text-muted-foreground" />
-            <span className="text-teal-600 dark:text-teal-400">
-              QueryResource
-            </span>
+            <ArrowRightIcon size={13} aria-hidden="true" />
+            <span className="text-primary/80">QueryClient</span>
+            <ArrowRightIcon size={13} aria-hidden="true" />
+            <span className="text-primary/60">QueryResource</span>
           </div>
         </div>
       </div>

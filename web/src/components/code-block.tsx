@@ -39,11 +39,7 @@ export function CodeBlock({ children, title }: CodeBlockProps) {
           onClick={handleCopy}
           aria-label={copied ? "Copied" : "Copy code"}
         >
-          {copied ? (
-            <CheckIcon size={14} className="text-green-500" />
-          ) : (
-            <CopyIcon size={14} />
-          )}
+          {copied ? <CheckIcon size={14} className="text-green-500" /> : <CopyIcon size={14} />}
         </Button>
         <div ref={codeRef}>{children}</div>
       </div>

@@ -1,4 +1,5 @@
 import { CheckIcon, XIcon } from "@phosphor-icons/react";
+import { CornerMarks, SectionHeading } from "./decor";
 
 type Support = boolean;
 type Row = [string, Support, Support, Support];
@@ -17,74 +18,64 @@ const comparisonRows: Row[] = [
 
 const columns = [
   { label: "gpui-query", highlight: true },
-  { label: "Manual cx.spawn()", highlight: false },
+  { label: "cx.spawn()", highlight: false },
   { label: "Raw Futures", highlight: false },
 ];
 
 export function ComparisonSection() {
   return (
-    <section className="border-t border-border bg-muted/30 py-20 sm:py-28">
+    <section className="border-y border-border bg-muted/30 py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div data-reveal>
-          <p className="text-xs font-medium tracking-widest uppercase text-primary">
-            Comparison
-          </p>
-          <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-            Why gpui-query?
-          </h2>
-          <p className="mt-4 max-w-2xl text-muted-foreground">
-            See how gpui-query compares to the alternatives for managing async
-            state in GPUI.
-          </p>
-        </div>
+        <SectionHeading
+          eyebrow="comparison"
+          title="Why gpui-query?"
+          description="See how gpui-query compares to hand-rolling async state in GPUI."
+        />
 
-        <div
-          className="mx-auto mt-14 max-w-3xl overflow-hidden ring-1 ring-foreground/8"
-          data-reveal
-          data-reveal-delay="2"
-        >
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/80">
-                <th className="py-4 pr-4 pl-5 text-left text-sm font-semibold text-foreground">
-                  Feature
-                </th>
-                {columns.map((col) => (
-                  <th
-                    key={col.label}
-                    className={`px-4 py-4 text-center text-sm font-semibold ${
-                      col.highlight
-                        ? "text-primary"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    {col.label}
+        <div className="relative mx-auto mt-14 max-w-3xl" data-reveal data-reveal-delay="2">
+          <CornerMarks />
+          <div className="overflow-x-auto border border-border bg-background">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="py-4 pr-4 pl-5 text-left font-mono text-[11px] tracking-[0.2em] uppercase text-muted-foreground">
+                    Feature
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {comparisonRows.map(([feature, a, b, c]) => (
-                <tr
-                  key={feature}
-                  className="border-b border-border last:border-0 transition-colors hover:bg-muted/40"
-                >
-                  <td className="py-3.5 pr-4 pl-5 text-sm font-medium text-foreground">
-                    {feature}
-                  </td>
-                  <td className="bg-primary/[0.03] px-4 py-3.5 text-center">
-                    <SupportCell value={a} />
-                  </td>
-                  <td className="px-4 py-3.5 text-center">
-                    <SupportCell value={b} />
-                  </td>
-                  <td className="px-4 py-3.5 text-center">
-                    <SupportCell value={c} />
-                  </td>
+                  {columns.map((col) => (
+                    <th
+                      key={col.label}
+                      className={`px-4 py-4 text-center font-mono text-[11px] tracking-[0.15em] uppercase ${
+                        col.highlight ? "bg-primary/5 text-primary" : "text-muted-foreground"
+                      }`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {comparisonRows.map(([feature, a, b, c]) => (
+                  <tr
+                    key={feature}
+                    className="border-b border-border transition-colors last:border-0 hover:bg-muted/40"
+                  >
+                    <td className="py-3.5 pr-4 pl-5 text-sm font-medium text-foreground">
+                      {feature}
+                    </td>
+                    <td className="bg-primary/5 px-4 py-3.5 text-center">
+                      <SupportCell value={a} />
+                    </td>
+                    <td className="px-4 py-3.5 text-center">
+                      <SupportCell value={b} />
+                    </td>
+                    <td className="px-4 py-3.5 text-center">
+                      <SupportCell value={c} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
@@ -94,14 +85,14 @@ export function ComparisonSection() {
 function SupportCell({ value }: { value: boolean }) {
   if (value) {
     return (
-      <span className="inline-flex h-6 w-6 items-center justify-center ring-1 ring-primary/20 text-primary">
-        <CheckIcon size={14} weight="bold" />
+      <span className="inline-flex h-6 w-6 items-center justify-center bg-primary/10 text-primary ring-1 ring-primary/25">
+        <CheckIcon size={13} weight="bold" />
       </span>
     );
   }
   return (
-    <span className="inline-flex h-6 w-6 items-center justify-center ring-1 ring-foreground/8 text-muted-foreground/50">
-      <XIcon size={14} />
+    <span className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground/40 ring-1 ring-border">
+      <XIcon size={13} />
     </span>
   );
 }
