@@ -1,10 +1,12 @@
-name: Deploy
+name: Deploy Website
 
 on:
   push:
     branches: [main]
     paths:
       - "web/**"
+      - "website/**"
+      - "shared/**"
       - ".github/workflows/deploy.yml"
 
 concurrency:
@@ -39,9 +41,9 @@ jobs:
         env:
           CLOUDFLARE_INCLUDE_PROCESS_ENV: "true"
 
-      - name: Deploy to Cloudflare
+      - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           workingDirectory: web
-          command: deploy
+          command: pages deploy dist/client --project-name=gpui-query

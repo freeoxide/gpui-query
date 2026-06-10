@@ -1,0 +1,87 @@
+name: Changelog Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "CHANGELOG.md"
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Extract version from CHANGELOG
+        id: changelog
+        run: |
+          VERSION=$(grep -m 1 -oP '\[\K[0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md)
+          if [ -z "$VERSION" ]; then
+            echo "No version found in CHANGELOG.md"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check_tag
+        run: |
+          if git tag -l | grep -q "^${{ steps.changelog.outputs.tag }}$"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract release notes
+        id: notes
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.changelog.outputs.version }}"
+          NOTES=$(awk "/\[${VERSION}\]/,/^## \[([0-9]+\.){2}[0-9]+\]/" CHANGELOG.md | head -n -1 | tail -n +2 | sed '/^$/d; 1{/^$/d}')
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Update Cargo.toml versions
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.changelog.outputs.version }}"
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/gpui-query/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/gpui-query-v2/Cargo.toml
+
+      - name: Commit version bump
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add crates/gpui-query/Cargo.toml crates/gpui-query-v2/Cargo.toml
+          git diff --cached --quiet || git commit -m "chore: bump crate versions to v${{ steps.changelog.outputs.version }}"
+
+      - name: Create Git tag
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.changelog.outputs.tag }}" -m "Release v${{ steps.changelog.outputs.version }}"
+
+      - name: Push tag and commit
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git push origin HEAD:${{ github.ref }}
+          git push origin "${{ steps.changelog.outputs.tag }}"
+
+      - name: Create GitHub Release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.changelog.outputs.tag }}
+          name: Release ${{ steps.changelog.outputs.tag }}
+          body: ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(steps.changelog.outputs.version, '-') }}

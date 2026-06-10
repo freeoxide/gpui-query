@@ -11,7 +11,7 @@
     "build": "npm run build:docs && vp build && npx pagefind --site dist/client && node scripts/generate-rss.mjs --output dist/client && node scripts/generate-llms-txt.mjs --output dist/client && node scripts/generate-md-alt.mjs",
     "preview": "vp preview",
     "test": "vp test run",
-    "deploy": "pnpm run build && wrangler deploy",
+    "deploy": "pnpm run build && npx wrangler pages deploy dist/client --project-name=gpui-query",
     "prepare": "vp config"
   },
   "dependencies": {

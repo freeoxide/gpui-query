@@ -3,16 +3,13 @@ name: PR Checks
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "web/**"
-      - ".github/workflows/pr-checks.yml"
 
 concurrency:
   group: pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  check:
+  check-web:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -41,3 +38,26 @@ jobs:
         run: npx pnpm run build
         env:
           CLOUDFLARE_INCLUDE_PROCESS_ENV: "true"
+
+  check-rust:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "crates/gpui-query -> target\ncrates/gpui-query-v2 -> target"
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features
