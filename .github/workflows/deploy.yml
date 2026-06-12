@@ -1,0 +1,49 @@
+name: Deploy Website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "website/**"
+      - "shared/**"
+      - ".github/workflows/deploy.yml"
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: npx pnpm install --frozen-lockfile
+
+      - name: Build
+        run: npx pnpm run build
+        env:
+          CLOUDFLARE_INCLUDE_PROCESS_ENV: "true"
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: web
+          command: pages deploy dist/client --project-name=gpui-query

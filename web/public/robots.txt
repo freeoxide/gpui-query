@@ -1,3 +1,9 @@
-# https://www.robotstxt.org/robotstxt.html
 User-agent: *
-Disallow:
+Allow: /
+
+Sitemap: https://gpui-query.hmziq.xyz/sitemap.xml
+RSS: https://gpui-query.hmziq.xyz/rss.xml
+
+# AI agent files
+# llms.txt: https://gpui-query.hmziq.xyz/llms.txt
+# llms-full.txt: https://gpui-query.hmziq.xyz/llms-full.txt
