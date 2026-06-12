@@ -15,15 +15,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "crates/gpui-query -> target\ncrates/gpui-query-v2 -> target"
+          workspaces: "crates/gpui-query -> target\ncrates/gpui-query-legacy -> target"
 
       - name: Determine which crate to publish
         id: crate
         run: |
           TAG="${{ github.event.release.tag_name }}"
-          if [[ "$TAG" == *"-v2"* ]] || [[ "$TAG" == *"v2"* ]]; then
-            echo "name=crates/gpui-query-v2" >> "$GITHUB_OUTPUT"
-            echo "pkg=gpui-query-v2" >> "$GITHUB_OUTPUT"
+          if [[ "$TAG" == *"-legacy"* ]]; then
+            echo "name=crates/gpui-query-legacy" >> "$GITHUB_OUTPUT"
+            echo "pkg=gpui-query-legacy" >> "$GITHUB_OUTPUT"
           else
             echo "name=crates/gpui-query" >> "$GITHUB_OUTPUT"
             echo "pkg=gpui-query" >> "$GITHUB_OUTPUT"
@@ -35,7 +35,7 @@ jobs:
           VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           TAG_VERSION="${{ github.event.release.tag_name }}"
           TAG_VERSION="${TAG_VERSION#v}"
-          TAG_VERSION="${TAG_VERSION%-v2}"
+          TAG_VERSION="${TAG_VERSION%-legacy}"
           if [ "$VERSION" != "$TAG_VERSION" ]; then
             echo "Version mismatch: Cargo.toml has $VERSION, tag has $TAG_VERSION"
             exit 1

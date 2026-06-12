@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-06-12
+
+### Changed
+
+- The v2 rewrite at `crates/gpui-query-v2` is now the main crate at `crates/gpui-query`. The old v1 code lives at `crates/gpui-query-legacy`.
+- Fixed `read_with` calls in the hook module that returned `Result` instead of the raw value when called from `AsyncApp` context. The fix covers 9 call sites in `fetch_retry.rs`, `internals.rs`, and `fetch_runners.rs`.
+
+### Added
+
+- `legacy` feature flag. Add `features = ["legacy"]` to get the v1 API at `gpui_query::legacy`.
+- The legacy crate has `#![deprecated]` and a README pointing to v2.
+- All 12 documentation pages have real content now. No more "coming soon" stubs.
+
+### Removed
+
+- All `gpui_query_v2` references in source and docs replaced with `gpui_query`.
+
 ## [0.1.0] - 2025-06-10
 
 ### Added
@@ -56,4 +73,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Initial public release
 
+[0.1.1]: https://github.com/hmziqrs/gpui-query/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hmziqrs/gpui-query/releases/tag/v0.1.0
