@@ -64,8 +64,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
+      - name: Install web dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install website dependencies
+        working-directory: website
+        run: npm ci
 
       - name: Build
         run: bun run build
