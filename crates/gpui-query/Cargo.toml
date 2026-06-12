@@ -20,7 +20,7 @@ legacy = ["dep:gpui-query-legacy"]
 serde = { workspace = true }
 ahash = { version = "0.8" }
 gpui = { workspace = true, optional = true }
-gpui-query-legacy = { path = "../gpui-query-legacy", optional = true }
+gpui-query-legacy = { version = "0.1.1", path = "../gpui-query-legacy", optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
