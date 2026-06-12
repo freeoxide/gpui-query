@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/gpui-query-v2"]
-exclude = ["crates/gpui-query"]
+members = ["crates/gpui-query"]
+exclude = ["crates/gpui-query-legacy"]
 resolver = "3"
 
 [workspace.dependencies]

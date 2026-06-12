@@ -1,0 +1,24 @@
+[package]
+name = "gpui-query-legacy"
+version = "0.1.0"
+edition = "2024"
+description = "TanStack Query-inspired async state management for GPUI (legacy, deprecated)"
+repository = "https://github.com/hmziqrs/gpui-query"
+license = "MIT"
+keywords = ["gpui", "async", "state-management", "query", "zed"]
+categories = ["asynchronous", "caching", "gui"]
+homepage = "https://gpui-query.hmziq.xyz"
+
+[features]
+default = ["client"]
+core = []
+client = ["core", "dep:gpui"]
+hook = ["client"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+gpui = { version = "0.2.2", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+gpui = { version = "0.2.2", features = ["test-support"] }

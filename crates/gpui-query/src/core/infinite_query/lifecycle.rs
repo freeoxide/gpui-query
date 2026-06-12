@@ -1,18 +1,28 @@
-use super::{
-    QueryStatus, QueryTimestamp, RequestId, RequestSequencer,
+//! Lifecycle methods for [`InfiniteQueryResource`]: fetch, complete, reset,
+//! invalidate, and two-phase protocol.
+
+use crate::core::{
+    QuerySignal, QueryStatus, QueryTimestamp, RequestGuard, RequestId, RequestSequencer,
 };
-use crate::core::InfiniteQueryResource;
+
+use super::FetchDirection;
+use super::InfiniteQueryResource;
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
 
 impl<T, E> InfiniteQueryResource<T, E> {
     /// Begin fetching the next page.
     ///
-    /// Returns `None` (and does nothing) if `has_next_page` is `false`.
-    /// If a previous-page fetch is in progress, it is cancelled and replaced.
-    /// If a next-page fetch is already in progress with `LatestWins` policy,
-    /// the old request is cancelled and a new one starts. With
-    /// `IgnoreWhileLoading`, returns `None` instead.
+    /// **v2 fix**: Cancels the old signal before creating a new one.
+    ///
+    /// **Cross-direction replacement** (audit 2): When `RequestPolicy::LatestWins`
+    /// is set and a `begin_fetch_previous` is currently active, calling this
+    /// method will replace the previous-page request with this next-page request.
+    /// The old signal is cancelled and the previous-page result will be silently
+    /// discarded by `complete_page_success` (which returns `false` for stale IDs).
+    /// This is intentional for `LatestWins` semantics — the most recent direction
+    /// wins. Callers should check `is_fetching_next_page()` / `is_fetching_previous_page()`
+    /// before completing if they need to detect direction changes.
     pub fn begin_fetch_next(
         &mut self,
         sequencer: &mut RequestSequencer,
@@ -24,16 +34,18 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
         if self.is_fetching_next_page {
             match self.request_policy {
-                super::RequestPolicy::IgnoreWhileLoading => return None,
-                super::RequestPolicy::LatestWins => {
-                    // Cancel the existing next-page fetch and start fresh
-                }
+                crate::core::RequestPolicy::IgnoreWhileLoading => return None,
+                crate::core::RequestPolicy::LatestWins => {}
             }
         }
 
-        // If any request is active, count it as cancelled.
         if self.active_request_id.is_some() {
             self.cancelled_count += 1;
+        }
+
+        // v2 fix: Cancel old signal before replacing
+        if let Some(old_signal) = self.signal.as_ref() {
+            old_signal.cancel();
         }
 
         self.is_fetching_next_page = true;
@@ -48,16 +60,23 @@ impl<T, E> InfiniteQueryResource<T, E> {
         };
         self.started_at = Some(QueryTimestamp::from(now_ms));
         self.error = None;
-        self.signal = Some(super::QuerySignal::new());
+        self.signal = Some(QuerySignal::new());
 
         Some(request_id)
     }
 
     /// Begin fetching the previous page.
     ///
-    /// Returns `None` (and does nothing) if `has_previous_page` is `false`.
-    /// Respects the same `RequestPolicy` as [`begin_fetch_next`](Self::begin_fetch_next)
-    /// when a previous-page fetch is already in progress.
+    /// **v2 fix**: Cancels the old signal before creating a new one.
+    ///
+    /// **Cross-direction replacement** (audit 2): When `RequestPolicy::LatestWins`
+    /// is set and a `begin_fetch_next` is currently active, calling this
+    /// method will replace the next-page request with this previous-page request.
+    /// The old signal is cancelled and the next-page result will be silently
+    /// discarded by `complete_page_success` (which returns `false` for stale IDs).
+    /// This is intentional for `LatestWins` semantics — the most recent direction
+    /// wins. Callers should check `is_fetching_next_page()` / `is_fetching_previous_page()`
+    /// before completing if they need to detect direction changes.
     pub fn begin_fetch_previous(
         &mut self,
         sequencer: &mut RequestSequencer,
@@ -69,16 +88,18 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
         if self.is_fetching_previous_page {
             match self.request_policy {
-                super::RequestPolicy::IgnoreWhileLoading => return None,
-                super::RequestPolicy::LatestWins => {
-                    // Cancel the existing previous-page fetch and start fresh
-                }
+                crate::core::RequestPolicy::IgnoreWhileLoading => return None,
+                crate::core::RequestPolicy::LatestWins => {}
             }
         }
 
-        // Cancel any in-flight request.
         if self.active_request_id.is_some() {
             self.cancelled_count += 1;
+        }
+
+        // v2 fix: Cancel old signal before replacing
+        if let Some(old_signal) = self.signal.as_ref() {
+            old_signal.cancel();
         }
 
         self.is_fetching_previous_page = true;
@@ -93,42 +114,199 @@ impl<T, E> InfiniteQueryResource<T, E> {
         };
         self.started_at = Some(QueryTimestamp::from(now_ms));
         self.error = None;
-        self.signal = Some(super::QuerySignal::new());
+        self.signal = Some(QuerySignal::new());
 
         Some(request_id)
     }
 
-    /// Convenience wrapper around [`begin_fetch_next`](Self::begin_fetch_next) that
-    /// uses the resource's own persistent [`RequestSequencer`].
+    /// Like [`begin_fetch_next`] but accepts an optional pre-generated `RequestId`
+    /// instead of a `RequestSequencer`.
     ///
-    /// This is the preferred entry point for the hook layer — callers don't need
-    /// to manage a separate sequencer instance.
-    pub fn begin_fetch_next_auto(&mut self, now_ms: u128) -> Option<RequestId> {
-        // Take the sequencer out to avoid borrowing `self` and `self.sequencer`
-        // mutably at the same time.
-        let mut seq = std::mem::take(&mut self.sequencer);
-        let result = self.begin_fetch_next(&mut seq, now_ms);
-        self.sequencer = seq;
-        result
+    /// When `maybe_request_id` is `Some`, uses that ID directly — this is the
+    /// preferred call when the bucket's co-located sequencer has already
+    /// pre-allocated an ID via `QueryClient::next_request_id_for_infinite_key`.
+    /// When `None`, falls back to a transient `RequestSequencer::new()` for
+    /// compatibility (e.g., when no `QueryClient` is available).
+    ///
+    /// Passing the pre-allocated ID through ensures the `RequestId` stored as
+    /// the resource's `active_request_id` matches the one the bucket's sequencer
+    /// already consumed, keeping the bucket's monotonic counter consistent with
+    /// the resource's active request.
+    pub fn begin_fetch_next_with_id(
+        &mut self,
+        maybe_request_id: Option<RequestId>,
+        now_ms: u128,
+    ) -> Option<RequestId> {
+        if !self.has_next_page {
+            return None;
+        }
+
+        if self.is_fetching_next_page {
+            match self.request_policy {
+                crate::core::RequestPolicy::IgnoreWhileLoading => return None,
+                crate::core::RequestPolicy::LatestWins => {}
+            }
+        }
+
+        if self.active_request_id.is_some() {
+            self.cancelled_count += 1;
+        }
+
+        // v2 fix: Cancel old signal before replacing
+        if let Some(old_signal) = self.signal.as_ref() {
+            old_signal.cancel();
+        }
+
+        self.is_fetching_next_page = true;
+        self.is_fetching_previous_page = false;
+
+        let request_id = maybe_request_id
+            .unwrap_or_else(|| RequestSequencer::new().next_request());
+        self.active_request_id = Some(request_id);
+        self.status = if self.pages.is_empty() {
+            QueryStatus::LoadingEmpty
+        } else {
+            QueryStatus::LoadingWithData
+        };
+        self.started_at = Some(QueryTimestamp::from(now_ms));
+        self.error = None;
+        self.signal = Some(QuerySignal::new());
+
+        Some(request_id)
     }
 
-    /// Convenience wrapper around [`begin_fetch_previous`](Self::begin_fetch_previous)
-    /// that uses the resource's own persistent [`RequestSequencer`].
-    pub fn begin_fetch_previous_auto(&mut self, now_ms: u128) -> Option<RequestId> {
-        let mut seq = std::mem::take(&mut self.sequencer);
-        let result = self.begin_fetch_previous(&mut seq, now_ms);
-        self.sequencer = seq;
-        result
+    /// Like [`begin_fetch_previous`] but accepts an optional pre-generated
+    /// `RequestId` instead of a `RequestSequencer`.
+    ///
+    /// When `maybe_request_id` is `Some`, uses that ID directly — this is the
+    /// preferred call when the bucket's co-located sequencer has already
+    /// pre-allocated an ID via `QueryClient::next_request_id_for_infinite_key`.
+    /// When `None`, falls back to a transient `RequestSequencer::new()` for
+    /// compatibility (e.g., when no `QueryClient` is available).
+    ///
+    /// Passing the pre-allocated ID through ensures the `RequestId` stored as
+    /// the resource's `active_request_id` matches the one the bucket's sequencer
+    /// already consumed, keeping the bucket's monotonic counter consistent with
+    /// the resource's active request.
+    pub fn begin_fetch_previous_with_id(
+        &mut self,
+        maybe_request_id: Option<RequestId>,
+        now_ms: u128,
+    ) -> Option<RequestId> {
+        if !self.has_previous_page {
+            return None;
+        }
+
+        if self.is_fetching_previous_page {
+            match self.request_policy {
+                crate::core::RequestPolicy::IgnoreWhileLoading => return None,
+                crate::core::RequestPolicy::LatestWins => {}
+            }
+        }
+
+        if self.active_request_id.is_some() {
+            self.cancelled_count += 1;
+        }
+
+        // v2 fix: Cancel old signal before replacing
+        if let Some(old_signal) = self.signal.as_ref() {
+            old_signal.cancel();
+        }
+
+        self.is_fetching_previous_page = true;
+        self.is_fetching_next_page = false;
+
+        let request_id = maybe_request_id
+            .unwrap_or_else(|| RequestSequencer::new().next_request());
+        self.active_request_id = Some(request_id);
+        self.status = if self.pages.is_empty() {
+            QueryStatus::LoadingEmpty
+        } else {
+            QueryStatus::LoadingWithData
+        };
+        self.started_at = Some(QueryTimestamp::from(now_ms));
+        self.error = None;
+        self.signal = Some(QuerySignal::new());
+
+        Some(request_id)
+    }
+
+    /// Accept the current request for two-phase completion.
+    ///
+    /// Returns a [`RequestGuard`] if the request is still active, or `None`
+    /// if it was replaced or cancelled. The guard is a capability token for
+    /// the two-phase protocol (validate then complete).
+    ///
+    /// This mirrors [`QueryResource::accept_current_request`] for consistency.
+    /// Use this when you need to inspect or transform data between validation
+    /// and completion, or when integrating with frameworks that prefer explicit
+    /// acceptance.
+    pub fn accept_current_request(&mut self, request_id: RequestId) -> Option<RequestGuard> {
+        if self.is_current_request(request_id) {
+            self.active_request_id = None;
+            Some(RequestGuard::new(request_id))
+        } else {
+            None
+        }
+    }
+
+    /// Complete a page fetch with success using a guard (two-phase protocol).
+    ///
+    /// The guard proves that `accept_current_request` already validated the
+    /// request is current.
+    ///
+    /// **Audit 3**: Uses `VecDeque::push_back` for append and `VecDeque::push_front`
+    /// for prepend — both O(1) amortized.
+    pub fn complete_success_with_guard(
+        &mut self,
+        _guard: &RequestGuard,
+        page: T,
+        has_more: bool,
+        is_next: bool,
+        now_ms: u128,
+    ) {
+        if is_next {
+            self.pages.push_back(page);
+            self.has_next_page = has_more;
+            self.enforce_max_pages_remove_front();
+        } else {
+            self.pages.push_front(page);
+            self.has_previous_page = has_more;
+            self.enforce_max_pages_remove_back();
+        }
+
+        self.status = QueryStatus::Success;
+        self.error = None;
+        self.last_updated_at = Some(QueryTimestamp::from(now_ms));
+        self.is_fetching_next_page = false;
+        self.is_fetching_previous_page = false;
+        self.signal = None;
+    }
+
+    /// Complete a page fetch with failure using a guard (two-phase protocol).
+    ///
+    /// The guard proves that `accept_current_request` already validated the
+    /// request is current.
+    ///
+    /// **Note**: This does NOT clear previously loaded pages. A `Failure` status
+    /// means the last page fetch failed, but previously loaded pages remain
+    /// accessible via [`pages`](Self::pages). Use
+    /// [`is_page_data_valid`](Self::is_page_data_valid) to check whether page
+    /// data can be relied upon.
+    pub fn complete_failure_with_guard(&mut self, _guard: &RequestGuard, error: E) {
+        self.status = QueryStatus::Failure;
+        self.error = Some(error);
+        self.is_fetching_next_page = false;
+        self.is_fetching_previous_page = false;
+        self.signal = None;
     }
 
     /// Complete a page fetch with success.
     ///
-    /// If `request_id` matches the active request:
-    /// - Appends the page (if `is_next`) or prepends it (if previous).
-    /// - Sets `has_next_page` / `has_previous_page` from the result.
-    /// - Transitions to `Success` status.
+    /// Convenience method that accepts and completes in one call.
     ///
-    /// Returns `true` if the request was accepted, `false` if it was stale.
+    /// **Audit 3**: Uses `VecDeque::push_back` for append and `VecDeque::push_front`
+    /// for prepend — both O(1) amortized.
     pub fn complete_page_success(
         &mut self,
         request_id: RequestId,
@@ -138,15 +316,16 @@ impl<T, E> InfiniteQueryResource<T, E> {
         now_ms: u128,
     ) -> bool {
         if self.active_request_id != Some(request_id) {
+            self.ignored_results += 1;
             return false;
         }
 
         if is_next {
-            self.pages.push(page);
+            self.pages.push_back(page);
             self.has_next_page = has_more;
             self.enforce_max_pages_remove_front();
         } else {
-            self.pages.insert(0, page);
+            self.pages.push_front(page);
             self.has_previous_page = has_more;
             self.enforce_max_pages_remove_back();
         }
@@ -164,10 +343,16 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// Complete a page fetch with failure.
     ///
-    /// If `request_id` matches the active request, stores the error and
-    /// transitions to `Failure` status. Returns `true` if accepted.
+    /// Convenience method that accepts and completes in one call.
+    ///
+    /// **Note**: This does NOT clear previously loaded pages. The `Failure` status
+    /// applies to the most recent page fetch attempt only — previously loaded pages
+    /// remain accessible via [`pages()`](Self::pages) and are still valid. Use
+    /// [`is_page_data_valid()`](Self::is_page_data_valid) to check whether page
+    /// data can be relied upon.
     pub fn complete_page_failure(&mut self, request_id: RequestId, error: E) -> bool {
         if self.active_request_id != Some(request_id) {
+            self.ignored_results += 1;
             return false;
         }
 
@@ -181,13 +366,27 @@ impl<T, E> InfiniteQueryResource<T, E> {
         true
     }
 
-    /// Check whether the given request id is the current active request.
+    /// Whether the given request id is the current active request.
     pub fn is_current_request(&self, request_id: RequestId) -> bool {
         self.active_request_id == Some(request_id)
     }
 
-    /// Reset the resource back to idle, clearing all pages and state.
+    /// Reset to idle, clearing everything.
+    ///
+    /// **Note** (audit 2): `max_pages` is preserved across resets — if it was
+    /// changed via `set_max_pages()`, that value persists.
+    ///
+    /// **Audit 3**: `has_next_page` and `has_previous_page` are reset according
+    /// to the current [`FetchDirection`](self.direction):
+    /// - `ForwardOnly`: `has_next_page = true`, `has_previous_page = false`
+    /// - `Bidirectional`: both reset to `false`
+    ///
+    /// If the resource was previously exhausted, the caller should set the
+    /// flags again after reset if the direction-based defaults are incorrect.
     pub fn reset(&mut self) {
+        if let Some(signal) = self.signal.as_ref() {
+            signal.cancel();
+        }
         self.pages.clear();
         self.status = QueryStatus::Idle;
         self.error = None;
@@ -196,17 +395,22 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.last_updated_at = None;
         self.cache_hits = 0;
         self.cancelled_count = 0;
-        self.has_next_page = true;
-        self.has_previous_page = false;
+        self.ignored_results = 0;
+        self.retry_count = 0;
+        // max_pages is intentionally preserved across resets.
+        // direction is intentionally preserved across resets.
+        let (has_next, has_prev) = match self.direction {
+            FetchDirection::ForwardOnly => (true, false),
+            FetchDirection::Bidirectional => (false, false),
+        };
+        self.has_next_page = has_next;
+        self.has_previous_page = has_prev;
         self.is_fetching_next_page = false;
         self.is_fetching_previous_page = false;
         self.signal = None;
     }
 
-    /// Invalidate the resource by clearing the last-updated timestamp.
-    ///
-    /// Pages are retained but the resource is considered stale, so the next
-    /// access will trigger a refetch.
+    /// Invalidate the cache (clear last-updated timestamp).
     pub fn invalidate(&mut self) {
         self.last_updated_at = None;
     }

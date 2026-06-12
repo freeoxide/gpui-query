@@ -1,42 +1,29 @@
-//! Network connectivity mode for queries.
-//!
-//! [`NetworkMode`] controls whether queries should fetch based on network
-//! connectivity state. Inspired by TanStack Query's `networkMode` option.
+//! Network mode configuration (forward compatibility).
 
 use serde::{Deserialize, Serialize};
 
-/// Network connectivity mode for queries.
+/// Controls fetch behavior based on network connectivity.
 ///
-/// Controls whether queries attempt to fetch based on the perceived network
-/// state. For desktop applications, the default `Online` mode is typically
-/// appropriate since the network is usually available.
-///
-/// # Example
-///
-/// ```
-/// use gpui_query::core::NetworkMode;
-///
-/// let mode = NetworkMode::Always;
-/// assert_eq!(mode.label(), "always");
-/// ```
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// Note: In v2, this is defined for forward compatibility. The actual
+/// network detection is not yet implemented.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetworkMode {
-    /// Only fetch when online (default for web, less relevant for desktop).
+    /// Only fetch when online (default).
     #[default]
     Online,
-    /// Always fetch regardless of connectivity.
+    /// Always try to fetch, even when offline.
     Always,
-    /// Use a custom connectivity check (offline-first strategy).
+    /// Use cached data first, fetch when online.
     OfflineFirst,
 }
 
 impl NetworkMode {
-    /// Returns a static label string for this network mode.
-    pub fn label(&self) -> &'static str {
+    /// Human-readable label.
+    pub fn label(self) -> &'static str {
         match self {
-            Self::Online => "online",
-            Self::Always => "always",
-            Self::OfflineFirst => "offline-first",
+            Self::Online => "Online",
+            Self::Always => "Always",
+            Self::OfflineFirst => "Offline first",
         }
     }
 }
@@ -46,22 +33,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_is_online() {
+    fn network_mode_labels() {
+        assert_eq!(NetworkMode::Online.label(), "Online");
+        assert_eq!(NetworkMode::Always.label(), "Always");
+        assert_eq!(NetworkMode::OfflineFirst.label(), "Offline first");
+    }
+
+    #[test]
+    fn network_mode_default_is_online() {
         assert_eq!(NetworkMode::default(), NetworkMode::Online);
     }
 
     #[test]
-    fn labels() {
-        assert_eq!(NetworkMode::Online.label(), "online");
-        assert_eq!(NetworkMode::Always.label(), "always");
-        assert_eq!(NetworkMode::OfflineFirst.label(), "offline-first");
+    fn network_mode_serde_roundtrip() {
+        for mode in [NetworkMode::Online, NetworkMode::Always, NetworkMode::OfflineFirst] {
+            let json = serde_json::to_string(&mode).unwrap();
+            let back: NetworkMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, mode);
+        }
     }
 
     #[test]
-    fn serde_roundtrip() {
-        let mode = NetworkMode::OfflineFirst;
-        let json = serde_json::to_string(&mode).unwrap();
-        let back: NetworkMode = serde_json::from_str(&json).unwrap();
-        assert_eq!(mode, back);
+    fn network_mode_equality() {
+        assert_eq!(NetworkMode::Online, NetworkMode::Online);
+        assert_ne!(NetworkMode::Online, NetworkMode::Always);
+        assert_ne!(NetworkMode::Always, NetworkMode::OfflineFirst);
     }
 }

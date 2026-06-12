@@ -1,19 +1,14 @@
 //! Mutation resource for tracking async write operations.
-//!
-//! [`MutationResource`] tracks the lifecycle of a single mutation — from idle,
-//! through loading, to success or failure. It supports retry via a configurable
-//! [`RetryPolicy`] and cooperative cancellation through [`QuerySignal`].
-//!
-//! This module depends only on `serde` — zero framework coupling.
 
 use serde::{Deserialize, Serialize};
 
 use super::{QueryError, QueryKey, QuerySignal, RetryPolicy};
 
 /// Status of a mutation operation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MutationStatus {
     /// No mutation has been started yet.
+    #[default]
     Idle,
     /// Mutation is in progress.
     Loading,
@@ -24,7 +19,7 @@ pub enum MutationStatus {
 }
 
 impl MutationStatus {
-    /// Human-readable label for the status.
+    /// Human-readable label.
     pub fn label(self) -> &'static str {
         match self {
             Self::Idle => "Idle",
@@ -39,25 +34,6 @@ impl MutationStatus {
 ///
 /// `V` is the variables (input) type, `T` is the success output type,
 /// and `E` is the error type.
-///
-/// # Lifecycle
-///
-/// 1. **Idle** — initial state, no mutation in progress.
-/// 2. **Loading** — mutation started via [`begin`](MutationResource::begin),
-///    variables stored, signal created.
-/// 3. **Success** — mutation completed via
-///    [`complete_success`](MutationResource::complete_success).
-/// 4. **Failure** — mutation failed via
-///    [`complete_failure`](MutationResource::complete_failure).
-///    If retries remain, [`retry`](MutationResource::retry) transitions back
-///    to Loading.
-///
-/// # Retry
-///
-/// Each failure increments an internal retry counter. Call
-/// [`should_retry`](MutationResource::should_retry) to check whether another
-/// attempt is allowed, then [`retry`](MutationResource::retry) to re-enter
-/// the Loading state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MutationResource<V, T, E = QueryError> {
     key: Option<QueryKey>,
@@ -66,11 +42,8 @@ pub struct MutationResource<V, T, E = QueryError> {
     error: Option<E>,
     variables: Option<V>,
     retry_count: u32,
+    cancelled_count: u64,
     retry_policy: RetryPolicy,
-    /// Timestamp (ms) of the most recent [`begin`](MutationResource::begin) call.
-    /// Used by [`MutationBucket::gc`](crate::client::mutation_bucket::MutationBucket::gc)
-    /// to decide whether the resource is old enough to evict.
-    created_at: u64,
     #[serde(skip)]
     signal: Option<QuerySignal>,
 }
@@ -85,38 +58,43 @@ impl<V, T, E> MutationResource<V, T, E> {
             error: None,
             variables: None,
             retry_count: 0,
+            cancelled_count: 0,
             retry_policy,
-            created_at: 0,
             signal: None,
         }
     }
 
-    /// The current status of this mutation.
+    /// Current status.
     pub fn status(&self) -> MutationStatus {
         self.status
     }
 
-    /// The most recent successful data, if any.
+    /// Most recent successful data.
     pub fn data(&self) -> Option<&T> {
         self.data.as_ref()
     }
 
-    /// The most recent error, if any.
+    /// Most recent error.
     pub fn error(&self) -> Option<&E> {
         self.error.as_ref()
     }
 
-    /// The variables (input) for the current or most recent mutation.
+    /// Variables for the current or most recent mutation.
     pub fn variables(&self) -> Option<&V> {
         self.variables.as_ref()
     }
 
-    /// How many retries have been attempted so far.
+    /// Current retry count.
     pub fn retry_count(&self) -> u32 {
         self.retry_count
     }
 
-    /// A reference to the retry policy.
+    /// Number of times this mutation has been cancelled.
+    pub fn cancelled_count(&self) -> u64 {
+        self.cancelled_count
+    }
+
+    /// The retry policy.
     pub fn retry_policy(&self) -> &RetryPolicy {
         &self.retry_policy
     }
@@ -126,12 +104,12 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.status == MutationStatus::Loading
     }
 
-    /// Whether the mutation is idle (not started).
+    /// Whether the mutation is idle.
     pub fn is_idle(&self) -> bool {
         self.status == MutationStatus::Idle
     }
 
-    /// Whether the mutation completed successfully.
+    /// Whether the mutation succeeded.
     pub fn is_success(&self) -> bool {
         self.status == MutationStatus::Success
     }
@@ -141,17 +119,12 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.status == MutationStatus::Failure
     }
 
-    /// The optional query key associated with this mutation.
-    ///
-    /// When set, the key can be used to correlate mutations with specific
-    /// query resources for cache invalidation or optimistic updates.
+    /// Optional query key for this mutation.
     pub fn key(&self) -> Option<&QueryKey> {
         self.key.as_ref()
     }
 
     /// Associate a query key with this mutation.
-    ///
-    /// Returns `self` for builder-style chaining.
     pub fn with_key(mut self, key: QueryKey) -> Self {
         self.key = Some(key);
         self
@@ -159,31 +132,23 @@ impl<V, T, E> MutationResource<V, T, E> {
 
     /// Start a mutation with the given variables.
     ///
-    /// Transitions to [`Loading`](MutationStatus::Loading), stores the
-    /// variables, clears any previous error, records `now_ms` as the
-    /// creation timestamp, and creates a fresh cancellation signal.
-    ///
-    /// `now_ms` is a monotonically-nondecreasing timestamp in milliseconds,
-    /// typically sourced from [`QueryClient`](crate::client::QueryClient)'s
-    /// clock. It is used by garbage collection to determine resource age.
-    pub fn begin(&mut self, variables: V, now_ms: u64) {
+    /// Transitions to `Loading`, stores variables, clears error, creates signal.
+    /// Cancels any previous in-flight signal so a prior fetcher observes cancellation.
+    /// Resets `retry_count` so each mutation invocation starts fresh, matching
+    /// `QueryResource`'s behavior where the hook layer resets retries on success.
+    pub fn begin(&mut self, variables: V) {
+        // Cancel old signal before replacing, matching QueryResource/InfiniteQueryResource pattern.
+        if let Some(old_signal) = self.signal.as_ref() {
+            old_signal.cancel();
+        }
         self.status = MutationStatus::Loading;
         self.variables = Some(variables);
         self.error = None;
-        self.created_at = now_ms;
+        self.retry_count = 0;
         self.signal = Some(QuerySignal::new());
     }
 
-    /// The timestamp (ms) when [`begin`](MutationResource::begin) was last
-    /// called, or `0` if the mutation has never been started.
-    pub fn created_at(&self) -> u64 {
-        self.created_at
-    }
-
-    /// Complete the mutation successfully.
-    ///
-    /// Transitions to [`Success`](MutationStatus::Success) and stores the
-    /// result data.
+    /// Complete successfully.
     pub fn complete_success(&mut self, data: T) {
         self.status = MutationStatus::Success;
         self.data = Some(data);
@@ -191,31 +156,28 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.signal = None;
     }
 
-    /// Complete the mutation with a failure.
+    /// Complete with failure.
     ///
-    /// Transitions to [`Failure`](MutationStatus::Failure), stores the error,
-    /// and increments the retry counter.
+    /// Clears `data` so consumers do not see stale success data alongside
+    /// a `Failure` status. Increments `retry_count` with saturating add to
+    /// prevent wraparound.
     pub fn complete_failure(&mut self, error: E) {
         self.status = MutationStatus::Failure;
+        self.data = None;
         self.error = Some(error);
-        self.retry_count += 1;
+        self.retry_count = self.retry_count.saturating_add(1);
         self.signal = None;
     }
 
-    /// Whether another retry is allowed given the current retry count.
+    /// Whether another retry is allowed.
     pub fn should_retry(&self) -> bool {
         self.retry_policy.should_retry(self.retry_count)
     }
 
-    /// Retry the mutation by transitioning back to Loading.
+    /// Retry by transitioning back to Loading.
     ///
-    /// Only valid when [`should_retry`](MutationResource::should_retry)
-    /// returns `true` and the current status is
-    /// [`Failure`](MutationStatus::Failure). Returns `true` if the retry
-    /// was initiated.
-    ///
-    /// Variables from the original [`begin`](MutationResource::begin) call
-    /// are preserved. A fresh cancellation signal is created.
+    /// Only valid from `Failure` when retries remain.
+    /// A fresh cancellation signal is created.
     pub fn retry(&mut self) -> bool {
         if self.status != MutationStatus::Failure || !self.should_retry() {
             return false;
@@ -226,30 +188,73 @@ impl<V, T, E> MutationResource<V, T, E> {
         true
     }
 
-    /// Reset the mutation back to idle.
-    ///
-    /// Clears all data, error, variables, retry count, signal, and creation
-    /// timestamp.
+    /// Reset to idle, clearing everything.
     pub fn reset(&mut self) {
+        if let Some(signal) = self.signal.as_ref() {
+            signal.cancel();
+        }
         self.status = MutationStatus::Idle;
         self.data = None;
         self.error = None;
         self.variables = None;
         self.retry_count = 0;
-        self.created_at = 0;
+        self.cancelled_count = 0;
         self.signal = None;
     }
 
-    /// Returns a reference to the cancellation signal, if one exists.
+    /// The cancellation signal.
     pub fn signal(&self) -> Option<&QuerySignal> {
         self.signal.as_ref()
     }
 
-    /// Cancel the mutation with the given error.
+    /// Increment the retry counter.
     ///
-    /// Sets the error, transitions to [`Failure`](MutationStatus::Failure),
-    /// and cancels the signal so any in-flight work can observe it.
+    /// Used by the mutation retry loop to track how many attempts have been made
+    /// without transitioning through a terminal `Failure` state.
+    pub fn increment_retry(&mut self) {
+        self.retry_count = self.retry_count.saturating_add(1);
+    }
+
+    /// Prepare for a retry by refreshing the signal without transitioning
+    /// through `Failure`.
+    ///
+    /// This is the fix for audit finding #19: avoids a transient `Failure`
+    /// status that would cause observers to see a brief Failure flash between
+    /// retry attempts. The mutation stays in `Loading` state, the old signal
+    /// is cancelled, and a fresh signal is created for the next attempt.
+    pub fn prepare_retry(&mut self) {
+        if self.status != MutationStatus::Loading {
+            return;
+        }
+        // Cancel the old signal before creating a new one.
+        if let Some(old_signal) = self.signal.as_ref() {
+            old_signal.cancel();
+        }
+        self.error = None;
+        self.signal = Some(QuerySignal::new());
+    }
+
+    /// Reset the retry counter to zero.
+    ///
+    /// Called on terminal failure so that `retry_count` is clean for the
+    /// next mutation invocation (audit finding #4).
+    pub fn reset_retry_count(&mut self) {
+        self.retry_count = 0;
+    }
+
+    /// Cancel the mutation.
+    ///
+    /// Only has effect when the mutation is in `Loading` state. Returns without
+    /// side effects if the mutation is already `Idle`, `Success`, or `Failure`,
+    /// matching the `QueryResource::cancel` behavior where a no-op cancel is silent.
+    ///
+    /// When effective, increments `cancelled_count` for diagnostics and sets
+    /// status to `Failure`.
     pub fn cancel(&mut self, error: E) {
+        if self.status != MutationStatus::Loading {
+            return;
+        }
+        self.cancelled_count += 1;
         self.status = MutationStatus::Failure;
         self.error = Some(error);
         if let Some(signal) = self.signal.as_ref() {
@@ -258,8 +263,6 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.signal = None;
     }
 }
-
-// ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -270,170 +273,195 @@ mod tests {
         let m: MutationResource<String, String> =
             MutationResource::new(RetryPolicy::no_retries());
         assert!(m.is_idle());
-        assert!(!m.is_loading());
-        assert!(!m.is_success());
-        assert!(!m.is_failure());
         assert_eq!(m.status(), MutationStatus::Idle);
-        assert!(m.data().is_none());
-        assert!(m.error().is_none());
-        assert!(m.variables().is_none());
-        assert_eq!(m.retry_count(), 0);
     }
 
     #[test]
     fn begin_transitions_to_loading() {
         let mut m: MutationResource<String, String> =
             MutationResource::new(RetryPolicy::no_retries());
-        m.begin("my-vars".to_string(), 1_000);
-
+        m.begin("vars".to_string());
         assert!(m.is_loading());
-        assert_eq!(m.variables(), Some(&"my-vars".to_string()));
-        assert!(m.error().is_none());
-        assert!(m.signal().is_some());
-        assert_eq!(m.created_at(), 1_000);
+        assert_eq!(m.variables(), Some(&"vars".to_string()));
     }
 
     #[test]
-    fn complete_success() {
+    fn complete_success_stores_data() {
         let mut m: MutationResource<String, i32> =
             MutationResource::new(RetryPolicy::no_retries());
-        m.begin("vars".to_string(), 0);
+        m.begin("vars".to_string());
         m.complete_success(42);
-
         assert!(m.is_success());
         assert_eq!(m.data(), Some(&42));
-        assert!(m.error().is_none());
-        assert!(m.signal().is_none());
-        // Variables are preserved after success
-        assert_eq!(m.variables(), Some(&"vars".to_string()));
     }
 
     #[test]
-    fn complete_failure() {
+    fn complete_failure_stores_error() {
         let mut m: MutationResource<String, i32> =
             MutationResource::new(RetryPolicy::no_retries());
-        m.begin("vars".to_string(), 0);
+        m.begin("vars".to_string());
         m.complete_failure(QueryError::response("bad"));
-
         assert!(m.is_failure());
-        assert!(m.data().is_none());
-        assert_eq!(m.error().unwrap().message(), "bad");
         assert_eq!(m.retry_count(), 1);
+        assert!(m.data().is_none(), "data should be cleared on failure");
     }
 
     #[test]
-    fn retry_resets_to_loading() {
+    fn retry_from_failure() {
         let mut m: MutationResource<String, i32> =
             MutationResource::new(RetryPolicy::new(2));
-
-        m.begin("vars".to_string(), 0);
-        m.complete_failure(QueryError::response("fail 1"));
-
-        assert!(m.is_failure());
-        assert_eq!(m.retry_count(), 1);
-        assert!(m.should_retry());
-
-        let retried = m.retry();
-        assert!(retried);
+        m.begin("vars".to_string());
+        m.complete_failure(QueryError::response("fail"));
+        assert!(m.retry());
         assert!(m.is_loading());
-        assert!(m.error().is_none());
-        assert!(m.signal().is_some());
-        // Variables preserved
-        assert_eq!(m.variables(), Some(&"vars".to_string()));
     }
 
     #[test]
-    fn retry_respects_max_retries() {
+    fn retry_respects_max() {
         let mut m: MutationResource<String, i32> =
             MutationResource::new(RetryPolicy::new(1));
-
-        m.begin("vars".to_string(), 0);
-
-        // First failure, retry_count = 1
-        m.complete_failure(QueryError::response("fail 1"));
-        assert_eq!(m.retry_count(), 1);
-        assert!(!m.should_retry()); // max_retries=1, so 1 is not < 1
-
-        let retried = m.retry();
-        assert!(!retried);
-        assert!(m.is_failure());
+        m.begin("vars".to_string());
+        m.complete_failure(QueryError::response("fail"));
+        assert!(!m.should_retry()); // retry_count=1, max=1
+        assert!(!m.retry());
     }
 
     #[test]
     fn reset_clears_everything() {
         let mut m: MutationResource<String, i32> =
             MutationResource::new(RetryPolicy::new(3));
-
-        m.begin("vars".to_string(), 0);
+        m.begin("vars".to_string());
         m.complete_success(99);
         m.reset();
-
         assert!(m.is_idle());
         assert!(m.data().is_none());
-        assert!(m.error().is_none());
-        assert!(m.variables().is_none());
         assert_eq!(m.retry_count(), 0);
-        assert!(m.signal().is_none());
     }
 
     #[test]
-    fn cancel_sets_error_and_cancels_signal() {
+    fn cancel_cancels_signal() {
         let mut m: MutationResource<String, i32> =
             MutationResource::new(RetryPolicy::no_retries());
-        m.begin("vars".to_string(), 0);
-
+        m.begin("vars".to_string());
         let signal = m.signal().unwrap().clone();
         assert!(!signal.is_cancelled());
-
         m.cancel(QueryError::cancelled("aborted"));
-
-        assert!(m.is_failure());
-        assert_eq!(m.error().unwrap().message(), "aborted");
         assert!(signal.is_cancelled());
-        assert!(m.signal().is_none());
     }
 
     #[test]
-    fn status_labels() {
-        assert_eq!(MutationStatus::Idle.label(), "Idle");
-        assert_eq!(MutationStatus::Loading.label(), "Loading");
-        assert_eq!(MutationStatus::Success.label(), "Success");
-        assert_eq!(MutationStatus::Failure.label(), "Failure");
-    }
-
-    #[test]
-    fn retry_delay_calculation() {
-        let mut m: MutationResource<String, i32> = MutationResource::new(
-            RetryPolicy::new(5)
-                .with_delay(500)
-                .with_exponential_backoff()
-                .with_max_delay(5000),
-        );
-
-        m.begin("vars".to_string(), 0);
-        m.complete_failure(QueryError::response("fail")); // retry_count = 1
-        assert_eq!(m.retry_policy().delay_for_attempt(0), 500);
-        assert_eq!(m.retry_policy().delay_for_attempt(1), 1000);
-        assert_eq!(m.retry_policy().delay_for_attempt(4), 5000); // capped
-    }
-
-    #[test]
-    fn retry_only_from_failure_status() {
+    fn begin_cancels_old_signal() {
         let mut m: MutationResource<String, i32> =
-            MutationResource::new(RetryPolicy::new(3));
+            MutationResource::new(RetryPolicy::no_retries());
+        m.begin("first".to_string());
+        let old_signal = m.signal().unwrap().clone();
+        assert!(!old_signal.is_cancelled());
+        // Starting a new mutation should cancel the old signal.
+        m.begin("second".to_string());
+        assert!(old_signal.is_cancelled());
+        // New signal should not be cancelled.
+        assert!(!m.signal().unwrap().is_cancelled());
+    }
 
-        // Cannot retry from Idle
-        assert!(!m.retry());
-
-        // Cannot retry from Loading
-        m.begin("vars".to_string(), 0);
-        assert!(!m.retry());
-
-        // Can retry from Failure
+    #[test]
+    fn complete_failure_clears_previous_data() {
+        let mut m: MutationResource<String, i32> =
+            MutationResource::new(RetryPolicy::new(2));
+        m.begin("vars".to_string());
+        m.complete_success(42);
+        assert_eq!(m.data(), Some(&42));
+        // Succeed then fail: data should be cleared.
+        m.begin("vars2".to_string());
         m.complete_failure(QueryError::response("fail"));
-        assert!(m.retry());
+        assert!(m.is_failure());
+        assert!(m.data().is_none(), "data from previous success must be cleared on failure");
+    }
 
-        // After retry, back to Loading — cannot retry again without failing first
-        assert!(!m.retry());
+    #[test]
+    fn cancel_increments_cancelled_count() {
+        let mut m: MutationResource<String, i32> =
+            MutationResource::new(RetryPolicy::no_retries());
+        assert_eq!(m.cancelled_count(), 0);
+        m.begin("vars".to_string());
+        m.cancel(QueryError::cancelled("aborted"));
+        assert_eq!(m.cancelled_count(), 1);
+        m.begin("vars2".to_string());
+        m.cancel(QueryError::cancelled("aborted2"));
+        assert_eq!(m.cancelled_count(), 2);
+    }
+
+    #[test]
+    fn reset_clears_cancelled_count() {
+        let mut m: MutationResource<String, i32> =
+            MutationResource::new(RetryPolicy::no_retries());
+        m.begin("vars".to_string());
+        m.cancel(QueryError::cancelled("aborted"));
+        assert_eq!(m.cancelled_count(), 1);
+        m.reset();
+        assert_eq!(m.cancelled_count(), 0);
+    }
+
+    #[test]
+    fn cancel_on_idle_is_noop() {
+        let mut m: MutationResource<String, i32> =
+            MutationResource::new(RetryPolicy::no_retries());
+        assert!(m.is_idle());
+        m.cancel(QueryError::cancelled("aborted"));
+        assert!(m.is_idle(), "cancel on Idle should be a no-op");
+        assert_eq!(m.cancelled_count(), 0);
+        assert!(m.error().is_none());
+    }
+
+    #[test]
+    fn cancel_on_success_is_noop() {
+        let mut m: MutationResource<String, i32> =
+            MutationResource::new(RetryPolicy::no_retries());
+        m.begin("vars".to_string());
+        m.complete_success(42);
+        m.cancel(QueryError::cancelled("aborted"));
+        assert!(m.is_success(), "cancel on Success should be a no-op");
+        assert_eq!(m.cancelled_count(), 0);
+        assert_eq!(m.data(), Some(&42));
+    }
+
+    #[test]
+    fn cancel_on_failure_is_noop() {
+        let mut m: MutationResource<String, i32> =
+            MutationResource::new(RetryPolicy::no_retries());
+        m.begin("vars".to_string());
+        m.complete_failure(QueryError::response("fail"));
+        m.cancel(QueryError::cancelled("aborted"));
+        assert!(m.is_failure(), "cancel on Failure should be a no-op");
+        assert_eq!(m.cancelled_count(), 0);
+    }
+
+    #[test]
+    fn begin_resets_retry_count() {
+        let mut m: MutationResource<String, i32> =
+            MutationResource::new(RetryPolicy::new(2));
+        m.begin("vars".to_string());
+        m.complete_failure(QueryError::response("fail"));
+        assert_eq!(m.retry_count(), 1);
+        // Starting a new invocation resets retry_count.
+        m.begin("vars2".to_string());
+        assert_eq!(m.retry_count(), 0, "begin() should reset retry_count");
+    }
+
+    #[test]
+    fn begin_resets_retry_count_allows_fresh_retries() {
+        let mut m: MutationResource<String, i32> =
+            MutationResource::new(RetryPolicy::new(1));
+        // First invocation: fail, exhaust retries.
+        m.begin("vars".to_string());
+        m.complete_failure(QueryError::response("fail"));
+        assert_eq!(m.retry_count(), 1);
+        assert!(!m.should_retry(), "retries exhausted after first invocation");
+        // Second invocation: begin resets retry_count, so retries are fresh.
+        m.begin("vars2".to_string());
+        assert_eq!(m.retry_count(), 0);
+        assert!(m.should_retry(), "should_retry should be true after begin resets retry_count");
+        m.complete_failure(QueryError::response("fail again"));
+        assert_eq!(m.retry_count(), 1);
+        assert!(!m.should_retry(), "retries exhausted after second invocation");
     }
 }

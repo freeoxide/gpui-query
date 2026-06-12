@@ -14,11 +14,15 @@ default = ["client"]
 core = []
 client = ["core", "dep:gpui"]
 hook = ["client"]
+legacy = ["dep:gpui-query-legacy"]
 
 [dependencies]
 serde = { workspace = true }
+ahash = { version = "0.8" }
 gpui = { workspace = true, optional = true }
+gpui-query-legacy = { path = "../gpui-query-legacy", optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
 gpui = { workspace = true, features = ["test-support"] }
+proptest = "1"

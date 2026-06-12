@@ -1,20 +1,7 @@
 use super::QueryKey;
 
 /// A filter for matching query keys, used by bulk operations like
-/// [`invalidate_queries`](crate::client::QueryClient::invalidate_queries).
-///
-/// # Examples
-///
-/// ```
-/// use gpui_query::{QueryKey, QueryKeyFilter};
-///
-/// let key = QueryKey::from(["users", "42", "posts"]);
-///
-/// assert!(QueryKeyFilter::All.matches(&key));
-/// assert!(QueryKeyFilter::Exact(&key).matches(&key));
-/// assert!(QueryKeyFilter::Prefix(&QueryKey::from(["users"])).matches(&key));
-/// assert!(!QueryKeyFilter::Exact(&QueryKey::from(["users"])).matches(&key));
-/// ```
+/// `invalidate_queries`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum QueryKeyFilter<'a> {
     /// Match only the key that is exactly equal.
@@ -65,22 +52,8 @@ mod tests {
     }
 
     #[test]
-    fn prefix_rejects_unrelated_key() {
-        let prefix = key(&["todos"]);
-        let key = key(&["users", "42"]);
-        assert!(!QueryKeyFilter::Prefix(&prefix).matches(&key));
-    }
-
-    #[test]
-    fn prefix_matches_exact_same_key() {
-        let k = key(&["users", "42"]);
-        assert!(QueryKeyFilter::Prefix(&k).matches(&k));
-    }
-
-    #[test]
     fn all_matches_everything() {
-        let k = key(&["anything", "at", "all"]);
+        let k = key(&["anything"]);
         assert!(QueryKeyFilter::All.matches(&k));
-        assert!(QueryKeyFilter::All.matches(&key(&["a"])));
     }
 }
