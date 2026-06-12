@@ -437,13 +437,13 @@ function LinksSection() {
             />
           </a>
 
-          <a href="https://gpui.rs/blog">
+          <Link to="/blog">
             <LinkCard
               icon={NotePencilIcon}
               label="Blog"
               description="Announcements and deep dives"
             />
-          </a>
+          </Link>
 
           <Link to="/changelog">
             <LinkCard

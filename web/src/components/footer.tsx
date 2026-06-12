@@ -68,14 +68,12 @@ export function Footer() {
                 </a>
               </li>
               <li>
-                <a
-                  href="https://gpui.rs/blog"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <Link
+                  to="/blog"
                   className="text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
                 >
                   Blog
-                </a>
+                </Link>
               </li>
               <li>
                 <Link

@@ -1,0 +1,34 @@
+---
+title: "Introducing gpui-query"
+date: "2026-03-10"
+excerpt: "Zero-boilerplate async state management for GPUI — inspired by TanStack Query, built for Rust."
+author: "hmziqrs"
+---
+
+gpui-query brings the battle-tested patterns of [TanStack Query](https://tanstack.com/query) to the [GPUI](https://gpui.rs) framework. If you've ever wrestled with loading states, caching, or race conditions in your GPUI app — this is for you.
+
+## Why gpui-query?
+
+Building async-driven UIs in GPUI meant writing repetitive boilerplate: manual fetch logic, cache management, stale-while-revalidate heuristics, and cooperative cancellation. gpui-query handles all of this out of the box.
+
+```rust
+let (data, status) = use_query(cx, || QueryArgs::new(
+    "users".into(),
+    || async { fetch_users().await },
+));
+```
+
+That's it. Automatic caching, background refetching, retry with exponential backoff — all configured by default.
+
+## What's included
+
+- **Queries** (`use_query`) — declarative async data fetching with caching
+- **Mutations** (`use_mutation`) — server-side modifications with success/error callbacks
+- **Infinite Queries** (`use_infinite_query`) — paginated data with bidirectional fetching
+- **Query Observers** — fine-grained subscriptions for derived data
+- **Persistence API** — custom serialization backends for offline support
+- **DevTools** — diagnostic types for inspecting cache state
+
+## What's next
+
+We're working on DevTools UI integration, server-state synchronization patterns, and a plugin system for custom query backends. [Star the repo](https://github.com/hmziqrs/gpui-query) to follow along.

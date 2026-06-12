@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 
 const navLinks = [
   { href: "/docs/", label: "Docs" },
-  { href: "https://gpui.rs/blog", label: "Blog", external: true },
+  { href: "/blog", label: "Blog" },
   { href: "/faq", label: "FAQ" },
 ];
 
@@ -63,29 +63,17 @@ export function Navbar() {
           </Link>
 
           <nav className="hidden flex-1 items-center gap-6 md:flex" aria-label="Main navigation">
-            {navLinks.map((link) =>
-              link.external ? (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground"
-                >
-                  {link.label}
-                </a>
-              ) : (
-                <Link
-                  key={link.href}
-                  to={link.href}
-                  className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground relative after:absolute after:bottom-[-2px] after:left-0 after:h-0.5 after:w-0 after:bg-primary after:transition-all after:duration-200 hover:after:w-full"
-                  activeOptions={{ exact: false }}
-                  activeProps={{ className: "text-primary" }}
-                >
-                  {link.label}
-                </Link>
-              ),
-            )}
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                to={link.href}
+                className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground relative after:absolute after:bottom-[-2px] after:left-0 after:h-0.5 after:w-0 after:bg-primary after:transition-all after:duration-200 hover:after:w-full"
+                activeOptions={{ exact: false }}
+                activeProps={{ className: "text-primary" }}
+              >
+                {link.label}
+              </Link>
+            ))}
           </nav>
 
           <div className="flex flex-1 items-center justify-end gap-2 md:flex">

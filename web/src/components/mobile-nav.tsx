@@ -31,14 +31,13 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
               {link.label}
             </Link>
           ))}
-          <a
-            href="https://gpui.rs/blog"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            to="/blog"
+            onClick={onClose}
             className="text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             Blog
-          </a>
+          </Link>
           <a
             href="https://github.com/hmziqrs/gpui-query"
             target="_blank"
