@@ -1,11 +1,199 @@
 ---
 sidebar_position: 2
-title: Error Handling
-description: Patterns for handling errors in queries and mutations
+title: Error handling
+description: Handling and displaying query errors
 ---
 
-This page is coming soon. Check back when gpui-query is ready for documentation.
+Queries fail. Networks drop, servers return 500, users go offline. gpui-query tracks errors as part of the resource state so your UI can respond to them without extra bookkeeping.
 
-:::tip
-Discover how gpui-query surfaces errors and the patterns for graceful degradation.
-:::
+## QueryError and QueryErrorKind
+
+Every query and mutation uses [`QueryError`](/api/queries) as the default error type. It wraps two fields: a [`QueryErrorKind`](/api/queries) and a message string.
+
+```rust
+use gpui_query::{QueryError, QueryErrorKind};
+
+let err = QueryError::response("not found");
+assert_eq!(err.kind(), QueryErrorKind::Response);
+assert_eq!(err.message(), "not found");
+```
+
+The four variants of `QueryErrorKind` are:
+
+- `Response` for server-side errors (HTTP 4xx/5xx, application-level rejections)
+- `Transport` for network failures, timeouts, DNS errors
+- `Cancelled` for cooperative cancellation (the query was invalidated before it finished)
+- `Unknown` for anything that does not fit the above
+
+Each variant has a constructor helper so you do not spell out the kind explicitly:
+
+```rust
+// These all produce the correct QueryErrorKind
+QueryError::response("permission denied");
+QueryError::transport("connection refused");
+QueryError::cancelled("request invalidated");
+QueryError::unknown("something went wrong");
+```
+
+`QueryError` implements `std::fmt::Display` and `std::error::Error`. The display format is `"{kind}: {message}"`, so it prints cleanly in logs and works with the `?` operator:
+
+```rust
+fn fetch_users() -> Result<Vec<User>, QueryError> {
+    let resp = http::get("/users").await
+        .map_err(|e| QueryError::transport(e.to_string()))?;
+
+    if !resp.is_success() {
+        return Err(QueryError::response(resp.status_text()));
+    }
+
+    Ok(resp.json().await?)
+}
+```
+
+Because it implements `std::error::Error`, you can also return it through `anyhow`:
+
+```rust
+fn do_work() -> anyhow::Result<()> {
+    let users = fetch_users()?; // QueryError -> anyhow::Error, no wrapper needed
+    Ok(())
+}
+```
+
+Internally the message uses `Arc<str>`, so cloning a `QueryError` is a pointer bump. This matters in high-retry scenarios where the same error ends up stored in multiple locations.
+
+## Error sanitization
+
+Error messages often contain data you do not want in logs: database credentials, file paths, auth tokens. `QueryError::sanitized()` returns a new `QueryError` with known sensitive patterns redacted:
+
+```rust
+let err = QueryError::transport(
+    "connection to postgres://admin:s3cret@db.host/mydb failed"
+);
+let clean = err.sanitized();
+
+assert_eq!(
+    clean.message(),
+    "connection to [REDACTED_CONNECTION] failed"
+);
+```
+
+It handles these patterns:
+
+- Database connection strings: `postgres://...`, `mysql://...`, `mongodb://...`, `redis://...`
+- Bearer tokens and token assignments: `Bearer ...`, `token=...`
+- File paths: `/home/...`, `/Users/...`, `/etc/...`, `/var/...`
+- Email addresses
+- Long hex sequences (16+ hex chars, likely API keys or secrets)
+
+Messages longer than 512 characters get truncated with `...[truncated]` appended. The kind is preserved, only the message changes.
+
+```rust
+let err = QueryError::unknown(&"x".repeat(600));
+let clean = err.sanitized();
+
+assert!(clean.message().ends_with("...[truncated]"));
+assert_eq!(clean.kind(), QueryErrorKind::Unknown);
+```
+
+The sanitization runs a lightweight scan without depending on the `regex` crate. It is cheap enough to call on every error that leaves your app.
+
+## Reading errors from QueryResource
+
+When a query fails, the error is stored on the [`QueryResource`](/api/queries). Read it inside `read_with`:
+
+```rust
+entity.read_with(cx, |resource| {
+    if let Some(err) = resource.error() {
+        // err is &QueryError
+        println!("Error: {}", err);
+
+        // Sanitized version for logs or analytics
+        println!("Safe: {}", err.sanitized());
+    }
+});
+```
+
+The `error()` method returns `Option<&E>`. It is `Some` whenever the resource is in a failure state. You can also check the kind to branch your UI:
+
+```rust
+entity.read_with(cx, |resource| {
+    if let Some(err) = resource.error() {
+        match err.kind() {
+            QueryErrorKind::Transport => show_offline_banner(),
+            QueryErrorKind::Response => show_error_panel(err.message()),
+            QueryErrorKind::Cancelled => {} // silent, a new request is already running
+            QueryErrorKind::Unknown => show_generic_error(),
+        }
+    }
+});
+```
+
+## Error states in QueryStatus
+
+[QueryStatus](/api/queries) has three states relevant to errors:
+
+- `Failure` means the query completed with an error. `error()` will return `Some`.
+- `LoadingWithData` means a fetch is in progress, but a previous fetch failed. The stale data from before the error is still available via `data()`. This is the "show old data while retrying" scenario.
+- `Cancelled` means the request was cooperatively cancelled, typically because a new query with the same key superseded it.
+
+The `LoadingWithData` case is worth paying attention to. When a refetch fails, gpui-query keeps the last successful data around. You can show it to the user while also surfacing the error:
+
+```rust
+entity.read_with(cx, |resource| {
+    if resource.is_loading() && resource.has_data() {
+        // A refetch failed, but we still have previous data
+        show_stale_data_warning();
+        render_from(resource.data().unwrap());
+    }
+});
+```
+
+The `display_data()` method handles this pattern directly. It returns `data()` if present, falling back to `placeholder_data()`. Use it for rendering and your UI stays populated even during error states:
+
+```rust
+entity.read_with(cx, |resource| {
+    if let Some(data) = resource.display_data() {
+        render_list(data);
+    }
+
+    if let Some(err) = resource.error() {
+        show_inline_error(err.sanitized().message());
+    }
+});
+```
+
+## Mutation errors
+
+`MutationResource<V, T, E>` tracks errors the same way. After a mutation fails, `status()` returns `MutationStatus::Failure` and `error()` returns the error:
+
+```rust
+mutation_entity.read_with(cx, |mutation| {
+    if mutation.is_failure() {
+        if let Some(err) = mutation.error() {
+            log::error!("mutation failed: {}", err.sanitized());
+        }
+    }
+});
+```
+
+Mutations also track a retry count. Call `should_retry()` to check whether the retry policy allows another attempt, then call `retry()` to transition back to `Loading`. See [Retry](/guides/retry) for the full retry configuration.
+
+## Best practices
+
+**Sanitize before logging.** Any error that leaves your app (logs, analytics, crash reporting) should go through `sanitized()`. Raw error messages from server responses can contain credentials, internal paths, and tokens.
+
+```rust
+// Good: sanitized before logging
+log::error!("query failed: {}", err.sanitized());
+
+// Bad: might leak secrets
+log::error!("query failed: {}", err);
+```
+
+**Check `has_data()` alongside `error()`.** A resource can have both data and an error at the same time (the `LoadingWithData` state). If you only check `error()`, you might hide good data that is still valid to show.
+
+**Use `display_data()` for rendering.** It returns data if available, falling back to placeholder data. This keeps your UI populated during transient failures. You can layer an error indicator on top.
+
+**Match on `QueryErrorKind` to decide what to show.** Transport errors warrant a different UI response than server errors. Cancelled errors usually do not need to be shown at all.
+
+For retry configuration, see the [Retry](/guides/retry) guide. For the full query and mutation API, see [Queries](/api/queries) and [Mutations](/api/mutations).

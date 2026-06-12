@@ -1,11 +1,116 @@
 ---
 sidebar_position: 1
 title: Observers
-description: Building reactive UIs with query observers
+description: Fine-grained reactivity with query observers
 ---
 
-This page is coming soon. Check back when gpui-query is ready for documentation.
+Every time a [QueryClient](/api/query-client) updates a query's internal state, something has to decide whether your view re-renders. That decision is the observer's job.
 
-:::tip
-Observers let you subscribe to query state changes and reactively update your GPUI views.
-:::
+A `QueryResource` tracks a lot of state: status, data, error, fetch timestamp, cache age. Most of those fields change constantly in the background. A cache age ticking from 1001ms to 1002ms does not affect what the user sees. Without filtering, every one of those updates calls `cx.notify()` on your view, and GPUI re-renders the entire component tree.
+
+Observers sit between the entity and your view. They subscribe to changes, compare what matters, and only call `cx.notify()` when something visible has actually changed.
+
+## QueryObserver
+
+`QueryObserver` wraps a query entity and watches its status field. When the status transitions (for example, `Loading` to `Success`, or `Success` to `Error`), it calls `cx.notify()`. When the status stays the same, it stays silent.
+
+```rust
+use gpui_query::{QueryObserver, ObserverConfig};
+
+let config = ObserverConfig::default(); // notify_on_status_change_only: true
+let subscription = QueryObserver::new(entity, config, cx);
+```
+
+The constructor subscribes immediately. You don't call a separate `subscribe` method.
+
+## InfiniteQueryObserver
+
+Same idea, different shape. `InfiniteQueryObserver` watches an infinite query entity. It notifies when the overall status changes, or when the page set changes in a way that affects rendering (like a new page being appended).
+
+```rust
+use gpui_query::{InfiniteQueryObserver, ObserverConfig};
+
+let config = ObserverConfig::default();
+let subscription = InfiniteQueryObserver::new(entity, config, cx);
+```
+
+## MutationObserver
+
+`MutationObserver` applies the observer pattern to mutations. A mutation transitions through `Idle`, `Loading`, and `Success` or `Error`. The observer only triggers a re-render at those boundaries.
+
+```rust
+use gpui_query::{MutationObserver, ObserverConfig};
+
+let config = ObserverConfig::default();
+let subscription = MutationObserver::new(entity, config, cx);
+```
+
+## ObserverConfig
+
+`ObserverConfig` has one field:
+
+```rust
+pub struct ObserverConfig {
+    pub notify_on_status_change_only: bool, // default: true
+}
+```
+
+When `true` (the default), the observer only calls `cx.notify()` when the query status changes. Loading to Success. Success to Error. Those transitions. The data itself changing does not trigger a re-render.
+
+When `false`, any change to the entity's observable state triggers `cx.notify()`. This includes new data arriving, cache metadata updating, and background refetches completing. Use this when your view displays data that updates in real time and you need every revision.
+
+```rust
+let config = ObserverConfig {
+    notify_on_status_change_only: false,
+};
+```
+
+## Returns `Option<Subscription>`
+
+In v2, all observer constructors return `Option<Subscription>` instead of panicking when the entity cannot be found. This happens when the query was garbage collected between the time you obtained the entity handle and the time you created the observer.
+
+Handle the `None` case:
+
+```rust
+let subscription = match QueryObserver::new(entity, config, cx) {
+    Some(sub) => sub,
+    None => {
+        // Entity was evicted from cache. Create a fresh query or show fallback UI.
+        return;
+    }
+};
+```
+
+Dropping the `Subscription` unsubscribes the observer. Keep it alive as long as you want updates.
+
+## How hooks use observers
+
+The hooks you interact with daily ([`use_query`](/api/queries), [`use_mutation`](/api/queries), [`use_infinite_query`](/api/queries)) all create observers internally. Each hook spawns the appropriate observer, passes a default `ObserverConfig`, and holds the subscription for the lifetime of the component.
+
+You don't need to set up observers manually unless you're building a custom abstraction on top of the query system. Maybe you're writing a hook that composes multiple queries, or you need a non-standard `ObserverConfig`. That's when you reach for the observer types directly.
+
+## Custom observer usage
+
+Here is a practical example of wiring up an observer with a non-default config:
+
+```rust
+use gpui_query::{QueryObserver, ObserverConfig};
+
+fn setup_custom_observer(
+    entity: Entity<QueryResource<MyData, MyError>>,
+    cx: &mut ViewContext<MyView>,
+) -> Option<Subscription> {
+    let config = ObserverConfig {
+        notify_on_status_change_only: false, // re-render on any data change
+    };
+    QueryObserver::new(entity, config, cx)
+}
+```
+
+The observer auto-subscribes on creation. When `MyData` changes in the cache, your view re-renders. When you drop the returned `Subscription`, the observer stops listening.
+
+## Why this matters
+
+Without observers, a single query updating its internal timestamp every millisecond would re-render your view 1000 times per second. With observers and the default config, that same query re-renders your view once when it finishes loading. That is the difference between a sluggish UI and one that feels responsive.
+
+For debugging what triggers re-renders, see [Devtools](/advanced/devtools).

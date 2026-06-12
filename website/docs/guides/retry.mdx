@@ -1,11 +1,112 @@
 ---
 sidebar_position: 3
 title: Retry
-description: Configuring automatic retry behavior for failed requests
+description: Configuring automatic retry for failed requests
 ---
 
-This page is coming soon. Check back when gpui-query is ready for documentation.
+Network requests fail. Servers drop connections, DNS resolution flakes, sockets time out. gpui-query retries failed fetches automatically using a configurable `RetryPolicy`.
 
-:::tip
-Configure retry counts, delays, and backoff strategies for resilient data fetching.
-:::
+## RetryPolicy
+
+`RetryPolicy` controls how many times a failed fetch is retried and how long to wait between attempts. It uses a builder pattern.
+
+```rust
+use gpui_query::RetryPolicy;
+
+// Default: 3 retries, 1-second base delay, exponential backoff, 30-second cap.
+let policy = RetryPolicy::default();
+
+// Custom policy with 5 retries and exponential backoff.
+let policy = RetryPolicy::new(5)
+    .with_delay(2_000)              // 2-second base delay
+    .with_exponential_backoff()     // 2s, 4s, 8s, 16s, 32s
+    .with_max_delay(60_000);        // cap at 60 seconds
+
+// No retries at all.
+let policy = RetryPolicy::no_retries();
+```
+
+### Default values
+
+`RetryPolicy::default()` gives you:
+
+- `max_retries`: 3
+- `retry_delay_ms`: 1000 (1 second)
+- `exponential_backoff`: true
+- `max_retry_delay_ms`: 30,000 (30 seconds)
+
+When you call `RetryPolicy::new(n)`, you get a fixed-delay policy (no exponential backoff) with the same 1-second base and 30-second cap. Chain `.with_exponential_backoff()` to enable it.
+
+### How delay is calculated
+
+With exponential backoff, the delay for attempt N is:
+
+```
+base_delay * 2^attempt
+```
+
+This is then capped by `max_retry_delay_ms` and a hard ceiling of 3,600,000 ms (one hour, the `ABSOLUTE_MAX_DELAY_MS` constant). The shift is limited to 62 bits to prevent overflow.
+
+For a policy with a 1-second base:
+
+| Attempt | Calculation | Delay |
+|---------|-------------|-------|
+| 0 | 1000 * 2^0 | 1s |
+| 1 | 1000 * 2^1 | 2s |
+| 2 | 1000 * 2^2 | 4s |
+| 3 | 1000 * 2^3 | 8s |
+
+Without exponential backoff, every retry waits the same `retry_delay_ms`.
+
+## Setting a retry policy
+
+`QueryOptions` accepts a retry policy via the builder. The same applies to `MutationOptions` and `InfiniteQueryOptions`.
+
+```rust
+use gpui_query::{QueryOptions, RetryPolicy};
+
+let result = use_query(
+    QueryOptions::new("users")
+        .retry_policy(RetryPolicy::new(5).with_exponential_backoff()),
+    |signal| async move {
+        Ok::<Vec<User>, MyError>(fetch_users().await?)
+    },
+    cx,
+);
+```
+
+The default for `QueryOptions` and `InfiniteQueryOptions` is `RetryPolicy::default()` (3 retries with backoff). The default for `MutationOptions` is `RetryPolicy::no_retries()`, since mutations usually represent user actions where silent retries can cause side effects.
+
+## Reading retry state
+
+`QueryResource` exposes `retry_count()` to check how many retry attempts have been made for the current request.
+
+```rust
+let entity: Entity<QueryResource<Vec<User>, MyError>> = /* ... */;
+
+let attempts = entity.read_with(cx, |r, _| r.retry_count());
+```
+
+The count resets to 0 on success and on terminal failure (when all retries are exhausted), so the resource is clean for the next `begin_request`.
+
+## Cooperative cancellation
+
+Retries cooperate with the cancellation signal. After each retry delay, gpui-query checks whether the request is still active. If a newer request replaced it (under `LatestWins` request policy) or you called `cancel()` on the signal, the retry loop stops immediately.
+
+This means stale requests do not waste time retrying in the background. The check uses `is_current_request(request_id)` on the entity, which is the same guard that prevents stale writes during completion.
+
+Your fetcher also receives a `QuerySignal` (when using the signal-accepting variant of `use_query`). You can check `signal.is_cancelled()` inside long-running fetches to abort early, though the retry loop itself handles cancellation between attempts automatically.
+
+## Retry methods reference
+
+`RetryPolicy` has three methods you might call directly:
+
+- `should_retry(attempt)` returns `true` if `attempt < max_retries`. The retry loop calls this with the current attempt counter.
+- `delay_for_attempt(attempt)` calculates the delay in milliseconds for the given attempt number, applying exponential backoff and caps.
+- `no_retries()` constructs a policy that never retries. Equivalent to `RetryPolicy { max_retries: 0, .. }`.
+
+## When retries are exhausted
+
+After all retry attempts fail, the query transitions to `Failure` status with the last error. The retry count is then reset so the resource is ready for a fresh fetch later (for example, on refetch or remount). The error is available through `resource.error()`.
+
+For patterns around displaying errors and recovering from failure, see [Error Handling](/guides/error-handling). For the full query API including `begin_request` and completion methods, see [Queries](/api/queries).

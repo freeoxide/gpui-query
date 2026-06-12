@@ -1,11 +1,112 @@
 ---
 sidebar_position: 4
 title: Persistence
-description: Persisting query cache across sessions
+description: Saving and restoring query state across sessions
 ---
 
-This page is coming soon. Check back when gpui-query is ready for documentation.
+Users close your app. They reopen it, and every fetch starts from scratch. That means loading spinners where there should be cached data, redundant network requests, and a sluggish experience.
 
-:::tip
-Persist cached data to disk so your app can start with fresh data on relaunch.
-:::
+gpui-query includes a built-in serialization system. You can snapshot the entire query cache to disk (or anywhere else), then restore it on the next launch. Queries come back with their data, their keys, and their cache metadata intact.
+
+## The `QueryPersister` trait
+
+Implement `QueryPersister` to tell gpui-query where to read and write state. The trait has two methods: `load` and `save`.
+
+```rust
+use gpui_query::{QueryPersister, DehydratedEntry};
+
+struct FilePersister {
+    path: std::path::PathBuf,
+}
+
+impl QueryPersister for FilePersister {
+    fn load(&self) -> Vec<DehydratedEntry> {
+        let bytes = match std::fs::read(&self.path) {
+            Ok(b) => b,
+            Err(_) => return Vec::new(),
+        };
+        serde_json::from_slice(&bytes).unwrap_or_default()
+    }
+
+    fn save(&self, entries: Vec<DehydratedEntry>) {
+        if let Ok(json) = serde_json::to_vec(&entries) {
+            let _ = std::fs::write(&self.path, json);
+        }
+    }
+}
+```
+
+This example writes to a JSON file. You could just as well write to SQLite, a socket, or anything else. The trait does not care about the storage backend.
+
+## What is a `DehydratedEntry`?
+
+Each cached query becomes one `DehydratedEntry`. It carries four fields:
+
+- **`key`** - the query key, serialized
+- **`type_id`** - the Rust type ID of the data, used to route deserialization
+- **`kind`** - either `"query"` or `"infinite"`, depending on the query type
+- **`data_json`** - the serialized query data
+
+The `DehydratedState` struct wraps a `Vec<DehydratedEntry>` and represents the full snapshot of a [QueryClient](/api/query-client)'s cache at a point in time.
+
+## Saving state
+
+Call `dehydrate` on the client to get a snapshot, then hand it to your persister.
+
+```rust
+let client = cx.global::<QueryClient>();
+let state = client.dehydrate();
+persister.save(state.entries);
+```
+
+This grabs every eligible entry from the cache and serializes it. Queries whose data types do not implement `Serialize` are skipped silently.
+
+## Restoring state
+
+Load the entries back and pass them through `hydrate`.
+
+```rust
+let entries = persister.load();
+let state = DehydratedState { entries };
+client.hydrate(state);
+```
+
+After `hydrate` returns, the client's cache contains all the restored queries. Any active observers (components listening to query state) will see the data immediately.
+
+## Convenience methods
+
+The client has two shorthand methods that combine dehydrate/hydrate with your persister.
+
+```rust
+// Save everything in one call
+client.persist(&persister);
+
+// Load and restore in one call
+client.restore(&persister);
+```
+
+These are equivalent to calling `dehydrate` + `save` or `load` + `hydrate` yourself. Use them when you do not need to inspect the `DehydratedState` in between.
+
+## When to persist
+
+Good times to call `persist`:
+
+- When the app is about to quit or suspend
+- During idle periods, on a timer (every 30 seconds, for example)
+- After a mutation invalidates queries that took a long time to fetch
+
+Avoid calling it on every query success. That would turn your cache writes into a bottleneck. Treat persistence as a periodic checkpoint, not a realtime sync.
+
+## What gets persisted
+
+Only queries with serializable data make it through the cycle. Your data type `T` must implement both `Serialize` and `DeserializeOwned` from serde. Queries that fail this requirement are dropped during `dehydrate`.
+
+The type ID stored in each entry ensures that `hydrate` routes data back to the correct generic type. Two queries with different `T` but the same key will not collide.
+
+## Limitations
+
+Mutations are not persisted. A mutation represents an in-flight operation: a POST request, a file write, a submit action. Those do not make sense to restore across sessions.
+
+Only [queries](/api/queries) and infinite queries go through dehydrate. If you have other cached resources managed outside the query system, you will need to handle those separately.
+
+See [Caching](/guides/caching) for background on how the cache works day-to-day, and [QueryClient](/api/query-client) for the full API surface.

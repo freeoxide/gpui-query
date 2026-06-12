@@ -1,11 +1,333 @@
 ---
 sidebar_position: 4
 title: QueryClient
-description: API reference for the QueryClient singleton
+description: API reference for the QueryClient global registry
 ---
 
-This page is coming soon. Check back when gpui-query is ready for documentation.
+`QueryClient` is a GPUI [`Global`] that holds every [query](/api/queries), infinite query, and [mutation](/api/mutations) entity in your application. You set it up once during app initialization and access it from any GPUI context through `cx.global::<QueryClient>()`.
 
-:::tip
-The QueryClient is the central coordinator that manages caches, queries, and mutations.
-:::
+[`Global`]: https://docs.rs/gpui/latest/gpui/trait.Global.html
+
+## Setup
+
+```rust
+use gpui_query::{CachePolicy, QueryClient, RequestPolicy, RetryPolicy};
+
+let client = QueryClient::new(
+    CachePolicy::Ttl { ttl_ms: 60_000 },
+    RequestPolicy::LatestWins,
+)
+.with_gc_time(300_000)       // 5 minutes (this is the default)
+.with_retry_policy(
+    RetryPolicy::new(3)
+        .with_delay(1000)
+        .with_exponential_backoff()
+        .with_max_delay(30_000),
+);
+
+cx.set_global(client);
+```
+
+`QueryClient::new` takes two required arguments: a default `CachePolicy` and a default `RequestPolicy`. Every [query resource](/api/queries) created through `resource()` inherits these unless you override them per-resource.
+
+### Constructor
+
+| Method | Description |
+|--------|-------------|
+| `new(cache_policy, request_policy)` | Create a client with default policies |
+| `.with_gc_time(ms)` | Set garbage collection interval (default: 300,000 ms) |
+| `.with_retry_policy(policy)` | Set default retry policy for mutations |
+
+## Typed query access
+
+### `resource`
+
+```rust
+fn resource<T, E>(&mut self, key: QueryKey, cx: &mut App) -> Entity<QueryResource<T, E>>
+```
+
+Get or create a `QueryResource<T, E>` entity for the given key. If a resource already exists for that key and type pair, it returns the existing entity. Otherwise it creates a new one with the client's default policies.
+
+```rust
+let client = cx.global_mut::<QueryClient>();
+let user = client.resource::<User, MyError>(
+    QueryKey::from(["users", "42"]),
+    cx,
+);
+```
+
+### `resource_with_policies`
+
+```rust
+fn resource_with_policies<T, E>(
+    &mut self,
+    key: QueryKey,
+    cache_policy: CachePolicy,
+    request_policy: RequestPolicy,
+    cx: &mut App,
+) -> Entity<QueryResource<T, E>>
+```
+
+Same as `resource`, but with explicit per-resource policies that override the client defaults.
+
+### `contains`
+
+```rust
+fn contains<T, E>(&self, key: &QueryKey) -> bool
+```
+
+Check whether a resource exists for the given key and type pair. Does not create anything.
+
+### `fetch_query` and `force_fetch_query`
+
+```rust
+fn fetch_query<T, E>(
+    &mut self,
+    key: QueryKey,
+    cache_policy: CachePolicy,
+    request_policy: RequestPolicy,
+    now_ms: u128,
+    cx: &mut App,
+) -> Option<(Entity<QueryResource<T, E>>, RequestId)>
+```
+
+Imperatively begin a fetch. Creates the resource if needed, then starts a request using the resource's co-located sequencer. Returns `None` (short-circuits) when the cache is fresh or a request is already in flight with `IgnoreWhileLoading`.
+
+`force_fetch_query` works the same way but bypasses cache freshness checks. It still respects `IgnoreWhileLoading`.
+
+### `prefetch_query`
+
+```rust
+fn prefetch_query<T, E>(
+    &mut self,
+    key: &QueryKey,
+    cache_policy: CachePolicy,
+    request_policy: RequestPolicy,
+    now_ms: u128,
+    cx: &mut App,
+) -> bool
+```
+
+Prefetch a query in the background. Returns `true` if a new request was started, `false` if the cache was fresh or the request was short-circuited. Useful for warming the cache before a user navigates to a new view.
+
+### `cancel_query`
+
+```rust
+fn cancel_query<T, E>(&mut self, key: &QueryKey, error: E, cx: &mut App) -> bool
+```
+
+Cancel the active request for a specific resource. The error value is stored as the resource's error. Returns `true` if there was an active request to cancel.
+
+### `signal_for`
+
+```rust
+fn signal_for<T, E>(&self, key: &QueryKey, cx: &App) -> Option<QuerySignal>
+```
+
+Get a clone of the cancellation signal for a resource. Pass this to an async fetcher so it can observe cooperative cancellation.
+
+## Optimistic updates
+
+### `set_query_data`
+
+```rust
+fn set_query_data<T, E>(&mut self, key: &QueryKey, data: T, cx: &mut App) -> bool
+```
+
+Set data on a resource without completing a request. The previous data is saved internally so you can roll it back. Returns `true` if the resource was found and updated.
+
+Use this for optimistic updates: update the cache immediately, then let the mutation result or a refetch correct it later.
+
+```rust
+let client = cx.global_mut::<QueryClient>();
+
+// Optimistically add the new user to the list
+client.set_query_data::<Vec<User>, MyError>(
+    &users_key,
+    updated_user_list,
+    cx,
+);
+```
+
+### `rollback_query_data`
+
+```rust
+fn rollback_query_data<T, E>(&mut self, key: &QueryKey, cx: &mut App) -> bool
+```
+
+Undo the last optimistic update. Restores the data that was stored before `set_query_data` was called. Returns `true` if there was previous data to restore.
+
+A typical pattern is to optimistically update, then roll back if the mutation fails:
+
+```rust
+client.set_query_data::<Vec<User>, MyError>(&key, optimistic_data, cx);
+
+// ... later, if the mutation fails ...
+client.rollback_query_data::<Vec<User>, MyError>(&key, cx);
+```
+
+## Bulk operations
+
+Bulk operations use `QueryKeyFilter` to target resources across all type-partitioned buckets. They work on every `(T, E)` type pair at once.
+
+### `QueryKeyFilter`
+
+```rust
+pub enum QueryKeyFilter<'a> {
+    Exact(&'a QueryKey),   // match one specific key
+    Prefix(&'a QueryKey),  // match all keys that start with this prefix
+    All,                    // match everything
+}
+```
+
+`Prefix` is useful for invalidating all queries under a namespace. For example, `Prefix(&QueryKey::from(["users"]))` matches `["users", "42"]`, `["users", "42", "posts"]`, and so on.
+
+### `invalidate_queries`
+
+```rust
+fn invalidate_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App)
+```
+
+Mark matching resources as stale by clearing their cache freshness. Does not cancel active requests. The next time a stale resource is accessed, it will trigger a refetch.
+
+```rust
+let client = cx.global_mut::<QueryClient>();
+
+// Invalidate all user queries
+client.invalidate_queries(
+    &QueryKeyFilter::Prefix(&QueryKey::from(["users"])),
+    cx,
+);
+
+// Invalidate one specific query
+client.invalidate_queries(
+    &QueryKeyFilter::Exact(&QueryKey::from(["users", "42"])),
+    cx,
+);
+```
+
+### `reset_queries`
+
+```rust
+fn reset_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App)
+```
+
+Clear data and error state on matching resources, resetting them to idle. The entity itself is kept in the registry. Active requests are not cancelled.
+
+### `remove_queries`
+
+```rust
+fn remove_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App)
+```
+
+Remove matching resources from the registry entirely. This drops the entities and their co-located sequencers. Unlike `reset_queries`, the resources are gone and will need to be re-created if accessed again.
+
+```rust
+// Remove everything
+client.remove_queries(&QueryKeyFilter::All, cx);
+```
+
+## Mutation management
+
+### `mutation_resource`
+
+```rust
+fn mutation_resource<V, T, E>(
+    &mut self,
+    key: &QueryKey,
+    cx: &mut App,
+) -> Entity<MutationResource<V, T, E>>
+```
+
+Get or create a `MutationResource<V, T, E>` entity. The three type parameters are: `V` (variables/input), `T` (success result), and `E` (error type). Uses the client's default retry policy.
+
+### `mutation_resource_with_policy`
+
+Same as `mutation_resource` but with an explicit `RetryPolicy`.
+
+### `all_mutations`
+
+```rust
+fn all_mutations<V, T, E>(&self) -> Vec<Entity<MutationResource<V, T, E>>>
+```
+
+Return all mutation entities for a specific `(V, T, E)` type triple. Returns an empty vec if no mutations of that type exist.
+
+### `gc_mutations`
+
+```rust
+fn gc_mutations(&mut self, cx: &mut App, now_ms: u128)
+```
+
+Garbage-collect idle mutation resources across all type buckets. Mutations with active requests are kept.
+
+## Garbage collection
+
+### `gc`
+
+```rust
+fn gc(&mut self, cx: &mut App, now_ms: u128)
+```
+
+Collect idle query resources older than the client's `gc_time_ms`. Resources with active requests are never collected. Call this periodically (every 30 seconds is reasonable) with the current timestamp.
+
+```rust
+let client = cx.global_mut::<QueryClient>();
+let now = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap()
+    .as_millis();
+client.gc(cx, now);
+```
+
+### `clear`
+
+```rust
+fn clear(&mut self)
+```
+
+Remove all query and mutation resources from all buckets. Useful in tests.
+
+## Diagnostics
+
+### `diagnostics`
+
+```rust
+fn diagnostics(&self, cx: &App) -> ClientDiagnostic
+```
+
+Return a serializable snapshot of the entire client state. Useful for devtools panels or logging.
+
+`ClientDiagnostic` contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_resources` | `usize` | Query resources across all type buckets |
+| `bucket_count` | `usize` | Number of type-partitioned buckets |
+| `mutation_count` | `usize` | Total mutation resources |
+| `queries` | `Vec<QueryDiagnostic>` | Per-query details |
+
+### `query_diagnostics`
+
+```rust
+fn query_diagnostics<T, E>(&self, cx: &App) -> Vec<QueryDiagnostic>
+```
+
+Get diagnostics for one specific `(T, E)` type pair. Returns an empty vec if no bucket exists for that type.
+
+### `total_count` and `bucket_count`
+
+```rust
+fn total_count(&self) -> usize
+fn bucket_count(&self) -> usize
+```
+
+Quick accessors for the total number of query resources and the number of type buckets.
+
+## How type partitioning works
+
+Rust's type system treats `Entity<QueryResource<User>>` and `Entity<QueryResource<Post>>` as different types. You cannot store them in the same `HashMap`. `QueryClient` solves this by partitioning resources into type-specific buckets keyed by `TypeId` of `(T, E)`.
+
+Each bucket is stored as `Box<dyn QueryBucketTrait>`. Bulk operations like `invalidate_queries` iterate across all buckets through this trait, without needing to know the concrete types. Typed access methods like `resource::<User, MyError>()` downcast to the correct bucket.
+
+This means `invalidate_queries` with `QueryKeyFilter::All` will touch every query regardless of its data type, which is usually what you want after a logout or a global state reset.

@@ -4,8 +4,114 @@ title: Quick Start
 description: Get up and running with gpui-query in minutes
 ---
 
-This page is coming soon. Check back when gpui-query is ready for documentation.
+This walks through installing gpui-query and making your first query. You need a GPUI project already set up. If you don't have one, follow the [installation](/getting-started/installation) page first.
 
-:::tip
-The quick start guide will walk you through creating your first query and binding it to a GPUI view.
-:::
+## Add the dependency
+
+Put this in your `Cargo.toml`:
+
+```toml
+[dependencies]
+gpui-query = { version = "0.1.0", features = ["hook"] }
+```
+
+The `hook` feature pulls in `use_query`, `use_mutation`, and the rest of the declarative API. Without it you get the raw client layer, which is useful but more manual.
+
+## Set up the query client
+
+`QueryClient` manages all cached state. It needs to live as a GPUI global so any view can access it. Create it once during app startup:
+
+```rust
+use gpui::App;
+use gpui_query::QueryClient;
+
+App::new().run(|cx| {
+    cx.set_global(QueryClient::new());
+    // ... your views
+});
+```
+
+That is the entire setup. One line. The client handles garbage collection, cache eviction, and request deduplication internally.
+
+## Make your first query
+
+Call `use_query` from inside a view. It takes a key, a fetcher closure, and the view context. It returns an `Entity<QueryResource<T, E>>` and a `Subscription`.
+
+```rust
+use gpui_query::use_query;
+use gpui::Entity;
+
+struct MyView {
+    query_entity: Entity<QueryResource<Vec<User>, MyError>>,
+    _subscription: Subscription,
+}
+
+impl MyView {
+    fn new(cx: &mut ViewContext<Self>) -> Self {
+        let (entity, sub) = use_query(
+            "users",
+            |signal| async move {
+                let users = fetch_users().await?;
+                Ok::<Vec<User>, MyError>(users)
+            },
+            cx,
+        );
+
+        Self {
+            query_entity: entity,
+            _subscription: sub,
+        }
+    }
+}
+```
+
+The string `"users"` is the cache key. Two views calling `use_query` with the same key share the same cached data. The fetcher only runs once, not twice.
+
+The `signal` argument inside the closure is a `QuerySignal`. Call `signal.is_cancelled()` to check if the request was invalidated and you should bail early. For simple cases you can ignore it.
+
+## Read the state in render
+
+`QueryResource<T, E>` tracks the full lifecycle of a request: idle, loading, success, failure. Read it from `render` with `read_with`:
+
+```rust
+use gpui_query::QueryStatus;
+
+impl Render for MyView {
+    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+        let entity = self.query_entity.clone();
+        entity.read_with(cx, |resource| {
+            match resource.status() {
+                QueryStatus::LoadingEmpty => "Loading...",
+                QueryStatus::Success => "Got data",
+                QueryStatus::Failure => "Error",
+                _ => "Idle",
+            }
+        })
+    }
+}
+```
+
+The `status()` method returns one of `Idle`, `LoadingEmpty`, `LoadingHasData`, `Success`, `Failure`, or `Cancelled`. When data arrives, `resource.data()` returns `Some(&T)`. On failure, `resource.error()` returns `Some(&E)`.
+
+## Mutations
+
+Queries fetch data. Mutations change it. `use_mutation` gives you an entity that starts idle and only runs when you explicitly trigger it:
+
+```rust
+use gpui_query::{use_mutation, mutate};
+
+let (entity, sub) = use_mutation((), cx);
+
+// Trigger it later, on a button click or form submit
+mutate(&entity, NewUser { name: "Alice" }, |vars| async move {
+    Ok::<User, MyError>(create_user(vars).await)
+}, cx);
+```
+
+Mutations do not touch the query cache on their own. To refresh the user list after creating a user, call `invalidate_queries` in a success callback. See [Mutations](/api/mutations) for the full API.
+
+## Where to go next
+
+- [Queries](/api/queries) covers `QueryOptions`, cache policies, retry, manual fetch mode, and `use_query_select`.
+- [Mutations](/api/mutations) covers `use_mutation`, `mutate_with_callbacks`, and `MutationCallbacks`.
+- [Caching](/guides/caching) explains TTL, stale-while-revalidate, garbage collection, and bulk invalidation.
