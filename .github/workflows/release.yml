@@ -77,8 +77,7 @@ jobs:
           CLOUDFLARE_INCLUDE_PROCESS_ENV: "true"
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          workingDirectory: web
-          command: pages deploy dist/client --project-name=gpui-query
+        run: npx wrangler pages deploy dist/client --project-name=gpui-query
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
