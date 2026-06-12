@@ -42,7 +42,7 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
             Some(e) => e,
             None => return,
         };
-        e.read_with(cx, |r, _| r.last_page().cloned())
+        e.read_with(cx, |r, _| r.last_page().cloned()).ok().flatten()
     };
 
     let mut attempt: u32 = 0;
@@ -96,7 +96,7 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
                     };
                     let cancelled = e.read_with(cx, |r, _| {
                         r.signal().map(|s| s.is_cancelled()).unwrap_or(false)
-                    });
+                    }).unwrap_or(true);
                     if cancelled {
                         return;
                     }
@@ -152,7 +152,7 @@ pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
             Some(e) => e,
             None => return,
         };
-        e.read_with(cx, |r, _| r.first_page().cloned())
+        e.read_with(cx, |r, _| r.first_page().cloned()).ok().flatten()
     };
 
     let mut attempt: u32 = 0;
@@ -203,7 +203,7 @@ pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
                     };
                     let cancelled = e.read_with(cx, |r, _| {
                         r.signal().map(|s| s.is_cancelled()).unwrap_or(false)
-                    });
+                    }).unwrap_or(true);
                     if cancelled {
                         return;
                     }

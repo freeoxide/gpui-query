@@ -190,7 +190,7 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
                         None => return,
                     };
                     let request_still_active =
-                        e.read_with(cx, |r, _| r.is_current_request(request_id));
+                        e.read_with(cx, |r, _| r.is_current_request(request_id)).unwrap_or(false);
                     if !request_still_active {
                         #[cfg(debug_assertions)]
                         eprintln!(
@@ -310,7 +310,7 @@ pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
                         Some(e) => e,
                         None => return,
                     };
-                    if !e.read_with(cx, |r, _| r.is_current_request(request_id)) {
+                    if !e.read_with(cx, |r, _| r.is_current_request(request_id)).unwrap_or(false) {
                         #[cfg(debug_assertions)]
                         eprintln!(
                             "DEBUG: fetch_signal_with_retry: request {} no longer active after retry delay, aborting",
@@ -322,7 +322,7 @@ pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
                     // Get a fresh signal for the next attempt
                     signal = e.read_with(cx, |r, _| {
                         r.signal().cloned().unwrap_or_else(QuerySignal::new)
-                    });
+                    }).unwrap_or_else(|_| QuerySignal::new());
                 } else {
                     let e = match entity.upgrade() {
                         Some(e) => e,
