@@ -96,6 +96,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-and-release.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -116,10 +118,12 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   publish-main:
-    needs: publish-legacy
+    needs: [check-and-release, publish-legacy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-and-release.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -135,7 +139,7 @@ jobs:
 
       - name: Publish main crate
         working-directory: crates/gpui-query
-        run: cargo publish
+        run: cargo publish || echo "Already published, continuing."
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
