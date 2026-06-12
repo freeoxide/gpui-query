@@ -11,7 +11,7 @@
     "build": "npm run build:docs && vp build && npx pagefind --site dist/client && node scripts/generate-rss.mjs --output dist/client && node scripts/generate-llms-txt.mjs --output dist/client && node scripts/generate-md-alt.mjs",
     "preview": "vp preview",
     "test": "vp test run",
-    "deploy": "pnpm run build && npx wrangler pages deploy dist/client --project-name=gpui-query",
+    "deploy": "bun run build && npx wrangler pages deploy dist/client --project-name=gpui-query",
     "prepare": "vp config"
   },
   "dependencies": {
@@ -63,15 +63,8 @@
     "vitest": "npm:@voidzero-dev/vite-plus-test@latest",
     "wrangler": "^4.70.0"
   },
-  "packageManager": "pnpm@11.5.1",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "lightningcss"
-    ],
-    "overrides": {
-      "vite": "npm:@voidzero-dev/vite-plus-core@latest",
-      "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
-    }
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
   }
 }
