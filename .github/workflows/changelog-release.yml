@@ -111,7 +111,7 @@ jobs:
 
       - name: Publish legacy crate
         working-directory: crates/gpui-query-legacy
-        run: cargo publish
+        run: cargo publish || echo "Already published, continuing."
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
