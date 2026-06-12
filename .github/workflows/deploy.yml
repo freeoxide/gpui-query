@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Install web dependencies
+      - name: Install web dependencies (bun)
         run: bun install --frozen-lockfile
 
       - name: Install website dependencies
