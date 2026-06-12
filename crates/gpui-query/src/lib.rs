@@ -55,19 +55,6 @@ pub use client::*;
 #[cfg(feature = "hook")]
 pub use hook::*;
 
-/// Re-export the legacy v1 crate under `gpui_query::legacy`.
-///
-/// ```toml
-/// [dependencies]
-/// gpui-query = { version = "0.1.0", features = ["legacy"] }
-/// ```
-///
-/// ```ignore
-/// use gpui_query::legacy::core::QueryResource;
-/// ```
-#[cfg(feature = "legacy")]
-pub extern crate gpui_query_legacy as legacy;
-
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
