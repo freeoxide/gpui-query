@@ -2,9 +2,9 @@ name: Changelog Release
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
-      - "CHANGELOG.md"
+      - 'CHANGELOG.md'
 
 permissions:
   contents: write
@@ -85,3 +85,4 @@ jobs:
           body: ${{ steps.notes.outputs.notes }}
           draft: false
           prerelease: ${{ contains(steps.changelog.outputs.version, '-') }}
+

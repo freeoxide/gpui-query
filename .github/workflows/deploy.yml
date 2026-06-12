@@ -2,12 +2,12 @@ name: Deploy Website
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
-      - "web/**"
-      - "website/**"
-      - "shared/**"
-      - ".github/workflows/deploy.yml"
+      - 'web/**'
+      - 'website/**'
+      - 'shared/**'
+      - '.github/workflows/deploy.yml'
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -29,7 +29,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
@@ -39,11 +39,13 @@ jobs:
       - name: Build
         run: npx pnpm run build
         env:
-          CLOUDFLARE_INCLUDE_PROCESS_ENV: "true"
+          CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true'
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: web
-          command: pages deploy dist/client --project-name=gpui-query
+          command: pages deploy dist/client --project-name=gpui-query --branch=master
+
