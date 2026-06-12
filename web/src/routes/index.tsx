@@ -27,10 +27,11 @@ export const Route = createFileRoute("/")({
       },
       { property: "og:type", content: "website" },
       { property: "og:url", content: "https://gpui-query.hmziq.xyz" },
-      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.svg" },
+      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "gpui-query — Async State Management for GPUI" },
       { name: "twitter:description", content: "Zero-boilerplate async state management for GPUI." },
+      { name: "twitter:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz" }],
     scripts: [

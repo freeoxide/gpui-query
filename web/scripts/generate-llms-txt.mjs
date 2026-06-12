@@ -3,7 +3,10 @@
  * Generate llms.txt and llms-full.txt for AI agent optimization.
  * Follows the llmstxt.org specification.
  *
- * Usage: node scripts/generate-llms-txt.mjs [--output .output/public]
+ * Reads docs from the Docusaurus source at ../../website/docs/
+ * and blog posts from src/content/blog/
+ *
+ * Usage: node scripts/generate-llms-txt.mjs [--output dist/client]
  */
 
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
@@ -13,23 +16,40 @@ const outputDir = process.argv.includes("--output")
   ? process.argv[process.argv.indexOf("--output") + 1]
   : ".output/public";
 
-const contentDir = resolve("src/content");
+const blogDir = resolve("src/content/blog");
+const docusaurusDocsDir = resolve("../website/docs");
 
-async function readMdxFiles(subdir) {
-  const dir = join(contentDir, subdir);
-  let files;
+/**
+ * Recursively collect all .mdx files from a directory tree.
+ */
+async function collectMdxFiles(dir) {
+  let entries;
   try {
-    files = await readdir(dir);
+    entries = await readdir(dir, { withFileTypes: true });
   } catch {
     return [];
   }
 
-  const mdxFiles = files.filter((f) => f.endsWith(".mdx"));
   const results = [];
 
-  for (const file of mdxFiles) {
-    const content = await readFile(join(dir, file), "utf-8");
-    const slug = file.replace(/\.mdx$/, "");
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await collectMdxFiles(fullPath);
+      results.push(...nested);
+    } else if (entry.name.endsWith(".mdx")) {
+      results.push(fullPath);
+    }
+  }
+
+  return results;
+}
+
+function parseMdx(filePath, baseDir) {
+  return async () => {
+    const content = await readFile(filePath, "utf-8");
+    // slug is the relative path from baseDir, without .mdx extension
+    const slug = filePath.slice(baseDir.length + 1).replace(/\.mdx$/, "");
 
     // Extract frontmatter
     const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
@@ -46,28 +66,31 @@ async function readMdxFiles(subdir) {
       }
     }
 
-    // Strip frontmatter and JSX components for plain text
+    // Strip frontmatter and JSX for plain text
     const body = content
-      .replace(/^---\n[\s\S]*?\n---\n*/, "") // Remove frontmatter
-      .replace(/<Callout[^>]*>/g, "> ") // Convert callouts to blockquotes
+      .replace(/^---\n[\s\S]*?\n---\n*/, "")
+      .replace(/<Callout[^>]*>/g, "> ")
       .replace(/<\/Callout>/g, "")
-      .replace(/<[^>]+>/g, "") // Remove JSX tags
+      .replace(/<[^>]+>/g, "")
       .trim();
 
-    results.push({ slug, frontmatter, body });
-  }
-
-  return results;
+    return { slug, frontmatter, body };
+  };
 }
 
 async function main() {
   await mkdir(outputDir, { recursive: true });
 
-  const docs = await readMdxFiles("docs");
-  const blogPosts = await readMdxFiles("blog");
+  // Collect docs from Docusaurus source
+  const docFiles = await collectMdxFiles(docusaurusDocsDir);
+  const docs = await Promise.all(docFiles.map((f) => parseMdx(f, docusaurusDocsDir)()));
 
-  // Sort docs by order
-  docs.sort((a, b) => (a.frontmatter.order || 0) - (b.frontmatter.order || 0));
+  // Collect blog posts from TanStack Start source
+  const blogFiles = await collectMdxFiles(blogDir);
+  const blogPosts = await Promise.all(blogFiles.map((f) => parseMdx(f, blogDir)()));
+
+  // Sort docs by slug for consistent ordering
+  docs.sort((a, b) => a.slug.localeCompare(b.slug));
 
   // Sort blog posts by date descending
   blogPosts.sort((a, b) => (b.frontmatter.date || "").localeCompare(a.frontmatter.date || ""));
@@ -83,8 +106,10 @@ async function main() {
   ];
 
   for (const doc of docs) {
+    const title = doc.frontmatter.title || doc.slug;
+    const desc = doc.frontmatter.description || doc.frontmatter.excerpt || "";
     const url = `https://gpui-query.hmziq.xyz/docs/${doc.slug}`;
-    llmsLines.push(`- [${doc.frontmatter.title}](${url}): ${doc.frontmatter.description}`);
+    llmsLines.push(`- [${title}](${url})${desc ? ": " + desc : ""}`);
   }
 
   if (blogPosts.length > 0) {
@@ -92,8 +117,10 @@ async function main() {
     llmsLines.push("## Blog");
     llmsLines.push("");
     for (const post of blogPosts) {
+      const title = post.frontmatter.title || post.slug;
+      const desc = post.frontmatter.excerpt || post.frontmatter.description || "";
       const url = `https://gpui-query.hmziq.xyz/blog/${post.slug}`;
-      llmsLines.push(`- [${post.frontmatter.title}](${url}): ${post.frontmatter.description}`);
+      llmsLines.push(`- [${title}](${url})${desc ? ": " + desc : ""}`);
     }
   }
 
@@ -102,7 +129,7 @@ async function main() {
   llmsLines.push("");
   llmsLines.push("- [GitHub](https://github.com/hmziqrs/gpui-query): Source code and issues");
   llmsLines.push(
-    "- [Getting Started](https://gpui-query.hmziq.xyz/docs/getting-started): Install and first query",
+    "- [Getting Started](https://gpui-query.hmziq.xyz/docs/getting-started/installation): Install and first query",
   );
 
   const llmsTxt = llmsLines.join("\n");
@@ -118,7 +145,7 @@ async function main() {
   ];
 
   for (const doc of docs) {
-    fullLines.push(`## ${doc.frontmatter.title}`);
+    fullLines.push(`## ${doc.frontmatter.title || doc.slug}`);
     fullLines.push("");
     fullLines.push(doc.body);
     fullLines.push("");
@@ -128,9 +155,9 @@ async function main() {
     fullLines.push("---");
     fullLines.push("");
     for (const post of blogPosts) {
-      fullLines.push(`## ${post.frontmatter.title}`);
+      fullLines.push(`## ${post.frontmatter.title || post.slug}`);
       fullLines.push("");
-      fullLines.push(`*Published: ${post.frontmatter.date}*`);
+      if (post.frontmatter.date) fullLines.push(`*Published: ${post.frontmatter.date}*`);
       fullLines.push("");
       fullLines.push(post.body);
       fullLines.push("");

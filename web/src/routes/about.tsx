@@ -38,13 +38,15 @@ export const Route = createFileRoute("/about")({
           "About gpui-query — zero-boilerplate async state management for the GPUI framework.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "About - gpui-query" },
       {
         name: "twitter:description",
         content:
           "About gpui-query — zero-boilerplate async state management for the GPUI framework.",
       },
+      { name: "twitter:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/about" }],
   }),

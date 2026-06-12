@@ -16,6 +16,8 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
+      { rel: "manifest", href: "/manifest.json" },
       {
         rel: "preconnect",
         href: "https://fonts.googleapis.com",
@@ -34,6 +36,7 @@ export const Route = createRootRoute({
   }),
   shellComponent: RootDocument,
   notFoundComponent: NotFoundPage,
+  errorComponent: ErrorPage,
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
@@ -90,6 +93,31 @@ function NotFoundPage() {
               <BookOpenIcon size={16} className="mr-1" />
               Documentation
             </a>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ErrorPage({ error }: { error: Error }) {
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+        <h1 className="text-8xl font-extrabold tracking-tighter text-destructive">Oops</h1>
+        <p className="mt-4 text-2xl font-semibold text-foreground">Something went wrong</p>
+        <p className="mt-2 max-w-md text-muted-foreground">
+          {error.message || "An unexpected error occurred."}
+        </p>
+        <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+          <Button asChild>
+            <Link to="/">
+              <HouseIcon size={16} className="mr-1" />
+              Go Home
+            </Link>
+          </Button>
+          <Button variant="outline" onClick={() => window.location.reload()}>
+            Reload page
           </Button>
         </div>
       </div>

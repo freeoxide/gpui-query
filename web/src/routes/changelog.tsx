@@ -42,8 +42,8 @@ const changelogEntries: ChangelogEntry[] = [
       { category: "Fixed", text: "Race condition when multiple observers share a query key" },
     ],
     links: [
-      { label: "Infinite Queries", slug: "infinite-queries" },
-      { label: "Persistence", slug: "persistence" },
+      { label: "Infinite Queries", slug: "/docs/api/infinite-queries/" },
+      { label: "Persistence", slug: "/docs/guides/persistence/" },
     ],
   },
   {
@@ -57,7 +57,7 @@ const changelogEntries: ChangelogEntry[] = [
       { category: "Changed", text: "Refactored internal registry for lower memory footprint" },
       { category: "Fixed", text: "Stale-While-Revalidate returning stale data on error" },
     ],
-    links: [{ label: "Mutations", slug: "mutations" }],
+    links: [{ label: "Mutations", slug: "/docs/api/mutations/" }],
   },
   {
     version: "v0.1.0",
@@ -69,7 +69,7 @@ const changelogEntries: ChangelogEntry[] = [
       { category: "Added", text: "TTL and Stale-While-Revalidate cache policies" },
       { category: "Added", text: "Cooperative cancellation via Arc<AtomicBool>" },
     ],
-    links: [{ label: "Getting Started", slug: "getting-started" }],
+    links: [{ label: "Getting Started", slug: "/docs/getting-started/installation/" }],
   },
 ];
 
@@ -89,12 +89,14 @@ export const Route = createFileRoute("/changelog")({
         content: "Release history and changelog for gpui-query.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Changelog - gpui-query" },
       {
         name: "twitter:description",
         content: "Release history and changelog for gpui-query.",
       },
+      { name: "twitter:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/changelog" }],
   }),
@@ -240,7 +242,7 @@ function ChangelogEntryCard({
             {entry.links.map((link) => (
               <a
                 key={link.slug}
-                href={`/docs/${link.slug}`}
+                href={link.slug}
                 className="inline-flex items-center text-sm font-medium text-primary transition-colors hover:text-primary/80"
               >
                 {link.label}

@@ -4,6 +4,7 @@ import { GithubLogoIcon } from "@phosphor-icons/react";
 
 const navLinks = [
   { href: "/docs/", label: "Docs" },
+  { href: "/blog", label: "Blog" },
   { href: "/faq", label: "FAQ" },
   { href: "/about", label: "About" },
 ];
@@ -21,23 +22,27 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
           <SheetTitle>Navigation</SheetTitle>
         </SheetHeader>
         <nav className="flex flex-col gap-4 pt-4" aria-label="Mobile navigation">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              to={link.href}
-              onClick={onClose}
-              className="text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {link.label}
-            </Link>
-          ))}
-          <Link
-            to="/blog"
-            onClick={onClose}
-            className="text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Blog
-          </Link>
+          {navLinks.map((link) =>
+            link.href.startsWith("/docs") ? (
+              <a
+                key={link.href}
+                href={link.href}
+                onClick={onClose}
+                className="text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {link.label}
+              </a>
+            ) : (
+              <Link
+                key={link.href}
+                to={link.href}
+                onClick={onClose}
+                className="text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {link.label}
+              </Link>
+            ),
+          )}
           <a
             href="https://github.com/hmziqrs/gpui-query"
             target="_blank"

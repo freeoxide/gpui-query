@@ -44,6 +44,8 @@ const config: Config = {
       logo: {
         alt: 'gpui-query',
         src: 'img/logo.svg',
+        href: '/',
+        target: '_self',
       },
       items: [
         {
@@ -89,7 +91,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: 'Copyright &copy; 2024 hmziqrs.',
+      copyright: 'Copyright &copy; 2024-2026 hmziqrs.',
     },
     prism: {
       theme: prismThemes.github,

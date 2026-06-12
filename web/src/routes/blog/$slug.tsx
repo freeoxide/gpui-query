@@ -1,9 +1,16 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { getPost } from "#/lib/blog";
 import { ArrowLeft, CalendarIcon, UserIcon } from "lucide-react";
 import { Button } from "#/components/ui/button";
 
 export const Route = createFileRoute("/blog/$slug")({
+  loader: ({ params }) => {
+    const post = getPost(params.slug);
+    if (!post) {
+      throw notFound();
+    }
+    return post;
+  },
   head: ({ params }) => {
     const post = getPost(params.slug);
     const title = post ? `${post.title} - gpui-query` : "Post Not Found - gpui-query";
@@ -15,9 +22,11 @@ export const Route = createFileRoute("/blog/$slug")({
         { property: "og:title", content: title },
         { property: "og:description", content: description },
         { property: "og:type", content: "article" },
-        { name: "twitter:card", content: "summary" },
+        { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+        { name: "twitter:card", content: "summary_large_image" },
         { name: "twitter:title", content: title },
         { name: "twitter:description", content: description },
+        { name: "twitter:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
       ],
       links: [{ rel: "canonical", href: `https://gpui-query.hmziq.xyz/blog/${params.slug}` }],
     };

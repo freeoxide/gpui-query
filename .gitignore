@@ -9,6 +9,9 @@ dist/
 .output/
 .tanstack/
 
+# Generated docs (built from website/ by build-docs.mjs)
+web/public/docs/
+
 # OS
 .DS_Store
 Thumbs.db

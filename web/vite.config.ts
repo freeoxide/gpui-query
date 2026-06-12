@@ -29,7 +29,7 @@ const config = defineConfig({
     tanstackStart({
       prerender: {
         enabled: true,
-        crawlLinks: false,
+        crawlLinks: true,
         autoStaticPathsDiscovery: true,
       },
       sitemap: {
