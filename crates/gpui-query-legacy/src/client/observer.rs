@@ -8,7 +8,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use gpui_query::client::observer::{QueryObserver, ObserverConfig};
+//! use gpui_query_legacy::client::observer::{QueryObserver, ObserverConfig};
 //!
 //! let config = ObserverConfig::new()
 //!     .on_success(|data: &Vec<User>| { println!("Got {} users", data.len()); })
@@ -35,9 +35,9 @@ use crate::core::{QueryResource, QueryStatus};
 /// # Builder pattern
 ///
 /// ```
-/// use gpui_query::client::observer::ObserverConfig;
+/// use gpui_query_legacy::client::observer::ObserverConfig;
 ///
-/// let config: ObserverConfig<String, gpui_query::QueryError> = ObserverConfig::new()
+/// let config: ObserverConfig<String, gpui_query_legacy::QueryError> = ObserverConfig::new()
 ///     .on_success(|data| println!("data: {data}"))
 ///     .on_loading(|| println!("loading..."));
 /// ```

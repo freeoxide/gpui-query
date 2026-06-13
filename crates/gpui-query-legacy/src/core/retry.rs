@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// # Builder pattern
 ///
 /// ```
-/// use gpui_query::core::RetryPolicy;
+/// use gpui_query_legacy::core::RetryPolicy;
 ///
 /// let policy = RetryPolicy::new(5)
 ///     .with_delay(500)

@@ -12,8 +12,8 @@
 //! # Quick start
 //!
 //! ```ignore
-//! use gpui_query::client::QueryClient;
-//! use gpui_query::{CachePolicy, QueryKey, RequestPolicy};
+//! use gpui_query_legacy::client::QueryClient;
+//! use gpui_query_legacy::{CachePolicy, QueryKey, RequestPolicy};
 //!
 //! // In your app setup:
 //! cx.set_global(QueryClient::new(

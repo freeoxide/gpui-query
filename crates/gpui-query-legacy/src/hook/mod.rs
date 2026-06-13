@@ -4,11 +4,11 @@
 //! # Query Usage
 //!
 //! ```ignore
-//! use gpui_query::hook::use_query;
-//! use gpui_query::{CachePolicy, QueryKey, RequestPolicy};
+//! use gpui_query_legacy::hook::use_query;
+//! use gpui_query_legacy::{CachePolicy, QueryKey, RequestPolicy};
 //!
 //! struct MyView {
-//!     users: gpui::Entity<gpui_query::QueryResource<Vec<User>>>,
+//!     users: gpui::Entity<gpui_query_legacy::QueryResource<Vec<User>>>,
 //!     _subscription: gpui::Subscription,
 //! }
 //!
@@ -33,10 +33,10 @@
 //! # Mutation Usage
 //!
 //! ```ignore
-//! use gpui_query::hook::{use_mutation, mutate};
+//! use gpui_query_legacy::hook::{use_mutation, mutate};
 //!
 //! struct MyView {
-//!     create_user: gpui::Entity<gpui_query::MutationResource<NewUser, User>>,
+//!     create_user: gpui::Entity<gpui_query_legacy::MutationResource<NewUser, User>>,
 //! }
 //!
 //! impl MyView {

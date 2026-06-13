@@ -14,7 +14,7 @@
 /// # Example
 ///
 /// ```
-/// use gpui_query::core::RefetchTrigger;
+/// use gpui_query_legacy::core::RefetchTrigger;
 ///
 /// let trigger = RefetchTrigger::OnWindowFocus { stale_time_ms: Some(30_000) };
 /// assert_eq!(trigger.label(), "on-window-focus");

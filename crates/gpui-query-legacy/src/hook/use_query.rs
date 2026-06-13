@@ -348,7 +348,7 @@ async fn fetch_signal_with_retry<T, E, F, Fut>(
                     };
                     signal = e.read_with(cx, |r, _| {
                         r.signal().cloned().unwrap_or_else(QuerySignal::new)
-                    });
+                    }).unwrap_or_else(|_| QuerySignal::new());
                 } else {
                     let e = match entity.upgrade() {
                         Some(e) => e,

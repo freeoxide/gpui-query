@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// # Example
 ///
 /// ```
-/// use gpui_query::core::QuerySignal;
+/// use gpui_query_legacy::core::QuerySignal;
 ///
 /// let signal = QuerySignal::new();
 /// let clone = signal.clone();

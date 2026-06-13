@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// # Example
 ///
 /// ```
-/// use gpui_query::core::NetworkMode;
+/// use gpui_query_legacy::core::NetworkMode;
 ///
 /// let mode = NetworkMode::Always;
 /// assert_eq!(mode.label(), "always");

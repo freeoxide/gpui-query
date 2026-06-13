@@ -4,11 +4,11 @@
 //! # Usage
 //!
 //! ```ignore
-//! use gpui_query::hook::{use_infinite_query, InfiniteQueryOptions};
-//! use gpui_query::QueryKey;
+//! use gpui_query_legacy::hook::{use_infinite_query, InfiniteQueryOptions};
+//! use gpui_query_legacy::QueryKey;
 //!
 //! struct FeedView {
-//!     feed: gpui::Entity<gpui_query::InfiniteQueryResource<Vec<Post>>>,
+//!     feed: gpui::Entity<gpui_query_legacy::InfiniteQueryResource<Vec<Post>>>,
 //!     fetch_next: Box<dyn Fn() + 'static>,
 //!     _subscription: gpui::Subscription,
 //! }
@@ -265,7 +265,7 @@ async fn run_fetch_next_page<T, E, F, Fut>(
             Some(e) => e,
             None => return,
         };
-        e.read_with(cx, |r, _| r.last_page().cloned())
+        e.read_with(cx, |r, _| r.last_page().cloned()).unwrap_or(None)
     };
 
     let result = fetcher(last_page_data.as_ref()).await;
@@ -280,7 +280,7 @@ async fn run_fetch_next_page<T, E, F, Fut>(
     // We need the request_id that was assigned during begin_fetch_next.
     // Read it from the entity before completing.
     let request_id: Option<RequestId> =
-        e.read_with(cx, |r, _| r.active_request_id());
+        e.read_with(cx, |r, _| r.active_request_id()).unwrap_or(None);
 
     let Some(request_id) = request_id else {
         return;
@@ -318,7 +318,7 @@ async fn run_fetch_previous_page<T, E, F, Fut>(
             Some(e) => e,
             None => return,
         };
-        e.read_with(cx, |r, _| r.first_page().cloned())
+        e.read_with(cx, |r, _| r.first_page().cloned()).unwrap_or(None)
     };
 
     let result = fetcher(first_page_data.as_ref()).await;
@@ -331,7 +331,7 @@ async fn run_fetch_previous_page<T, E, F, Fut>(
     };
 
     let request_id: Option<RequestId> =
-        e.read_with(cx, |r, _| r.active_request_id());
+        e.read_with(cx, |r, _| r.active_request_id()).unwrap_or(None);
 
     let Some(request_id) = request_id else {
         return;

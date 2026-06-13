@@ -131,8 +131,8 @@ impl<T, E> QueryOptions<T, E> {
 /// # Builder pattern
 ///
 /// ```
-/// use gpui_query::hook::MutationOptions;
-/// use gpui_query::core::RetryPolicy;
+/// use gpui_query_legacy::hook::MutationOptions;
+/// use gpui_query_legacy::core::RetryPolicy;
 ///
 /// let opts: MutationOptions<String, i32> = MutationOptions::new()
 ///     .retry_policy(RetryPolicy::new(3).with_exponential_backoff())

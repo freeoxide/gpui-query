@@ -1,4 +1,4 @@
-use gpui_query::QueryKey;
+use gpui_query_legacy::QueryKey;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -244,14 +244,14 @@ fn serde_roundtrip_special_chars() {
 
 #[test]
 fn filter_all_matches_empty_key() {
-    use gpui_query::QueryKeyFilter;
+    use gpui_query_legacy::QueryKeyFilter;
     let empty: QueryKey = QueryKey::from([] as [&str; 0]);
     assert!(QueryKeyFilter::All.matches(&empty));
 }
 
 #[test]
 fn filter_exact_empty_key() {
-    use gpui_query::QueryKeyFilter;
+    use gpui_query_legacy::QueryKeyFilter;
     let empty: QueryKey = QueryKey::from([] as [&str; 0]);
     assert!(QueryKeyFilter::Exact(&empty).matches(&empty));
     let nonempty = QueryKey::from(["x"]);
@@ -260,7 +260,7 @@ fn filter_exact_empty_key() {
 
 #[test]
 fn filter_prefix_empty_matches_everything() {
-    use gpui_query::QueryKeyFilter;
+    use gpui_query_legacy::QueryKeyFilter;
     let empty: QueryKey = QueryKey::from([] as [&str; 0]);
     let key = QueryKey::from(["users", "42"]);
     assert!(QueryKeyFilter::Prefix(&empty).matches(&key));

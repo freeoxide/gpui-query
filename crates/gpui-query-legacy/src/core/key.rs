@@ -24,7 +24,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// # Examples
 ///
 /// ```
-/// use gpui_query::QueryKey;
+/// use gpui_query_legacy::QueryKey;
 ///
 /// let key = QueryKey::from(["users", "42", "posts"]);
 /// assert!(key.starts_with(&QueryKey::from(["users"])));

@@ -6,7 +6,7 @@ use super::QueryKey;
 /// # Examples
 ///
 /// ```
-/// use gpui_query::{QueryKey, QueryKeyFilter};
+/// use gpui_query_legacy::{QueryKey, QueryKeyFilter};
 ///
 /// let key = QueryKey::from(["users", "42", "posts"]);
 ///
