@@ -2,7 +2,7 @@
 
 Async state management for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui), modeled after [TanStack Query](https://tanstack.com/query).
 
-GPUI draws everything synchronously on the main thread. That makes async data awkward: you end up hand-rolling loading states, error handling, caching, deduplication, retries, and cancellation. gpui-query does that for you.
+GPUI draws everything synchronously on the main thread. That makes async data awkward: you end up hand-rolling loading states, error handling, caching, deduplication, retries, and cancellation. gpui-query handles those pieces.
 
 You write a fetcher. The library manages the lifecycle.
 
@@ -20,7 +20,7 @@ The default feature set includes the `client` layer. To use the declarative view
 gpui-query = { version = "0.1.2", features = ["hook"] }
 ```
 
-If you only want the core state machine with no GPUI dependency:
+If you only want the core state machine without pulling in GPUI:
 
 ```toml
 [dependencies]
@@ -78,23 +78,23 @@ fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
 
 The crate is split into three layers, each behind a feature flag:
 
-- **`core`** - A serde-only state machine with no framework coupling. `QueryResource`, `MutationResource`, `CachePolicy`, `RetryPolicy`, and `QueryKey` live here. You can use this layer in any Rust project.
-- **`client`** (default) - Adds `QueryClient`, a GPUI `Global` that owns type-partitioned storage. Handles garbage collection, cache invalidation, observers, persistence, and devtools diagnostics.
-- **`hook`** - Declarative hooks (`use_query`, `use_mutation`, `use_infinite_query`) that wire the client into GPUI views. All hooks return `(Entity, Subscription)` tuples.
+- `core` is a serde-only state machine with no framework coupling. `QueryResource`, `MutationResource`, `CachePolicy`, `RetryPolicy`, and `QueryKey` live here. You can use this layer in any Rust project.
+- `client` is the default feature. It adds `QueryClient`, a GPUI `Global` that owns type-partitioned storage. It handles garbage collection, cache invalidation, observers, persistence, and devtools diagnostics.
+- `hook` provides the declarative hooks (`use_query`, `use_mutation`, `use_infinite_query`) that wire the client into GPUI views. All hooks return `(Entity, Subscription)` tuples.
 
 ## What you get
 
-- **Caching** with `NoCache`, `Ttl`, and `StaleWhileRevalidate` policies.
-- **Deduplication** of concurrent requests with the same key.
-- **Retry** with configurable exponential backoff.
-- **Cooperative cancellation** via the `QuerySignal` passed to fetchers.
-- **Garbage collection** of idle resources after a configurable TTL.
-- **Cache invalidation** by exact key, prefix, or globally.
-- **Optimistic updates** with rollback support.
-- **Mutation callbacks** for success, error, and settled states.
-- **Infinite queries** for paginated data.
-- **Error sanitization** that strips connection strings, tokens, paths, emails, and hex keys from error messages.
-- **Persistence** through the `QueryPersister` trait.
+- Caching with `NoCache`, `Ttl`, and `StaleWhileRevalidate` policies.
+- Deduplication of concurrent requests that share a key.
+- Retry with configurable exponential backoff.
+- Cooperative cancellation through the `QuerySignal` passed to every fetcher.
+- Garbage collection of idle resources after a configurable TTL.
+- Cache invalidation by exact key, prefix, or globally.
+- Optimistic updates with rollback support.
+- Mutation callbacks for success, error, and settled states.
+- Infinite queries for paginated data.
+- Error sanitization that strips connection strings, tokens, paths, emails, and hex keys from messages.
+- Persistence through the `QueryPersister` trait.
 
 ## Links
 
