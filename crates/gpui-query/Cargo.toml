@@ -4,6 +4,7 @@ version = "0.1.2"
 edition = "2024"
 description = "TanStack Query-inspired async state management for GPUI"
 repository = "https://github.com/hmziqrs/gpui-query"
+readme = "README.md"
 license = "MIT"
 keywords = ["gpui", "async", "state-management", "query", "zed"]
 categories = ["asynchronous", "caching", "gui"]
