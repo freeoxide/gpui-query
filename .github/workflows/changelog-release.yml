@@ -57,15 +57,14 @@ jobs:
         run: |
           VERSION="${{ steps.changelog.outputs.version }}"
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/gpui-query/Cargo.toml
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/gpui-query-legacy/Cargo.toml
 
       - name: Commit version bump
         if: steps.check_tag.outputs.exists == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add crates/gpui-query/Cargo.toml crates/gpui-query-legacy/Cargo.toml
-          git diff --cached --quiet || git commit -m "chore: bump crate versions to v${{ steps.changelog.outputs.version }}"
+          git add crates/gpui-query/Cargo.toml
+          git diff --cached --quiet || git commit -m "chore: bump gpui-query version to v${{ steps.changelog.outputs.version }}"
 
       - name: Create Git tag
         if: steps.check_tag.outputs.exists == 'false'
@@ -90,35 +89,8 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.changelog.outputs.version, '-') }}
 
-  publish-legacy:
-    needs: check-and-release
-    if: needs.check-and-release.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.check-and-release.outputs.tag }}
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "crates/gpui-query-legacy -> target"
-
-      - name: Verify version
-        working-directory: crates/gpui-query-legacy
-        run: |
-          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          echo "Publishing gpui-query-legacy v$VERSION"
-
-      - name: Publish legacy crate
-        working-directory: crates/gpui-query-legacy
-        run: cargo publish || echo "Already published, continuing."
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
   publish-main:
-    needs: [check-and-release, publish-legacy]
+    needs: check-and-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
