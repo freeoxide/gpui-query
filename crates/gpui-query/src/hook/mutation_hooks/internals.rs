@@ -11,6 +11,8 @@ use crate::core::{MutationResource, RetryPolicy};
 
 use super::super::options::MutationCallbacks;
 
+use crate::hook::read_entity;
+
 /// Core retry loop for mutations. Runs the mutator, handles success/failure,
 /// and retries with backoff according to the retry policy.
 ///
@@ -94,7 +96,7 @@ pub(super) async fn run_mutation_loop<V, T, E, F, Fut>(
                         Some(e) => e,
                         None => return,
                     };
-                    if !entity.read_with(cx, |r, _| r.is_loading()).unwrap_or(false) {
+                    if !read_entity(&entity, cx, |r, _| r.is_loading()).unwrap_or(false) {
                         #[cfg(debug_assertions)]
                         eprintln!(
                             "DEBUG: run_mutation_loop: mutation no longer Loading after retry delay, aborting"
@@ -256,7 +258,7 @@ pub(super) async fn run_mutation_loop_with_callbacks<V, T, E, F, Fut>(
                             return;
                         }
                     };
-                    if !entity.read_with(cx, |r, _| r.is_loading()).unwrap_or(false) {
+                    if !read_entity(&entity, cx, |r, _| r.is_loading()).unwrap_or(false) {
                         // Mutation was cancelled or reset during the delay.
                         // Fire error callbacks so callers get a terminal notification.
                         if let Some(ref cb) = callbacks.on_error {

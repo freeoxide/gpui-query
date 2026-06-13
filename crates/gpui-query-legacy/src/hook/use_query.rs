@@ -3,7 +3,7 @@ use gpui::{AppContext as _, BorrowAppContext as _, Context, Entity, Subscription
 use crate::client::QueryClient;
 use crate::core::{QueryKey, QueryResource, QuerySignal, QueryStatus, RetryPolicy};
 
-use super::helpers::current_time_ms;
+use super::helpers::{current_time_ms, read_entity};
 
 // ── Query hooks ─────────────────────────────────────────────────────────
 
@@ -346,9 +346,9 @@ async fn fetch_signal_with_retry<T, E, F, Fut>(
                         Some(e) => e,
                         None => return,
                     };
-                    signal = e.read_with(cx, |r, _| {
+                    signal = read_entity(&e, cx, |r, _| {
                         r.signal().cloned().unwrap_or_else(QuerySignal::new)
-                    }).unwrap_or_else(|_| QuerySignal::new());
+                    }).unwrap_or_else(|| QuerySignal::new());
                 } else {
                     let e = match entity.upgrade() {
                         Some(e) => e,

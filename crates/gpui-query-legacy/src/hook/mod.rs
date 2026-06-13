@@ -71,5 +71,5 @@ pub use use_query::{
     fetch_query, fetch_query_with_signal, use_query, use_query_manual, use_query_with_signal,
 };
 
-// Shared utility re-exported for internal use by sibling modules.
-pub(crate) use helpers::current_time_ms;
+// Shared utilities re-exported for internal use by sibling modules.
+pub(crate) use helpers::{current_time_ms, read_entity};

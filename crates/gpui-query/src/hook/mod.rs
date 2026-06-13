@@ -97,11 +97,16 @@
 //! cases where a newer request supersedes the current one.
 
 mod fetch_retry;
+mod gpui_compat;
 mod mutation_hooks;
 mod options;
 mod query_hooks;
 mod use_infinite_query;
 mod use_query_select;
+
+// Source-compat shim: read entities regardless of whether `read_with` returns
+// `R` (older gpui / git) or `Result<R>` (gpui 0.2.2 / crates.io).
+pub(crate) use gpui_compat::read_entity;
 
 // ── Re-exports from options ─────────────────────────────────────────────
 
