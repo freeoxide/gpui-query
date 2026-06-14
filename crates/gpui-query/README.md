@@ -10,21 +10,21 @@ You write a fetcher. The library manages the lifecycle.
 
 ```toml
 [dependencies]
-gpui-query = "0.1.2"
+gpui-query = "0.1.3"
 ```
 
 The default feature set includes the `client` layer. To use the declarative view hooks, enable the `hook` feature:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.1.2", features = ["hook"] }
+gpui-query = { version = "0.1.3", features = ["hook"] }
 ```
 
 If you only want the core state machine without pulling in GPUI:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.1.2", default-features = false, features = ["core"] }
+gpui-query = { version = "0.1.3", default-features = false, features = ["core"] }
 ```
 
 ## Quick start

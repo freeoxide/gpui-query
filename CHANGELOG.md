@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-06-14
+
+### Changed
+
+- `gpui-query-legacy` is now fully decoupled from the main crate, with standalone docs, tests, and improved hook error handling, and it publishes independently.
+
+### Added
+
+- A crate-level README for `gpui-query` on crates.io.
+
+### Fixed
+
+- `read_with` calls in the hook module are now source-compatible across gpui versions.
+
 ## [0.1.2] - 2025-06-13
 
 ### Changed
@@ -80,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Initial public release
 
+[0.1.3]: https://github.com/hmziqrs/gpui-query/releases/tag/v0.1.3
 [0.1.2]: https://github.com/hmziqrs/gpui-query/releases/tag/v0.1.2
 [0.1.1]: https://github.com/hmziqrs/gpui-query/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hmziqrs/gpui-query/releases/tag/v0.1.0
