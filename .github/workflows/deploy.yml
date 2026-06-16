@@ -8,6 +8,7 @@ on:
       - 'website/**'
       - 'shared/**'
       - '.github/workflows/deploy.yml'
+  workflow_dispatch:
 
 concurrency:
   group: deploy-${{ github.ref }}
