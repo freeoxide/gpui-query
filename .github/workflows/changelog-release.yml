@@ -118,6 +118,7 @@ jobs:
   deploy-website:
     needs: publish-main
     runs-on: ubuntu-latest
+    environment: prod
     defaults:
       run:
         working-directory: web
