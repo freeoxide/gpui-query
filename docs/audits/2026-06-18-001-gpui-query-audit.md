@@ -16,7 +16,7 @@
 4. **Massive bucket/hook duplication** that can be collapsed with generics and macros.
 5. **Many mechanical clippy/idiom fixes** that remove warning noise and production `expect` calls.
 
-This document lists 55 actionable findings, grouped by impact and implementation order.
+This document lists 55 primary findings plus supplementary items discovered on re-check, grouped by impact and implementation order.
 
 ---
 
@@ -275,6 +275,72 @@ This document lists 55 actionable findings, grouped by impact and implementation
 
 ---
 
+## 🔍 Supplementary Findings (Re-check)
+
+The following items were present in the raw subagent reports but condensed out of the primary 55. They are included here for completeness.
+
+### Performance
+
+| # | Issue | File(s) | Fix |
+|---|-------|---------|-----|
+| 56 | Single-pass URL-scheme redaction | `src/core/error/sanitize.rs:103-124` | Redact all schemes in one scan instead of rebuilding per scheme |
+| 57 | Extra allocation in `QueryError` serialization | `src/core/error/serde.rs:8-19` | Serialize `&*self.message` instead of `self.message.to_string()` |
+| 58 | `QueryKey` hashed multiple times in `get_or_create()` | `src/client/bucket/ops.rs:84-134`, `src/client/infinite_bucket.rs:55-96` | Use `AHashMap::entry()` to hash once |
+| 59 | `QueryBucket::evict_oldest()` clones `QueryKey` repeatedly | `src/client/bucket/ops.rs:46-70` | Use `Iterator::min_by_key` and clone the final key once |
+| 60 | `all_entities()` allocates on every call | `src/client/bucket/ops.rs:145-150`, `src/client/infinite_bucket.rs:117-122`, `src/client/mutation_bucket.rs:185-190` | Document as allocation-heavy; hot render paths should cache |
+| 61 | `use_query` clones `QueryKey` twice per hook call | `src/hook/query_hooks.rs:51-72` | Move `opts.key` into a local and pass the moved key where possible |
+| 62 | `begin_request_on_entity` locks entity twice on cache-hit path | `src/hook/fetch_retry.rs:55-74`, `src/hook/fetch_retry.rs:87-102` | Add `QueryResource::try_begin_request()` that checks freshness and transitions atomically |
+| 63 | Infinite runners compute `current_time_ms()` before verifying entity exists | `src/hook/use_infinite_query/fetch_runners.rs:53,163` | Move time read inside the `entity.upgrade()` success branch |
+| 64 | `fetch_signal_with_retry` reads fresh signal after cancellation check | `src/hook/fetch_retry.rs:313-325` | Return early immediately when `!is_current_request(...)` before reading signal |
+| 65 | `load_n_pages` builds formatted strings in a loop | `src/tests/core_infinite_query/helpers.rs:22-37` | Accept a closure or `&'static str` pages |
+| 66 | `cx.run_until_parked()` used when no async work spawned | Various tests | Audit each call; remove from purely synchronous setup assertions |
+
+### Boilerplate / Duplication
+
+| # | Issue | File(s) | Fix |
+|---|-------|---------|-----|
+| 67 | `mutate` and `mutate_with_callbacks` duplicate guard/begin/spawn | `src/hook/mutation_hooks/hooks.rs:202-299` | Implement `mutate` as `mutate_with_callbacks(..., MutationCallbacks::new(), cx)` |
+| 68 | `use_mutation` and `use_mutation_with_options` duplicate setup | `src/hook/mutation_hooks/hooks.rs:67-127` | Make deprecated `use_mutation_with_options` delegate to `use_mutation` |
+| 69 | `MIN_GC_TIME_MS` defined in three places | `src/client/bucket/types.rs:13`, `src/client/infinite_bucket.rs:22`, `src/client/mutation_bucket.rs:38` | Export once from `bucket::types` and reuse |
+| 70 | Repeated `begin()` / `complete_current_success()` pattern in tests | `src/tests/core_request/`, coverage tests | Add `complete_success_id()` helper combining begin + complete |
+
+### GPUI-Specific / Correctness
+
+| # | Issue | File(s) | Fix |
+|---|-------|---------|-----|
+| 71 | `Observer::observe()` takes `&mut self` but only reads | `src/client/observer.rs:56,103,159` | Change signature to `&self` |
+| 72 | `cx.notify()` called on terminal failure even when result discarded | `src/hook/use_infinite_query/fetch_runners.rs:112-123`, `src/hook/use_infinite_query/fetch_runners.rs:213-224` | Move `cx.notify()` inside the `accept_current_request` success branch |
+| 73 | Infinite runners check only signal cancellation after retry delay | `src/hook/use_infinite_query/fetch_runners.rs:93-102`, `src/hook/use_infinite_query/fetch_runners.rs:200-209` | Also verify `resource.is_current_request(request_id)` |
+| 74 | `use_query_select` can trigger two renders per source update | `src/hook/use_query_select.rs:142-145` | Document that only the mapped subscription is needed, or return a combined `Subscription` |
+
+### Type Design / API Friction
+
+| # | Issue | File(s) | Fix |
+|---|-------|---------|-----|
+| 75 | `#[allow(dead_code)]` on production methods masks API gaps | `src/client/bucket/ops.rs`, `src/client/infinite_bucket.rs`, `src/client/mutation_bucket.rs`, `src/client/lifecycle.rs` | Remove lint and make methods reachable, or move to `#[cfg(test)]` |
+| 76 | `QueryBeginResult` variants carry identical shape | `src/core/policy.rs:192` | Extract a private helper struct for `Started`/`StaleCacheHit` |
+| 77 | `Default` impls for options allocate default keys | `src/hook/options.rs:90-104`, `src/hook/options.rs:268-279` | Use a `const DEFAULT_KEY: QueryKey` if `QueryKey` can be made const-constructible |
+| 78 | Missing `PartialEq`/`Eq` derives | `src/core/mutation.rs:38`, `src/hook/options.rs:182` | Add conditional derives for easier testing |
+| 79 | `use_query_manual` / `use_query_unsignalled` take raw policy params | `src/hook/query_hooks.rs:103-116`, `src/hook/query_hooks.rs:153-157` | Provide overloads accepting `impl Into<QueryOptions>` |
+| 80 | Forward-compatibility fields on `QueryOptions` ignored | `src/hook/options.rs:57-87` | Implement `keep_previous_data`, `refetch_on_*`, or remove public setters until they work |
+
+### Error Handling / Edge Cases
+
+| # | Issue | File(s) | Fix |
+|---|-------|---------|-----|
+| 81 | Consider `thiserror` for `QueryError` | `src/core/error/convert.rs` | Removes ~15 lines of manual `Display`/`Error`; only if new variants are planned |
+| 82 | `From<String>` / `From<&str>` for `QueryError` always map to `Unknown` | `src/core/error/convert.rs:19-28` | Document behavior or add typed constructors |
+| 83 | Silent fallback when system clock is before epoch | `src/client/erased.rs:17-21`, `src/hook/mod.rs:144` | Document as unreachable or warn; consolidate time helper |
+| 84 | `AsRef<Arc<str>>` not implemented for `QueryError` | `src/core/error/convert.rs:13-17` | Add so callers can borrow the cheap clone source |
+
+### Test Maintainability
+
+| # | Issue | File(s) | Fix |
+|---|-------|---------|-----|
+| 85 | Repeated `begin()` result matching / `complete_current_success()` | `src/tests/core_request/`, coverage tests | Use existing `begin_request_id` helper; add `complete_success_id` helper |
+
+---
+
 ## 🏗️ Architectural Recommendations
 
 1. **Generic bucket abstraction.** `QueryBucket`, `InfiniteQueryBucket`, and much of `MutationBucket` share the same map/sequencer/observer-count/GC shape. A `Bucket<K, R>` generic would cut hundreds of lines and prevent fixes from being applied twice.
@@ -293,12 +359,13 @@ This document lists 55 actionable findings, grouped by impact and implementation
 
 ## Suggested Implementation Order
 
-1. **Mechanical clippy/idiom fixes** (#22–#45) — safe, fast, removes warning noise.
+1. **Mechanical clippy/idiom fixes** (#22–#45, #56–#60, #75–#80) — safe, fast, removes warning noise.
 2. **Memory bounds** (#1, #2) — prevent unbounded growth.
 3. **Task cancellation** (#6) + **mutation race** (#7) — correctness.
-4. **Clone reduction** (#3, #4, #5, #20, #21) — measurable perf wins.
-5. **Bucket/hook deduplication** (#10, #11, #12, #13, #14, #15) — maintainability.
-6. **Test helpers** (#46–#55) — reduces suite size and flakiness.
+4. **Clone reduction** (#3, #4, #5, #20, #57, #58, #61–#64) — measurable perf wins.
+5. **Bucket/hook deduplication** (#10, #11, #12, #13, #14, #15, #67–#69) — maintainability.
+6. **Test helpers** (#46–#55, #85) — reduces suite size and flakiness.
+7. **Type design / API cleanup** (#75–#84) — once core behavior is solid.
 
 ---
 
