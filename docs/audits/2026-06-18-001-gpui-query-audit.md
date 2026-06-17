@@ -16,7 +16,7 @@
 4. **Massive bucket/hook duplication** that can be collapsed with generics and macros.
 5. **Many mechanical clippy/idiom fixes** that remove warning noise and production `expect` calls.
 
-This document lists 55 primary findings plus supplementary items discovered on re-check, grouped by impact and implementation order.
+This document lists 55 primary findings plus 42 supplementary items discovered on re-check (97 total), grouped by impact and implementation order.
 
 ---
 
@@ -339,6 +339,25 @@ The following items were present in the raw subagent reports but condensed out o
 |---|-------|---------|-----|
 | 85 | Repeated `begin()` result matching / `complete_current_success()` | `src/tests/core_request/`, coverage tests | Use existing `begin_request_id` helper; add `complete_success_id` helper |
 
+### Second-Pass Additions
+
+These were identified on a third cross-check against the raw subagent reports.
+
+| # | Issue | File(s) | Fix |
+|---|-------|---------|-----|
+| 86 | `InfiniteQueryResource::complete_success_with_guard` takes `&RequestGuard` instead of consuming it | `src/core/infinite_query/lifecycle.rs:260,286` | Change to `RequestGuard` by value to match `QueryResource`’s two-phase protocol |
+| 87 | `IgnoreWhileLoading` only applies per-direction in infinite queries | `src/core/infinite_query/lifecycle.rs:31-40,80-99` | Add a global active-request guard or document the per-direction behavior |
+| 88 | `QueryResource::set_initial_data()` clones the value it just stored | `src/core/resource/lifecycle.rs:341-350` | Store as `Arc<T>` or move the value instead of cloning |
+| 89 | Large optional data fields inlined in resource structs | `src/core/resource.rs:24-46`, `src/core/mutation.rs:37-49` | Consider `Option<Box<T>>` when `T` is expected to be large |
+| 90 | `From<String>` / `From<Vec<String>>` for `QueryKey` copy strings into `Arc<str>` | `src/core/key.rs:128-156` | Accept `IntoIterator<Item: Into<Arc<str>>>` to move owned strings |
+| 91 | `MutationBucket::gc()` uses collect-then-remove and reads every entity | `src/client/mutation_bucket.rs:226-296` | Replace with `AHashMap::retain()` and avoid the `Vec<u64>` allocation |
+| 92 | `dehydrate()` calls `current_time_ms()` twice | `src/client/lifecycle.rs:243,257` | Pass a single cached `now_ms` into helpers |
+| 93 | Lifecycle retain/release helpers duplicated per bucket type | `src/client/lifecycle.rs:68-182` | Collapse into generic helpers over the bucket map |
+| 94 | `dehydrate()` has near-duplicate loops for query and infinite buckets | `src/client/lifecycle.rs:242-268` | Extract `dehydrate_bucket_entries(kind, ...)` helper |
+| 95 | Repeated `resource()` + `seq()` setup in core lifecycle tests | `src/tests/core_lifecycle/`, `src/tests/coverage_gaps/` | Add a `(QueryResource, RequestSequencer)` helper or macro |
+| 96 | `clippy::type_complexity` on callback fields and return tuples | `src/hook/options.rs:209-211`, `src/hook/use_query_select.rs:95-99` | Introduce type aliases: `MutationCallback<T>` and `QuerySelectResult<T,U,E>` |
+| 97 | Manual `.clone()` that could borrow in hook hot paths | `src/hook/fetch_retry.rs:79`, `src/hook/use_infinite_query/fetch_helpers.rs:64,121` | Restructure to keep borrowed keys inside the global update where possible |
+
 ---
 
 ## 🏗️ Architectural Recommendations
@@ -359,13 +378,13 @@ The following items were present in the raw subagent reports but condensed out o
 
 ## Suggested Implementation Order
 
-1. **Mechanical clippy/idiom fixes** (#22–#45, #56–#60, #75–#80) — safe, fast, removes warning noise.
-2. **Memory bounds** (#1, #2) — prevent unbounded growth.
-3. **Task cancellation** (#6) + **mutation race** (#7) — correctness.
-4. **Clone reduction** (#3, #4, #5, #20, #57, #58, #61–#64) — measurable perf wins.
-5. **Bucket/hook deduplication** (#10, #11, #12, #13, #14, #15, #67–#69) — maintainability.
-6. **Test helpers** (#46–#55, #85) — reduces suite size and flakiness.
-7. **Type design / API cleanup** (#75–#84) — once core behavior is solid.
+1. **Mechanical clippy/idiom fixes** (#22–#45, #56–#60, #75–#80, #96, #97) — safe, fast, removes warning noise.
+2. **Memory bounds** (#1, #2, #91) — prevent unbounded growth.
+3. **Task cancellation** (#6) + **mutation race** (#7) + **RequestGuard protocol** (#86, #87) — correctness.
+4. **Clone reduction** (#3, #4, #5, #20, #57–#59, #61–#64, #88, #90) — measurable perf wins.
+5. **Bucket/hook deduplication** (#10, #11, #12, #13, #14, #15, #67–#69, #93, #94) — maintainability.
+6. **Test helpers** (#46–#55, #85, #95) — reduces suite size and flakiness.
+7. **Type design / API cleanup** (#75–#84, #89) — once core behavior is solid.
 
 ---
 
