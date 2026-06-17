@@ -13,3 +13,11 @@ Use **gpui-query** (v2) instead. The v2 crate provides:
 - **Efficient re-renders** with status deduplication
 
 See the migration guide at [https://gpui-query.hmziq.xyz/docs/](https://gpui-query.hmziq.xyz/docs/).
+
+## Author
+
+**hmziqrs**
+
+- Website: <https://hmziq.rs>
+- GitHub: <https://github.com/hmziqrs>
+- X: <https://x.com/hmziqrs>

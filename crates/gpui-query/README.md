@@ -10,21 +10,21 @@ You write a fetcher. The library manages the lifecycle.
 
 ```toml
 [dependencies]
-gpui-query = "0.1.3"
+gpui-query = "0.1.4"
 ```
 
 The default feature set includes the `client` layer. To use the declarative view hooks, enable the `hook` feature:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.1.3", features = ["hook"] }
+gpui-query = { version = "0.1.4", features = ["hook"] }
 ```
 
 If you only want the core state machine without pulling in GPUI:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.1.3", default-features = false, features = ["core"] }
+gpui-query = { version = "0.1.4", default-features = false, features = ["core"] }
 ```
 
 ## Quick start
@@ -104,6 +104,15 @@ The crate is split into three layers, each behind a feature flag:
 - GPUI: <https://github.com/zed-industries/zed/tree/main/crates/gpui>
 - TanStack Query: <https://tanstack.com/query>
 
+## Author
+
+**hmziqrs**
+
+- Website: <https://hmziq.rs>
+- GitHub: <https://github.com/hmziqrs>
+- X: <https://x.com/hmziqrs>
+
 ## License
 
 MIT. See the [LICENSE](../../LICENSE) file for details.
+
