@@ -46,6 +46,8 @@ use gpui::{App, Entity, Global};
 use crate::core::{
     CachePolicy, QueryKey, QueryResource, RequestPolicy,
 };
+use crate::client::bucket::shared::GC_INTERVAL;
+use crate::client::bucket::types::MIN_GC_TIME_MS;
 use crate::client::erased::{ErasedBucket, ErasedInfiniteBucket, ErasedMutationBucket};
 
 /// Global registry for query and mutation resources.
@@ -59,7 +61,6 @@ use crate::client::erased::{ErasedBucket, ErasedInfiniteBucket, ErasedMutationBu
 /// - `AHashMap` for ~2x faster lookups on trusted keys
 /// - Actual mutation GC (not a no-op)
 /// - Collect-then-update pattern to avoid nested entity borrows
-#[derive(Default)]
 pub struct QueryClient {
     pub(crate) buckets: AHashMap<TypeId, Box<dyn ErasedBucket>>,
     pub(crate) infinite_buckets: AHashMap<TypeId, Box<dyn ErasedInfiniteBucket>>,
@@ -67,9 +68,37 @@ pub struct QueryClient {
     pub(crate) default_cache_policy: CachePolicy,
     pub(crate) default_request_policy: RequestPolicy,
     pub(crate) gc_time_ms: u64,
+    /// Operation counter for opportunistic GC (audit CL1/#105). The GC
+    /// subsystem fires every `GC_INTERVAL` resource/mutation operations so it
+    /// actually runs in production without requiring hooks to call `gc()`.
+    op_count: u64,
+    /// Wall-clock ms of the last opportunistic GC sweep. Combined with the op
+    /// counter, this debounces GC so a burst of insertions (or a fast test that
+    /// creates many resources within `MIN_GC_TIME_MS`) does not trigger GC.
+    last_gc_ms: u128,
 }
 
 impl Global for QueryClient {}
+
+impl Default for QueryClient {
+    /// **Audit fix #21**: Explicit `Default` impl that sets `gc_time_ms` to
+    /// `300_000` (5 minutes), matching `with_policies`. The previous derive
+    /// produced `gc_time_ms: 0`, which silently disabled GC — every
+    /// non-loading Idle/Failure resource would be evicted on every pass.
+    /// All other field defaults are identical to what the derive produced.
+    fn default() -> Self {
+        Self {
+            buckets: AHashMap::new(),
+            infinite_buckets: AHashMap::new(),
+            mutation_buckets: AHashMap::new(),
+            default_cache_policy: CachePolicy::default(),
+            default_request_policy: RequestPolicy::default(),
+            gc_time_ms: 300_000,
+            op_count: 0,
+            last_gc_ms: current_time_ms(),
+        }
+    }
+}
 
 impl QueryClient {
     /// Create a new client with default policies.
@@ -97,6 +126,33 @@ impl QueryClient {
     pub fn with_gc_time(mut self, gc_time_ms: u64) -> Self {
         self.gc_time_ms = gc_time_ms;
         self
+    }
+
+    /// Opportunistic GC trigger (audit CL1/#105). Runs GC every `GC_INTERVAL`
+    /// operations so the GC subsystem actually fires in production without
+    /// requiring hooks to call `gc()` explicitly. Without this trigger the
+    /// (now correct, live-state-reading) GC never runs in production, which
+    /// would render the memory-bound fixes (#1, #2, #8, #91, #108) academic.
+    ///
+    /// Debounced by BOTH operation count (every `GC_INTERVAL` ops) and wall
+    /// clock time (no sweep within `MIN_GC_TIME_MS` of the last). The time
+    /// debounce is initialized to creation time, so a fast test that creates
+    /// many resources in well under a second never triggers GC. `gc_time_ms`
+    /// of 0 disables GC entirely.
+    fn maybe_opportunistic_gc(&mut self, cx: &App) {
+        if self.gc_time_ms == 0 {
+            return;
+        }
+        self.op_count = self.op_count.wrapping_add(1);
+        if self.op_count % GC_INTERVAL as u64 != 0 {
+            return;
+        }
+        let now_ms = current_time_ms();
+        if now_ms.saturating_sub(self.last_gc_ms) < MIN_GC_TIME_MS as u128 {
+            return;
+        }
+        self.last_gc_ms = now_ms;
+        self.gc_with_time(now_ms, cx);
     }
 
     // ── Query operations ────────────────────────────────────────────────
@@ -128,29 +184,31 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(QueryBucket::<T, E>::new()));
 
-        // Audit 3 fix (findings 3, 4): Graceful downcast with type name in
-        // error message. Uses two-step pattern to satisfy borrow checker:
-        // try downcast first, if it fails, replace bucket and retry.
-        let typed = {
-            if bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>().is_some() {
-                // Downcast succeeded — borrow released by this point.
-            } else {
-                eprintln!(
-                    "QueryClient: type mismatch in bucket downcast for {}. \
-                     Replacing with a fresh bucket.",
-                    std::any::type_name::<(T, E)>()
-                );
-                // Replace the mismatched bucket with a fresh one.
-                *bucket = Box::new(QueryBucket::<T, E>::new());
-            }
-            // Now borrow again for the actual downcast (will always succeed).
-            bucket
-                .as_any_mut()
-                .downcast_mut::<QueryBucket<T, E>>()
-                .expect("freshly created QueryBucket must downcast correctly")
-        };
+        // Audit fix #11: Replace the redundant first `downcast_mut` (which
+        // performed the downcast twice) with a single `TypeId` comparison.
+        // `Any::downcast_mut` fails only when `TypeId`s disagree, so checking
+        // `bucket.type_id()` upfront tells us whether the real downcast will
+        // succeed without paying for it twice. On mismatch we log the type
+        // name and swap in a fresh bucket, exactly as before.
+        let expected_type_id = TypeId::of::<QueryBucket<T, E>>();
+        if bucket.as_any().type_id() != expected_type_id {
+            eprintln!(
+                "QueryClient: type mismatch in bucket downcast for {}. \
+                 Replacing with a fresh bucket.",
+                std::any::type_name::<(T, E)>()
+            );
+            *bucket = Box::new(QueryBucket::<T, E>::new());
+        }
+        // The TypeId check above guarantees this downcast succeeds.
+        let typed = bucket
+            .as_any_mut()
+            .downcast_mut::<QueryBucket<T, E>>()
+            .expect("TypeId-verified QueryBucket must downcast correctly");
 
-        typed.get_or_create(key.into(), cache_policy, request_policy, cx)
+        let entity = typed.get_or_create(key.into(), cache_policy, request_policy, cx);
+        // Audit fix CL1/#105: opportunistically run GC on this op.
+        self.maybe_opportunistic_gc(cx);
+        entity
     }
 
     /// Get all query entities of a given type pair.
@@ -195,21 +253,20 @@ impl QueryClient {
     ) -> Option<crate::core::RequestId> {
         let type_id = TypeId::of::<(T, E)>();
         let bucket = self.buckets.get_mut(&type_id)?;
-        // Audit 3 fix (findings 3, 4): Two-step downcast with graceful recovery.
-        let typed = {
-            if bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>().is_none() {
-                eprintln!(
-                    "QueryClient: type mismatch in bucket downcast for {}. \
-                     Replacing with a fresh bucket.",
-                    std::any::type_name::<(T, E)>()
-                );
-                *bucket = Box::new(QueryBucket::<T, E>::new());
-            }
-            bucket
-                .as_any_mut()
-                .downcast_mut::<QueryBucket<T, E>>()
-                .expect("freshly created QueryBucket must downcast correctly")
-        };
+        // Audit fix #11: TypeId comparison replaces the redundant double downcast.
+        let expected_type_id = TypeId::of::<QueryBucket<T, E>>();
+        if bucket.as_any().type_id() != expected_type_id {
+            eprintln!(
+                "QueryClient: type mismatch in bucket downcast for {}. \
+                 Replacing with a fresh bucket.",
+                std::any::type_name::<(T, E)>()
+            );
+            *bucket = Box::new(QueryBucket::<T, E>::new());
+        }
+        let typed = bucket
+            .as_any_mut()
+            .downcast_mut::<QueryBucket<T, E>>()
+            .expect("TypeId-verified QueryBucket must downcast correctly");
         typed.sequencer_mut(key).map(|seq| seq.next_request())
     }
 

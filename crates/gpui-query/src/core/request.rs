@@ -50,6 +50,7 @@ use serde::{Deserialize, Serialize};
 /// assert_eq!(id.label(), "1:42");
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[must_use]
 pub struct RequestId {
     scope_id: u64,
     sequence: u64,
@@ -72,8 +73,21 @@ impl RequestId {
     }
 
     /// Human-readable label for diagnostics.
+    ///
+    /// Thin wrapper around the [`Display`](std::fmt::Display) impl that
+    /// allocates a `String`. Prefer `format!("{id}")` or writing directly to
+    /// a formatter to avoid the heap allocation for log/diagnostic callers.
+    // Audit fix #45: keep label for backward compat; Display writes directly.
     pub fn label(self) -> String {
-        format!("{}:{}", self.scope_id, self.sequence)
+        self.to_string()
+    }
+}
+
+impl std::fmt::Display for RequestId {
+    /// Reproduces the exact `"{scope}:{sequence}"` label format.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Audit fix #45: write directly to the formatter, avoiding a String alloc.
+        write!(f, "{}:{}", self.scope_id, self.sequence)
     }
 }
 
@@ -208,6 +222,7 @@ impl From<u128> for QueryTimestamp {
 /// [`QueryResource`]: super::QueryResource
 /// [`QueryResource::accept_current_request`]: super::QueryResource::accept_current_request
 #[derive(Debug, PartialEq, Eq)]
+#[must_use]
 pub struct RequestGuard {
     request_id: RequestId,
 }

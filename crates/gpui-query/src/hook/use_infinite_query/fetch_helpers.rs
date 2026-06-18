@@ -80,11 +80,13 @@ pub fn fetch_next_page_infinite<T, E, C, FNext, Fut>(
 
     if let Some(request_id) = request_id {
         let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-        cx.spawn(async move |_this, cx| {
+        // Audit fix #6: store the spawned task on the resource so a replacement
+        // fetch (or entity drop on unmount) aborts the prior in-flight task
+        // instead of leaving it detached and running.
+        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
             run_fetch_next_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx).await;
-            Ok::<_, ()>(())
-        })
-        .detach();
+        });
+        let _ = entity.update(cx, |r, _| r.set_current_task(task));
     }
 }
 
@@ -136,10 +138,11 @@ pub fn fetch_previous_page_infinite<T, E, C, FPrev, Fut>(
 
     if let Some(request_id) = request_id {
         let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-        cx.spawn(async move |_this, cx| {
+        // Audit fix #6: store the spawned task on the resource so a replacement
+        // fetch (or entity drop on unmount) aborts the prior in-flight task.
+        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
             run_fetch_previous_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx).await;
-            Ok::<_, ()>(())
-        })
-        .detach();
+        });
+        let _ = entity.update(cx, |r, _| r.set_current_task(task));
     }
 }

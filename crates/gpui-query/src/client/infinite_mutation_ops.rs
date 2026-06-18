@@ -54,22 +54,25 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(InfiniteQueryBucket::<T, E>::new()));
 
-        let typed = {
-            if bucket.as_any_mut().downcast_mut::<InfiniteQueryBucket<T, E>>().is_none() {
-                eprintln!(
-                    "QueryClient: type mismatch in infinite bucket downcast for {}. \
-                     Replacing with a fresh bucket.",
-                    std::any::type_name::<(T, E)>()
-                );
-                *bucket = Box::new(InfiniteQueryBucket::<T, E>::new());
-            }
-            bucket
-                .as_any_mut()
-                .downcast_mut::<InfiniteQueryBucket<T, E>>()
-                .expect("freshly created InfiniteQueryBucket must downcast correctly")
-        };
+        // Audit fix #11: TypeId comparison replaces the redundant double downcast.
+        let expected_type_id = TypeId::of::<InfiniteQueryBucket<T, E>>();
+        if bucket.as_any().type_id() != expected_type_id {
+            eprintln!(
+                "QueryClient: type mismatch in infinite bucket downcast for {}. \
+                 Replacing with a fresh bucket.",
+                std::any::type_name::<(T, E)>()
+            );
+            *bucket = Box::new(InfiniteQueryBucket::<T, E>::new());
+        }
+        let typed = bucket
+            .as_any_mut()
+            .downcast_mut::<InfiniteQueryBucket<T, E>>()
+            .expect("TypeId-verified InfiniteQueryBucket must downcast correctly");
 
-        typed.get_or_create(key.into(), cache_policy, request_policy, cx)
+        let entity = typed.get_or_create(key.into(), cache_policy, request_policy, cx);
+        // Audit fix CL1/#105: opportunistically run GC on this op.
+        self.maybe_opportunistic_gc(cx);
+        entity
     }
 
     /// Get a specific infinite query entity by key.
@@ -104,20 +107,20 @@ impl QueryClient {
     ) -> Option<crate::core::RequestId> {
         let type_id = TypeId::of::<(T, E)>();
         let bucket = self.infinite_buckets.get_mut(&type_id)?;
-        let typed = {
-            if bucket.as_any_mut().downcast_mut::<InfiniteQueryBucket<T, E>>().is_none() {
-                eprintln!(
-                    "QueryClient: type mismatch in infinite bucket downcast for {}. \
-                     Replacing with a fresh bucket.",
-                    std::any::type_name::<(T, E)>()
-                );
-                *bucket = Box::new(InfiniteQueryBucket::<T, E>::new());
-            }
-            bucket
-                .as_any_mut()
-                .downcast_mut::<InfiniteQueryBucket<T, E>>()
-                .expect("freshly created InfiniteQueryBucket must downcast correctly")
-        };
+        // Audit fix #11: TypeId comparison replaces the redundant double downcast.
+        let expected_type_id = TypeId::of::<InfiniteQueryBucket<T, E>>();
+        if bucket.as_any().type_id() != expected_type_id {
+            eprintln!(
+                "QueryClient: type mismatch in infinite bucket downcast for {}. \
+                 Replacing with a fresh bucket.",
+                std::any::type_name::<(T, E)>()
+            );
+            *bucket = Box::new(InfiniteQueryBucket::<T, E>::new());
+        }
+        let typed = bucket
+            .as_any_mut()
+            .downcast_mut::<InfiniteQueryBucket<T, E>>()
+            .expect("TypeId-verified InfiniteQueryBucket must downcast correctly");
         typed.sequencer_mut(key).map(|seq| seq.next_request())
     }
 
@@ -155,22 +158,25 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(MutationBucket::<V, T, E>::new()));
 
-        let typed = {
-            if bucket.as_any_mut().downcast_mut::<MutationBucket<V, T, E>>().is_none() {
-                eprintln!(
-                    "QueryClient: type mismatch in mutation bucket downcast for {}. \
-                     Replacing with a fresh bucket.",
-                    std::any::type_name::<(V, T, E)>()
-                );
-                *bucket = Box::new(MutationBucket::<V, T, E>::new());
-            }
-            bucket
-                .as_any_mut()
-                .downcast_mut::<MutationBucket<V, T, E>>()
-                .expect("freshly created MutationBucket must downcast correctly")
-        };
+        // Audit fix #11: TypeId comparison replaces the redundant double downcast.
+        let expected_type_id = TypeId::of::<MutationBucket<V, T, E>>();
+        if bucket.as_any().type_id() != expected_type_id {
+            eprintln!(
+                "QueryClient: type mismatch in mutation bucket downcast for {}. \
+                 Replacing with a fresh bucket.",
+                std::any::type_name::<(V, T, E)>()
+            );
+            *bucket = Box::new(MutationBucket::<V, T, E>::new());
+        }
+        let typed = bucket
+            .as_any_mut()
+            .downcast_mut::<MutationBucket<V, T, E>>()
+            .expect("TypeId-verified MutationBucket must downcast correctly");
 
         typed.insert(entity, cx);
+        // Audit fix CL1/#105: opportunistically run GC on this op so completed
+        // mutations are eventually evicted without manual gc() calls.
+        self.maybe_opportunistic_gc(cx);
     }
 
     /// Get all mutation entities of a given type triple.

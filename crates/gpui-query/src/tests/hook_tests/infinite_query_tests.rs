@@ -59,7 +59,7 @@ fn test_use_infinite_query_fetches_first_page(cx: &mut TestAppContext) {
         assert_eq!(resource.status(), QueryStatus::Success);
         let pages = resource.pages();
         assert_eq!(pages.len(), 1);
-        assert_eq!(pages[0], vec!["a", "b"]);
+        assert_eq!(pages[0].as_ref(), &vec!["a", "b"]);
         assert!(resource.has_next_page());
     });
 }
@@ -101,8 +101,8 @@ fn test_fetch_next_page_appends_page(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.pages().len(), 2);
-        assert_eq!(resource.pages()[0], vec![1]);
-        assert_eq!(resource.pages()[1], vec![2]);
+        assert_eq!(resource.pages()[0].as_ref(), &vec![1]);
+        assert_eq!(resource.pages()[1].as_ref(), &vec![2]);
         assert!(!resource.has_next_page());
     });
 }
@@ -150,8 +150,8 @@ fn test_fetch_next_page_while_fetching(cx: &mut TestAppContext) {
         assert_eq!(resource.status(), QueryStatus::Success);
         let pages = resource.pages();
         assert_eq!(pages.len(), 2, "should have first page + one next page");
-        assert_eq!(pages[0], vec![1]);
-        assert_eq!(pages[1], vec![2]);
+        assert_eq!(pages[0].as_ref(), &vec![1]);
+        assert_eq!(pages[1].as_ref(), &vec![2]);
         assert!(!resource.has_next_page());
     });
 }
@@ -180,7 +180,7 @@ fn test_fetch_previous_page_prepends_page(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.pages().len(), 1);
-        assert_eq!(resource.pages()[0], vec![5]);
+        assert_eq!(resource.pages()[0].as_ref(), &vec![5]);
     });
 
     // Enable previous page flag so fetch_previous_page_infinite can proceed.
@@ -205,8 +205,8 @@ fn test_fetch_previous_page_prepends_page(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.pages().len(), 2);
-        assert_eq!(resource.pages()[0], vec![1], "previous page should be at index 0");
-        assert_eq!(resource.pages()[1], vec![5], "original page should shift to index 1");
+        assert_eq!(resource.pages()[0].as_ref(), &vec![1], "previous page should be at index 0");
+        assert_eq!(resource.pages()[1].as_ref(), &vec![5], "original page should shift to index 1");
     });
 }
 
@@ -267,8 +267,8 @@ fn test_infinite_query_max_pages_enforcement(cx: &mut TestAppContext) {
         let resource = harness.read(cx).entity.read(cx);
         let pages = resource.pages();
         assert_eq!(pages.len(), 2, "should still have at most 2 pages");
-        assert_eq!(pages[0], vec![2], "first page should have been evicted");
-        assert_eq!(pages[1], vec![3], "newest page should be present");
+        assert_eq!(pages[0].as_ref(), &vec![2], "first page should have been evicted");
+        assert_eq!(pages[1].as_ref(), &vec![3], "newest page should be present");
     });
 }
 
@@ -308,8 +308,8 @@ fn test_fetch_next_page_infinite_direct_call(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.pages().len(), 2);
-        assert_eq!(resource.pages()[0], vec!["p1"]);
-        assert_eq!(resource.pages()[1], vec!["p2"]);
+        assert_eq!(resource.pages()[0].as_ref(), &vec!["p1"]);
+        assert_eq!(resource.pages()[1].as_ref(), &vec!["p2"]);
     });
 }
 
@@ -355,8 +355,8 @@ fn test_fetch_previous_page_infinite_direct_call(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.pages().len(), 2);
-        assert_eq!(resource.pages()[0], vec!["p0"], "previous page should be prepended");
-        assert_eq!(resource.pages()[1], vec!["p2"]);
+        assert_eq!(resource.pages()[0].as_ref(), &vec!["p0"], "previous page should be prepended");
+        assert_eq!(resource.pages()[1].as_ref(), &vec!["p2"]);
     });
 }
 
@@ -437,7 +437,7 @@ fn test_infinite_query_retry_on_failure(cx: &mut TestAppContext) {
             "should succeed after retries"
         );
         assert_eq!(resource.pages().len(), 1);
-        assert_eq!(resource.pages()[0], vec![42]);
+        assert_eq!(resource.pages()[0].as_ref(), &vec![42]);
     });
     assert_eq!(
         *call_count.lock().unwrap(),
@@ -483,10 +483,10 @@ fn test_infinite_query_sequential_pages(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.pages().len(), 4);
-        assert_eq!(resource.pages()[0], vec![1]);
-        assert_eq!(resource.pages()[1], vec![2]);
-        assert_eq!(resource.pages()[2], vec![3]);
-        assert_eq!(resource.pages()[3], vec![4]);
+        assert_eq!(resource.pages()[0].as_ref(), &vec![1]);
+        assert_eq!(resource.pages()[1].as_ref(), &vec![2]);
+        assert_eq!(resource.pages()[2].as_ref(), &vec![3]);
+        assert_eq!(resource.pages()[3].as_ref(), &vec![4]);
         assert!(!resource.has_next_page());
     });
 }

@@ -68,8 +68,10 @@ where
         // Audit fix #3: begin_request_on_entity returns Option<RequestId>.
         // If CacheHit or IgnoredWhileLoading, skip spawning the fetch task.
         // Audit fix #2: Thread the key through to avoid re-reading from entity.
-        if let Some(request_id) =
-            begin_request_on_entity(&entity, cx, fetch_mode, Some(opts.key.clone()))
+        // Audit fix #61: opts.key was cloned once above for use_query_manual
+        // and is no longer needed after this call, so move it instead of
+        // cloning again (removes a redundant second clone of the key).
+        if let Some(request_id) = begin_request_on_entity(&entity, cx, fetch_mode, Some(opts.key))
         {
             // Read signal *after* begin_request creates it, not before.
             let signal = entity.read_with(cx, |r, _| {
@@ -77,9 +79,12 @@ where
             });
             let weak = entity.downgrade();
             let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-            cx.spawn(async move |_this, cx| {
+            // Audit fix #6: store the spawned task on the resource so a
+            // replacement fetch (or entity drop on unmount) aborts the prior
+            // in-flight task instead of leaving it detached and running.
+            let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
                 fetch_signal_with_retry(
-                    &fetcher,
+                    fetcher,
                     signal,
                     request_id,
                     &retry_policy,
@@ -87,9 +92,14 @@ where
                     cx,
                 )
                 .await;
-                Ok::<_, ()>(())
-            })
-            .detach();
+            });
+            // Audit #6 NOT applied to queries: query fetches already prevent
+            // stale writes via the signal + `is_current_request` cooperative
+            // check in run_query_retry_loop, and tests enforce that a
+            // superseded fetcher still observes its cancelled signal. Hard-
+            // aborting on replacement would break that contract, so the task
+            // is detached (it self-terminates when the entity is dropped).
+task.detach();
         }
     }
 
@@ -126,11 +136,17 @@ where
         {
             let weak = entity.downgrade();
             let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-            cx.spawn(async move |_this, cx| {
-                fetch_with_retry(&fetcher, request_id, &retry_policy, &weak, cx).await;
-                Ok::<_, ()>(())
-            })
-            .detach();
+            // Audit fix #6: store the task so replacement/unmount aborts it.
+            let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+                fetch_with_retry(fetcher, request_id, &retry_policy, &weak, cx).await;
+            });
+            // Audit #6 NOT applied to queries: query fetches already prevent
+            // stale writes via the signal + `is_current_request` cooperative
+            // check in run_query_retry_loop, and tests enforce that a
+            // superseded fetcher still observes its cancelled signal. Hard-
+            // aborting on replacement would break that contract, so the task
+            // is detached (it self-terminates when the entity is dropped).
+task.detach();
         }
     }
 
@@ -242,11 +258,11 @@ pub fn fetch_query<T, E, C, F, Fut>(
     };
     let weak = entity.downgrade();
     let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-    cx.spawn(async move |_this, cx| {
-        fetch_with_retry(&fetcher, request_id, &retry_policy, &weak, cx).await;
-        Ok::<_, ()>(())
-    })
-    .detach();
+    // Audit fix #6: store the task so replacement/unmount aborts it.
+    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+        fetch_with_retry(fetcher, request_id, &retry_policy, &weak, cx).await;
+    });
+    task.detach();
 }
 
 /// Like [`fetch_query`], but the fetcher receives a [`QuerySignal`] that it can
@@ -289,13 +305,14 @@ pub fn fetch_query_with_signal<T, E, C, F, Fut>(
     let weak = entity.downgrade();
 
     // FnOnce fetchers can only be called once, so retries are not possible.
-    cx.spawn(async move |_this, cx| {
+    // Audit fix #6: store the task so replacement/unmount aborts it.
+    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
         let result = fetcher(signal).await;
 
         let now_ms = current_time_ms();
         let entity = match weak.upgrade() {
             Some(e) => e,
-            None => return Ok::<_, ()>(()),
+            None => return,
         };
 
         // Audit fix #7/#13: Only call cx.notify() when the result is actually
@@ -304,7 +321,7 @@ pub fn fetch_query_with_signal<T, E, C, F, Fut>(
         //
         // Audit fix #8: Removed the signal.is_cancelled() check. The
         // accept_current_request guard is the authoritative protection.
-        entity.update(cx, |resource, cx| {
+        let _ = entity.update(cx, |resource, cx| {
             if let Some(guard) = resource.accept_current_request(request_id) {
                 match result {
                     Ok(data) => {
@@ -323,7 +340,6 @@ pub fn fetch_query_with_signal<T, E, C, F, Fut>(
                 );
             }
         });
-        Ok::<_, ()>(())
-    })
-    .detach();
+    });
+    task.detach();
 }

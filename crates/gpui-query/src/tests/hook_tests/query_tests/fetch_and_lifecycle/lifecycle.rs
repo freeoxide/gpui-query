@@ -100,17 +100,16 @@ fn test_multiple_observations_same_entity(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_use_query_ignore_while_loading_policy(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    setup_test(cx);
 
     let fetch_count = Arc::new(Mutex::new(0u32));
     let fc1 = fetch_count.clone();
     let fc2 = fetch_count.clone();
 
     // Gate: the first fetcher blocks until the test releases it after issuing
-    // the second fetch_query. Uses AtomicBool + executor.timer() instead of
-    // thread::sleep to avoid blocking the executor thread.
-    use std::sync::atomic::{AtomicBool, Ordering};
-    let gate = Arc::new(AtomicBool::new(false));
+    // the second fetch_query. Uses the shared `Gate` helper which polls the
+    // executor with 1ms timers instead of thread::sleep.
+    let gate = Gate::new();
     let gate_clone = gate.clone();
     let executor = cx.background_executor.clone();
 
@@ -129,12 +128,9 @@ fn test_use_query_ignore_while_loading_policy(cx: &mut TestAppContext) {
                 let executor = executor.clone();
                 async move {
                     *fc1.lock().unwrap() += 1;
-                    // Wait for the gate using executor-aware yield instead of
-                    // thread::sleep. This allows the second fetch_query to be
-                    // scheduled while we wait.
-                    while !gate_clone.load(Ordering::Acquire) {
-                        executor.timer(std::time::Duration::from_millis(1)).await;
-                    }
+                    // Wait for the gate via the shared helper. This allows
+                    // the second fetch_query to be scheduled while we wait.
+                    gate_clone.wait(&executor).await;
                     Ok::<_, QueryError>("first-fetch")
                 }
             },
@@ -159,7 +155,7 @@ fn test_use_query_ignore_while_loading_policy(cx: &mut TestAppContext) {
     });
 
     // Release the gate so the first fetcher can proceed.
-    gate.store(true, Ordering::Release);
+    gate.release();
 
     cx.run_until_parked();
 

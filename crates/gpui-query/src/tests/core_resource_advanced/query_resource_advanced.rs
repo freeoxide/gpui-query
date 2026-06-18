@@ -116,7 +116,7 @@ fn failure_with_data_then_success_updates_data() {
 fn signal_mut_returns_signal_when_active() {
     let mut r = test_resource();
     let mut s = test_sequencer();
-    r.begin_request(&mut s, 100, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut s, 100, QueryFetchMode::Normal);
 
     let sig = r.signal_mut();
     assert!(sig.is_some());
@@ -257,7 +257,7 @@ fn begin_request_with_id_respects_ignore_while_loading() {
         RequestPolicy::IgnoreWhileLoading,
     );
     let custom_id = RequestId::scoped(10, 1);
-    r.begin_request_with_id(Some(custom_id), 100, QueryFetchMode::Normal);
+    let _ = r.begin_request_with_id(Some(custom_id), 100, QueryFetchMode::Normal);
     assert_eq!(r.active_request_id(), Some(custom_id));
 
     // Second request should be ignored

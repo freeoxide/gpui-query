@@ -36,8 +36,11 @@ pub fn arb_key_special() -> impl Strategy<Value = Vec<String>> {
         // RTL overrides, surrogates-replacement, and other tricky codepoints
         // that regex classes like \p{L} do not cover.
         prop::collection::vec(arb_unicode_edge_case_string(), 1..5),
-        // Very long single segment (100-2000 chars) to stress allocation paths
-        ".{100,2000}".prop_map(|s| vec![s]),
+        // Very long single segment (100-256 chars) to stress allocation paths.
+        // Bound reduced from 2000→256 per audit #126 so the default proptest
+        // suite stays fast; the 2000-char case is covered by the
+        // `#[ignore]`-gated `key_very_long_single_segment` deterministic test.
+        ".{100,256}".prop_map(|s| vec![s]),
     ]
 }
 
@@ -115,4 +118,21 @@ pub fn hash_of(key: &QueryKey) -> u64 {
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
     hasher.finish()
+}
+
+/// Assert clone, hash, serde roundtrip, and to_path consistency for a key.
+///
+/// Shared between `deterministic_tests.rs` and `proptests.rs` so both test
+/// modules exercise the same invariant set without duplicating the helper.
+pub fn assert_key_invariants(key: &QueryKey, expected_path: &str) {
+    let cloned = key.clone();
+    assert_eq!(key, &cloned, "clone should be equal");
+
+    assert_eq!(hash_of(key), hash_of(&cloned), "hash should match for equal keys");
+
+    let json = serde_json::to_string(key).unwrap();
+    let back: QueryKey = serde_json::from_str(&json).unwrap();
+    assert_eq!(key, &back, "serde roundtrip should produce equal key");
+
+    assert_eq!(key.to_path(), expected_path, "to_path should match expected");
 }

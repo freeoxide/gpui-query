@@ -22,20 +22,21 @@ use super::{current_time_ms, read_entity};
 /// while loading). The caller should skip spawning the async fetch task when
 /// this returns `None`.
 ///
-/// Audit fixes #1/#3/#5/#15/#18: Uses the bucket's co-located `RequestSequencer`
-/// (accessed via `QueryClient::next_request_id_for_key`) instead of creating a
-/// transient one. This ensures RequestIds are globally ordered across multiple
-/// fetches of the same resource, making debugging easier and preventing scope_id
-/// reuse. Falls back to a transient sequencer when no QueryClient is available.
+/// Audit fix #62: For `QueryFetchMode::Normal`, uses the new
+/// `QueryResource::try_begin_request(now_ms)` (core contract #4) to perform
+/// the cache-freshness / `IgnoreWhileLoading` check and the `Loading`
+/// transition atomically inside a single `entity.update`. This closes the
+/// read-then-update race window where a concurrent caller could change state
+/// between the check and the begin. The `CacheHit` / `Started` /
+/// `StaleCacheHit` / `IgnoredWhileLoading` distinction is preserved via
+/// [`QueryBeginResult`].
+///
+/// For `QueryFetchMode::Force` (no cache check, always begin), the bucket
+/// sequencer is still used so Force fetches keep their monotonic request IDs.
 ///
 /// Audit fix #2: Accepts an optional `known_key` parameter. When provided by
 /// the caller (e.g., from `use_query` which already has `opts.key`), the key
-/// clone and entity re-read are avoided.
-///
-/// Audit fix #10: Only advances the bucket sequencer when the resource actually
-/// needs a new request (not a CacheHit or IgnoredWhileLoading). Previously the
-/// sequencer was advanced before calling begin_request, wasting RequestIds on
-/// cache hits.
+/// clone and entity re-read are avoided on the Force path.
 pub(crate) fn begin_request_on_entity<T, E, C>(
     entity: &Entity<QueryResource<T, E>>,
     cx: &mut Context<C>,
@@ -49,32 +50,13 @@ where
 {
     let now_ms = current_time_ms();
 
-    // Audit fix #10: Check whether the resource actually needs a new request
-    // before advancing the bucket sequencer. If cache is fresh or the request
-    // would be ignored, skip the sequencer advance entirely.
-    if fetch_mode == QueryFetchMode::Normal {
-        let skip_sequencer = entity.read_with(cx, |r, _| {
-            // If cache is fresh, begin_request returns CacheHit.
-            r.should_short_circuit_cache(now_ms)
-                // If IgnoreWhileLoading and a request is active, returns IgnoredWhileLoading.
-                || (r.request_policy() == crate::core::RequestPolicy::IgnoreWhileLoading
-                    && r.active_request_id().is_some()
-                    && !r.should_serve_stale_and_revalidate(now_ms))
-        });
-        if skip_sequencer {
-            return entity.update(cx, |resource, _cx| {
-                match resource.begin_request_with_id(None, now_ms, fetch_mode) {
-                    QueryBeginResult::Started { request_id, .. } => Some(request_id),
-                    QueryBeginResult::StaleCacheHit { request_id, .. } => Some(request_id),
-                    QueryBeginResult::CacheHit => None,
-                    QueryBeginResult::IgnoredWhileLoading { .. } => None,
-                }
-            });
-        }
-    }
-
-    // Audit fix #2: Use the caller-provided key when available to avoid
-    // re-reading and re-cloning the key from the entity.
+    // Use the bucket's co-located sequencer for a monotonic `RequestId` when a
+    // QueryClient is available; otherwise fall back to a transient sequencer
+    // inside `begin_request_with_id`. This is done for BOTH fetch modes so that
+    // Normal-mode fetches also receive unique, monotonic ids. (Previously the
+    // Normal path used a transient sequencer via `try_begin_request`, which
+    // minted the same `RequestId` for every fetch and broke LatestWins
+    // replacement — the superseded fetch's id matched the active one.)
     let maybe_request_id = if cx.has_global::<QueryClient>() {
         let key = known_key.unwrap_or_else(|| entity.read_with(cx, |r, _| r.key().clone()));
         cx.update_global::<QueryClient, _>(|client, _cx| {
@@ -84,59 +66,67 @@ where
         None
     };
 
+    // Audit fix #62: the cache-freshness / IgnoreWhileLoading check and the
+    // Loading transition happen atomically inside this single `entity.update`
+    // closure, so a concurrent caller cannot slip a state mutation in between
+    // the check and the begin.
     entity.update(cx, |resource, _cx| {
         match resource.begin_request_with_id(maybe_request_id, now_ms, fetch_mode) {
             QueryBeginResult::Started { request_id, .. } => Some(request_id),
             QueryBeginResult::StaleCacheHit { request_id, .. } => Some(request_id),
-            QueryBeginResult::CacheHit => {
-                // Cache is fresh -- no fetch needed.
-                None
-            }
-            QueryBeginResult::IgnoredWhileLoading { .. } => {
-                // Another request is already in flight under IgnoreWhileLoading.
-                // No fetch needed.
-                None
-            }
+            QueryBeginResult::CacheHit => None,
+            QueryBeginResult::IgnoredWhileLoading { .. } => None,
         }
     })
 }
 
 // ── Retry-aware fetch helpers ───────────────────────────────────────────
 
-/// Execute a fetch with retry logic for a query resource.
+/// Unified retry loop for query fetches.
 ///
-/// Calls the fetcher. On failure, if the retry policy allows it, waits for the
-/// configured delay and retries. Updates the entity state between attempts.
-/// Resets the retry counter on success.
-///
-/// Takes an explicit `request_id` parameter obtained from
-/// `begin_request_on_entity`. Callers should only invoke this when
-/// `begin_request_on_entity` returns `Some(request_id)`.
+/// Audit fix #14: The previous `fetch_with_retry` and `fetch_signal_with_retry`
+/// were ~90% duplicated (only signal-handling differed). Both now delegate to
+/// this single loop parameterized by `signal: Option<QuerySignal>`:
+/// - `None` → the no-signal variant (`Fn() -> Fut` fetcher wrapped to ignore
+///   the signal slot; no fresh-signal re-read on retry).
+/// - `Some(initial)` → the signal variant (`Fn(QuerySignal) -> Fut` fetcher
+///   wrapped to unwrap the slot; fresh signal re-read after each retry delay).
 ///
 /// Audit fix #6: After each retry delay, checks whether the request has been
-/// cancelled (e.g., by a newer `begin_request` under LatestWins). If cancelled,
+/// cancelled (e.g., by a newer `begin_request` under `LatestWins`). If so,
 /// breaks out of the retry loop immediately to avoid unnecessary work.
-pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
-    fetcher: &F,
+///
+/// Audit fix #7: `cx.notify()` is only called when `accept_current_request`
+/// succeeds (i.e., the result is actually accepted by the current request
+/// slot). Discarded results do not trigger a re-render.
+///
+/// Audit fix #24: `unwrap_or_else(QuerySignal::new)` instead of the
+/// redundant-closure `unwrap_or_else(|| QuerySignal::new())`.
+///
+/// Audit fix #27/#121: `entity.update` results are discarded via `let _ =`
+/// because `update` returns `Result<R>` under `AsyncApp`.
+async fn run_query_retry_loop<T, E, F, Fut>(
+    fetcher: F,
     request_id: RequestId,
     retry_policy: &RetryPolicy,
     entity: &gpui::WeakEntity<QueryResource<T, E>>,
     cx: &mut gpui::AsyncApp,
+    mut signal: Option<QuerySignal>,
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
-    F: Fn() -> Fut + Send + 'static,
+    F: Fn(Option<QuerySignal>) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
     let mut attempt: u32 = 0;
 
     loop {
-        let result = fetcher().await;
+        let result = fetcher(signal.clone()).await;
 
         match result {
             Ok(data) => {
                 let now_ms = current_time_ms();
-                let entity = match entity.upgrade() {
+                let e = match entity.upgrade() {
                     Some(e) => e,
                     None => {
                         // Documented behavior -- if the owning component
@@ -144,7 +134,7 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
                         return;
                     }
                 };
-                entity.update(cx, |resource, cx| {
+                let _ = e.update(cx, |resource, cx| {
                     resource.reset_retry_count();
                     if let Some(guard) = resource.accept_current_request(request_id) {
                         resource.complete_success(guard, data, now_ms);
@@ -153,7 +143,7 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
                     } else {
                         #[cfg(debug_assertions)]
                         eprintln!(
-                            "DEBUG: fetch_with_retry: request {} no longer active on success, result discarded",
+                            "DEBUG: run_query_retry_loop: request {} no longer active on success, result discarded",
                             request_id.label()
                         );
                     }
@@ -167,7 +157,7 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
                         Some(e) => e,
                         None => return,
                     };
-                    e.update(cx, |resource, _cx| {
+                    let _ = e.update(cx, |resource, _cx| {
                         resource.increment_retry();
                         // No cx.notify() here -- increment_retry does not change
                         // status (stays Loading). The QueryObserver handles
@@ -194,10 +184,22 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
                     if !request_still_active {
                         #[cfg(debug_assertions)]
                         eprintln!(
-                            "DEBUG: fetch_with_retry: request {} no longer active after retry delay, aborting retry",
+                            "DEBUG: run_query_retry_loop: request {} no longer active after retry delay, aborting retry",
                             request_id.label()
                         );
                         return;
+                    }
+
+                    // Audit fix #14: Only the signal variant re-reads a fresh
+                    // signal after the retry-delay cancellation check. The
+                    // no-signal variant leaves `signal` as `None` forever.
+                    if let Some(ref mut sig) = signal {
+                        *sig = read_entity(&e, cx, |r, _| {
+                            // Audit fix #24: `QuerySignal::new` directly instead
+                            // of the redundant closure.
+                            r.signal().cloned().unwrap_or_else(QuerySignal::new)
+                        })
+                        .unwrap_or_else(QuerySignal::new);
                     }
                     // Loop to retry
                 } else {
@@ -207,7 +209,7 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
                         None => return,
                     };
                     let failure_now_ms = current_time_ms();
-                    e.update(cx, |resource, cx| {
+                    let _ = e.update(cx, |resource, cx| {
                         if let Some(guard) = resource.accept_current_request(request_id) {
                             resource.complete_failure(guard, error, failure_now_ms);
                             // Audit fix #4: Reset retry_count on terminal failure so the
@@ -218,7 +220,7 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
                         } else {
                             #[cfg(debug_assertions)]
                             eprintln!(
-                                "DEBUG: fetch_with_retry: request {} no longer active on failure, result discarded",
+                                "DEBUG: run_query_retry_loop: request {} no longer active on failure, result discarded",
                                 request_id.label()
                             );
                         }
@@ -230,19 +232,44 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
     }
 }
 
+/// Execute a fetch with retry logic for a query resource (no-signal variant).
+///
+/// Calls the fetcher. On failure, if the retry policy allows it, waits for the
+/// configured delay and retries. Updates the entity state between attempts.
+/// Resets the retry counter on success.
+///
+/// Takes an explicit `request_id` parameter obtained from
+/// `begin_request_on_entity`. Callers should only invoke this when
+/// `begin_request_on_entity` returns `Some(request_id)`.
+///
+/// Audit fix #14: Thin wrapper over [`run_query_retry_loop`] with
+/// `signal = None`.
+pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
+    fetcher: F,
+    request_id: RequestId,
+    retry_policy: &RetryPolicy,
+    entity: &gpui::WeakEntity<QueryResource<T, E>>,
+    cx: &mut gpui::AsyncApp,
+) where
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    F: Fn() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+{
+    let wrapper = move |_: Option<QuerySignal>| fetcher();
+    run_query_retry_loop(wrapper, request_id, retry_policy, entity, cx, None).await;
+}
+
 /// Like [`fetch_with_retry`] but for fetchers that take a [`QuerySignal`].
 ///
-/// On retry, reads a fresh signal from the resource entity and passes it to the fetcher.
-/// The signal is properly cancelled when a new request replaces the current one (v2 fix).
+/// On retry, reads a fresh signal from the resource entity and passes it to
+/// the fetcher. The signal is properly cancelled when a new request replaces
+/// the current one (v2 fix).
 ///
-/// Audit fix #6: After each retry delay, checks whether the request has been
-/// cancelled. If so, breaks out of the retry loop immediately.
-///
-/// Audit fix #7: After reading the fresh signal, also checks whether the request
-/// is still active. This prevents doing work for a stale request after a
-/// LatestWins replacement.
+/// Audit fix #14: Thin wrapper over [`run_query_retry_loop`] with
+/// `signal = Some(initial_signal)`.
 pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
-    fetcher: &F,
+    fetcher: F,
     initial_signal: QuerySignal,
     request_id: RequestId,
     retry_policy: &RetryPolicy,
@@ -254,100 +281,6 @@ pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
     F: Fn(QuerySignal) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    let mut attempt: u32 = 0;
-    let mut signal = initial_signal;
-
-    loop {
-        let result = fetcher(signal.clone()).await;
-
-        match result {
-            Ok(data) => {
-                let now_ms = current_time_ms();
-                let e = match entity.upgrade() {
-                    Some(e) => e,
-                    None => return,
-                };
-                e.update(cx, |resource, cx| {
-                    resource.reset_retry_count();
-                    if let Some(guard) = resource.accept_current_request(request_id) {
-                        resource.complete_success(guard, data, now_ms);
-                        // Audit fix #7: Only notify when the result was actually accepted.
-                        cx.notify();
-                    } else {
-                        #[cfg(debug_assertions)]
-                        eprintln!(
-                            "DEBUG: fetch_signal_with_retry: request {} no longer active on success, result discarded",
-                            request_id.label()
-                        );
-                    }
-                });
-                return;
-            }
-            Err(error) => {
-                if retry_policy.should_retry(attempt) {
-                    let delay_ms = retry_policy.delay_for_attempt(attempt);
-                    let e = match entity.upgrade() {
-                        Some(e) => e,
-                        None => return,
-                    };
-                    e.update(cx, |resource, _cx| {
-                        resource.increment_retry();
-                        // No cx.notify() -- increment_retry does not change status.
-                    });
-                    attempt += 1;
-
-                    if delay_ms > 0 {
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_millis(delay_ms))
-                            .await;
-                    }
-
-                    // Audit fix #7: After the retry delay, check whether the
-                    // request is still active before reading a fresh signal and
-                    // doing more work. If a new begin_request replaced this one,
-                    // the old request_id is no longer current.
-                    let e = match entity.upgrade() {
-                        Some(e) => e,
-                        None => return,
-                    };
-                    if !read_entity(&e, cx, |r, _| r.is_current_request(request_id)).unwrap_or(false) {
-                        #[cfg(debug_assertions)]
-                        eprintln!(
-                            "DEBUG: fetch_signal_with_retry: request {} no longer active after retry delay, aborting",
-                            request_id.label()
-                        );
-                        return;
-                    }
-
-                    // Get a fresh signal for the next attempt
-                    signal = read_entity(&e, cx, |r, _| {
-                        r.signal().cloned().unwrap_or_else(QuerySignal::new)
-                    }).unwrap_or_else(|| QuerySignal::new());
-                } else {
-                    let e = match entity.upgrade() {
-                        Some(e) => e,
-                        None => return,
-                    };
-                    let failure_now_ms = current_time_ms();
-                    e.update(cx, |resource, cx| {
-                        if let Some(guard) = resource.accept_current_request(request_id) {
-                            resource.complete_failure(guard, error, failure_now_ms);
-                            // Audit fix #4: Reset retry_count on terminal failure so the
-                            // resource is clean for the next begin_request.
-                            resource.reset_retry_count();
-                            // Audit fix #7: Only notify when the result was actually accepted.
-                            cx.notify();
-                        } else {
-                            #[cfg(debug_assertions)]
-                            eprintln!(
-                                "DEBUG: fetch_signal_with_retry: request {} no longer active on failure, result discarded",
-                                request_id.label()
-                            );
-                        }
-                    });
-                    return;
-                }
-            }
-        }
-    }
+    let wrapper = move |sig: Option<QuerySignal>| fetcher(sig.unwrap_or_else(QuerySignal::new));
+    run_query_retry_loop(wrapper, request_id, retry_policy, entity, cx, Some(initial_signal)).await;
 }

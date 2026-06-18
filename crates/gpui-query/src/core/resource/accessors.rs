@@ -125,7 +125,7 @@ impl<T, E> QueryResource<T, E> {
 
     /// Increment the retry counter.
     pub fn increment_retry(&mut self) {
-        self.retry_count += 1;
+        self.retry_count = self.retry_count.saturating_add(1);
     }
 
     /// Set the retry policy.

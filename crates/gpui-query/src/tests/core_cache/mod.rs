@@ -14,11 +14,6 @@ mod cache_ops;
 mod data_retention;
 mod request_interactions;
 
-pub(crate) use cache_policy::*;
-pub(crate) use cache_ops::*;
-pub(crate) use data_retention::*;
-pub(crate) use request_interactions::*;
-
 use crate::core::*;
 use crate::tests::test_support::*;
 
@@ -64,7 +59,7 @@ pub(crate) fn swr_resource() -> QueryResource<&'static str> {
     )
 }
 
-pub(crate) fn nocache_resource() -> QueryResource<&'static str> {
+pub(crate) fn nocache_test_resource() -> QueryResource<&'static str> {
     QueryResource::new("nocache-test", CachePolicy::NoCache, RequestPolicy::LatestWins)
 }
 

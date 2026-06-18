@@ -9,7 +9,9 @@ use crate::core::{
     CachePolicy, QueryBeginResult, QueryFetchMode, QueryResource, QueryStatus, RequestId,
     RequestPolicy,
 };
-use crate::tests::test_support::{assert_status, test_resource_with_policies, test_sequencer, TEST_NOW_MS};
+use crate::tests::test_support::{
+    assert_status, begin_request_id, test_resource_with_policies, test_sequencer, TEST_NOW_MS,
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RequestGuard: proof-of-ownership (obtained via accept_current_request)
@@ -21,11 +23,7 @@ fn guard_holds_the_correct_request_id() {
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
     let mut seq = test_sequencer();
 
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let rid = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let rid = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     let guard = resource.accept_current_request(rid).unwrap();
     assert_eq!(guard.request_id(), rid);
@@ -37,11 +35,7 @@ fn guard_into_request_id_consumes_guard() {
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
     let mut seq = test_sequencer();
 
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let rid = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let rid = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     let guard = resource.accept_current_request(rid).unwrap();
     let extracted = guard.into_request_id();
@@ -55,11 +49,8 @@ fn accept_current_request_returns_guard_for_active_request() {
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
     let mut seq = test_sequencer();
 
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let request_id = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let request_id =
+        begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     let guard = resource
         .accept_current_request(request_id)
@@ -74,11 +65,7 @@ fn accept_current_request_rejects_stale_request_id() {
     let mut seq = test_sequencer();
 
     // Start request 1
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let old_id = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let old_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     // Start request 2 — replaces request 1 under LatestWins
     let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
@@ -113,11 +100,7 @@ fn complete_success_consumes_guard_and_sets_data() {
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
     let mut seq = test_sequencer();
 
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let rid = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let rid = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     let guard = resource.accept_current_request(rid).unwrap();
     resource.complete_success(guard, "result", TEST_NOW_MS);
@@ -133,11 +116,7 @@ fn complete_failure_consumes_guard_and_sets_error() {
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
     let mut seq = test_sequencer();
 
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let rid = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let rid = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     let guard = resource.accept_current_request(rid).unwrap();
     resource.complete_failure(guard, "network error", TEST_NOW_MS);
@@ -154,14 +133,10 @@ fn complete_convenience_method_rejects_stale_id() {
     let mut seq = test_sequencer();
 
     // Request 1
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let old_id = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let old_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     // Request 2 replaces request 1
-    resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
+    let _ = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     // Trying to complete old request should fail
     let completed = resource.complete_current_success(old_id, "stale data", TEST_NOW_MS);

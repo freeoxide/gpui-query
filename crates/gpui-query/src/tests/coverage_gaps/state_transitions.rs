@@ -19,7 +19,7 @@ fn invariant_initial_state_is_consistent() {
 fn invariant_after_begin_loading_empty() {
     let mut r = fresh_resource();
     let mut s = test_sequencer();
-    r.begin_request(&mut s, 100, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut s, 100, QueryFetchMode::Normal);
     assert_eq!(r.status(), QueryStatus::LoadingEmpty);
     assert!(r.data().is_none(), "LoadingEmpty => data must be None");
     assert!(r.error().is_none(), "begin_request clears error");
@@ -107,7 +107,7 @@ fn invariant_after_complete_failure_from_loading_with_data() {
 fn invariant_after_cancel_from_loading_empty() {
     let mut r = fresh_resource();
     let mut s = test_sequencer();
-    r.begin_request(&mut s, 100, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut s, 100, QueryFetchMode::Normal);
 
     let cancelled = r.cancel(QueryError::cancelled("abort"));
     assert!(cancelled, "cancel should return true when request is active");
@@ -127,7 +127,7 @@ fn invariant_after_cancel_from_loading_with_data() {
     r.complete_current_success(rid1, "data", 200);
 
     // Start a refetch, then cancel.
-    r.begin_request(&mut s, 300, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut s, 300, QueryFetchMode::Normal);
     assert_eq!(r.status(), QueryStatus::LoadingWithData);
     assert_eq!(r.data(), Some(&"data"));
 
@@ -283,7 +283,7 @@ fn table_driven_cancel_from_every_loading_state() {
     {
         let mut r = fresh_resource();
         let mut s = test_sequencer();
-        r.begin_request(&mut s, 100, QueryFetchMode::Normal);
+        let _ = r.begin_request(&mut s, 100, QueryFetchMode::Normal);
         assert_eq!(r.status(), QueryStatus::LoadingEmpty);
         r.cancel(QueryError::cancelled("abort"));
         assert_eq!(r.status(), QueryStatus::Cancelled);
@@ -297,7 +297,7 @@ fn table_driven_cancel_from_every_loading_state() {
         let mut s = test_sequencer();
         let rid = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
         r.complete_current_success(rid, "data", 200);
-        r.begin_request(&mut s, 300, QueryFetchMode::Normal);
+        let _ = r.begin_request(&mut s, 300, QueryFetchMode::Normal);
         assert_eq!(r.status(), QueryStatus::LoadingWithData);
         r.cancel(QueryError::cancelled("abort"));
         assert_eq!(r.status(), QueryStatus::Cancelled);
@@ -333,7 +333,7 @@ fn table_driven_rollback_from_every_state() {
         let mut s = test_sequencer();
         let rid1 = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
         r.complete_current_success(rid1, "v1", 200);
-        r.begin_request(&mut s, 300, QueryFetchMode::Normal);
+        let _ = r.begin_request(&mut s, 300, QueryFetchMode::Normal);
         r.cancel(QueryError::cancelled("abort"));
         assert_eq!(r.previous_data(), Some(&"v1"));
 

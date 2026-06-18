@@ -42,8 +42,8 @@ fn max_pages_evicts_newest_page_on_prepend() {
     r.complete_page_success(id3, vec!["c".to_string()], false, false, 6_000);
 
     assert_eq!(r.page_count(), 2);
-    assert_eq!(r.pages()[0], vec!["c".to_string()]);
-    assert_eq!(r.pages()[1], vec!["a".to_string()]);
+    assert_eq!(r.pages()[0].as_ref(), &vec!["c".to_string()]);
+    assert_eq!(r.pages()[1].as_ref(), &vec!["a".to_string()]);
 }
 
 // ── 5. max_pages edge cases ─────────────────────────────────────────────
@@ -115,7 +115,7 @@ fn set_max_pages_returns_evicted_pages() {
 
     let evicted = r.set_max_pages(Some(2));
     assert_eq!(evicted.len(), 1);
-    assert_eq!(evicted[0], vec!["page0".to_string()]);
+    assert_eq!(evicted[0].as_ref(), &vec!["page0".to_string()]);
     assert_eq!(r.page_count(), 2);
 }
 
@@ -129,7 +129,7 @@ fn append_page_returns_evicted_pages() {
 
     let evicted = r.append_page(vec!["c".to_string()]);
     assert_eq!(evicted.len(), 1);
-    assert_eq!(evicted[0], vec!["a".to_string()]);
+    assert_eq!(evicted[0].as_ref(), &vec!["a".to_string()]);
     assert_eq!(r.page_count(), 2);
 }
 
@@ -143,7 +143,7 @@ fn prepend_page_returns_evicted_pages() {
 
     let evicted = r.prepend_page(vec!["c".to_string()]);
     assert_eq!(evicted.len(), 1);
-    assert_eq!(evicted[0], vec!["a".to_string()]);
+    assert_eq!(evicted[0].as_ref(), &vec!["a".to_string()]);
     assert_eq!(r.page_count(), 2);
     assert_eq!(r.first_page(), Some(&vec!["c".to_string()]));
 }

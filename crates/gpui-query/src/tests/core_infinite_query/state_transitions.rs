@@ -12,9 +12,9 @@ fn pages_returns_vecdeque_in_order() {
     let pages = r.pages();
 
     assert_eq!(pages.len(), 3);
-    assert_eq!(pages[0], vec!["page0".to_string()]);
-    assert_eq!(pages[1], vec!["page1".to_string()]);
-    assert_eq!(pages[2], vec!["page2".to_string()]);
+    assert_eq!(pages[0].as_ref(), &vec!["page0".to_string()]);
+    assert_eq!(pages[1].as_ref(), &vec!["page1".to_string()]);
+    assert_eq!(pages[2].as_ref(), &vec!["page2".to_string()]);
 }
 
 #[test]

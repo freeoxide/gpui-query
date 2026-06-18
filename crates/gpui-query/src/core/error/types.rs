@@ -98,6 +98,12 @@ impl QueryError {
         &self.message
     }
 
+    /// Returns a reference to the inner `Arc<str>` message, allowing cheap
+    /// clones of the message without re-allocation.
+    pub fn message_arc(&self) -> &Arc<str> {
+        &self.message
+    }
+
     /// Return a sanitized copy of this error with known sensitive patterns redacted.
     ///
     /// Redacts common patterns such as:

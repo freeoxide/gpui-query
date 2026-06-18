@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
 
-use crate::core::{MutationResource, QueryError, RetryPolicy};
+use crate::core::{MutationResource, QueryError};
 use crate::hook::*;
 use crate::tests::test_support::*;
 
@@ -65,10 +65,7 @@ fn test_mutate_with_callbacks_failure(cx: &mut TestAppContext) {
 
     let _harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>(
-            MutationOptions {
-                retry_policy: RetryPolicy::no_retries(),
-                gc_time_ms: 300_000,
-            },
+            no_retry_mutation_options(),
             cx,
         );
         mutate_with_callbacks(
@@ -176,10 +173,7 @@ fn test_mutate_callbacks_all_fire_on_failure(cx: &mut TestAppContext) {
 
     let _harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>(
-            MutationOptions {
-                retry_policy: RetryPolicy::no_retries(),
-                gc_time_ms: 300_000,
-            },
+            no_retry_mutation_options(),
             cx,
         );
         mutate_with_callbacks(
@@ -273,10 +267,7 @@ fn test_mutate_callbacks_settled_always_fires_on_failure(cx: &mut TestAppContext
 
     let _harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>(
-            MutationOptions {
-                retry_policy: RetryPolicy::no_retries(),
-                gc_time_ms: 300_000,
-            },
+            no_retry_mutation_options(),
             cx,
         );
         mutate_with_callbacks(

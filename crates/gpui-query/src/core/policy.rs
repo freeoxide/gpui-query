@@ -51,18 +51,13 @@ impl CachePolicy {
     ///
     /// Sub-second values are shown with millisecond precision (e.g. "500ms")
     /// rather than truncating to "0s" via integer division.
+    ///
+    /// Thin wrapper around the [`Display`](std::fmt::Display) impl that
+    /// allocates a `String`. Prefer `format!("{policy}")` or writing directly
+    /// to a formatter to avoid the heap allocation for log/diagnostic callers.
+    // Audit fix #45: keep label for backward compat; Display writes directly.
     pub fn label(self) -> String {
-        match self {
-            Self::NoCache => "No cache".to_string(),
-            Self::Ttl { ttl_ms } => format!("Cache TTL {}", format_duration(ttl_ms)),
-            Self::StaleWhileRevalidate { ttl_ms, stale_ms } => {
-                format!(
-                    "Stale-while-revalidate TTL {} stale {}",
-                    format_duration(ttl_ms),
-                    format_duration(stale_ms)
-                )
-            }
-        }
+        self.to_string()
     }
 
     /// Whether this policy can short-circuit (return cached data without fetching).
@@ -154,6 +149,43 @@ impl CachePolicy {
     }
 }
 
+impl std::fmt::Display for CachePolicy {
+    /// Reproduces the exact strings produced by [`CachePolicy::label`].
+    ///
+    /// The duration formatting is inlined here (mirroring [`format_duration`])
+    /// so that no intermediate `String` is allocated when writing to a
+    /// formatter — the whole point of the `Display` impl.
+    // Audit fix #45: write directly to the formatter, avoiding String allocs.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoCache => write!(f, "No cache"),
+            Self::Ttl { ttl_ms } => {
+                write!(f, "Cache TTL ")?;
+                write_duration(f, *ttl_ms)
+            }
+            Self::StaleWhileRevalidate { ttl_ms, stale_ms } => {
+                write!(f, "Stale-while-revalidate TTL ")?;
+                write_duration(f, *ttl_ms)?;
+                write!(f, " stale ")?;
+                write_duration(f, *stale_ms)
+            }
+        }
+    }
+}
+
+/// Write a duration (in milliseconds) directly to a formatter, mirroring
+/// [`format_duration`] exactly: seconds for `>= 1000ms`, milliseconds otherwise.
+///
+/// This avoids the `String` allocation that `format_duration` performs, while
+/// producing byte-identical output.
+fn write_duration(f: &mut std::fmt::Formatter<'_>, ms: u64) -> std::fmt::Result {
+    if ms >= 1_000 {
+        write!(f, "{}s", ms / 1_000)
+    } else {
+        write!(f, "{}ms", ms)
+    }
+}
+
 /// How concurrent requests are handled.
 ///
 /// - [`LatestWins`](RequestPolicy::LatestWins): New requests cancel in-flight ones.
@@ -190,6 +222,7 @@ pub enum QueryFetchMode {
 
 /// The result of calling `begin_request` on a query resource.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum QueryBeginResult {
     /// A new request was started.
     Started {

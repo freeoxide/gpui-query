@@ -16,7 +16,6 @@
 //! - InfiniteQueryResource active_request_id through lifecycle
 
 use crate::core::*;
-use crate::tests::test_support::*;
 
 // ── InfiniteQueryResource: cross-direction replacement ───────────────────
 

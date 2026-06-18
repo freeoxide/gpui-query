@@ -129,9 +129,16 @@ pub use use_infinite_query::{
 pub use use_query_select::use_query_select;
 
 // ── Re-exports from mutation_hooks ───────────────────────────────────────
+//
+// Audit fix #22: `use_mutation_with_options` is intentionally NOT re-exported
+// here. The deprecated function itself remains defined (and delegates to
+// `use_mutation`), but removing it from the `pub use` list stops the
+// `deprecated` lint from firing on the re-export. Existing callers that
+// import it via the full path still see the deprecation warning at the call
+// site.
 
 pub use mutation_hooks::{
-    mutate, mutate_with_callbacks, use_mutation, use_mutation_state, use_mutation_with_options,
+    mutate, mutate_arc, mutate_by_ref, mutate_with_callbacks, use_mutation, use_mutation_state,
 };
 
 // ── Utility ─────────────────────────────────────────────────────────────

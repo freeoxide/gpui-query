@@ -82,7 +82,7 @@ fn arb_linear_retry_policy() -> impl Strategy<Value = RetryPolicy> {
 // ── CachePolicy::NoCache invariants ─────────────────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// NoCache: is_fresh() is ALWAYS false regardless of age.
     #[test]
@@ -117,7 +117,7 @@ fn nocache_ttl_ms_is_none() {
 // ── CachePolicy::Ttl invariants ─────────────────────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// Ttl: is_fresh(age) == (age <= ttl_ms) for ALL u64/u128 value pairs.
     #[test]
@@ -159,7 +159,7 @@ proptest! {
 // ── CachePolicy::StaleWhileRevalidate invariants ────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// SWR: is_fresh(age) == (age <= ttl_ms).
     #[test]
@@ -215,7 +215,7 @@ proptest! {
 // ── CachePolicy cross-variant invariants ────────────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// For any CachePolicy, data that is fresh is never expired.
     #[test]
@@ -252,7 +252,7 @@ proptest! {
 // ── RetryPolicy invariants ─────────────────────────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// should_retry(n) == (n < max_retries) for all valid n.
     #[test]

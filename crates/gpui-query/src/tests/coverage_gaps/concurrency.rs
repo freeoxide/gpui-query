@@ -112,7 +112,7 @@ fn signal_cancelled_on_explicit_cancel() {
     let mut r = fresh_resource();
     let mut s = test_sequencer();
 
-    r.begin_request(&mut s, 100, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut s, 100, QueryFetchMode::Normal);
     let signal = r.signal().unwrap().clone();
     assert!(!signal.is_cancelled());
 
@@ -125,7 +125,7 @@ fn signal_cancelled_on_reset() {
     let mut r = fresh_resource();
     let mut s = test_sequencer();
 
-    r.begin_request(&mut s, 100, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut s, 100, QueryFetchMode::Normal);
     let signal = r.signal().unwrap().clone();
     assert!(!signal.is_cancelled());
 
@@ -183,7 +183,7 @@ fn is_data_stale_heuristic() {
     assert!(!r.is_data_stale(), "Success with data => not stale");
 
     // Start a refetch — data is stale (LoadingWithData).
-    r.begin_request(&mut s, 300, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut s, 300, QueryFetchMode::Normal);
     assert_eq!(r.status(), QueryStatus::LoadingWithData);
     assert!(r.is_data_stale(), "LoadingWithData with data => stale");
 

@@ -41,7 +41,12 @@ pub(crate) fn sanitize_message(msg: &str) -> String {
 
     let mut s = out.into_owned();
     if s.len() > SANITIZE_MAX_LEN {
-        s.truncate(SANITIZE_MAX_LEN);
+        let cut = s
+            .char_indices()
+            .map(|(b, _)| b)
+            .rfind(|&b| b <= SANITIZE_MAX_LEN)
+            .unwrap_or(0);
+        s.truncate(cut);
         s.push_str("...[truncated]");
     }
     s
@@ -101,24 +106,39 @@ impl Redact for str {
 
 /// Redact URL-like connection strings starting with any of `schemes`.
 fn redact_url_schemes(text: &str, schemes: &[&str], replacement: &str) -> String {
-    let mut result = text.to_string();
-    for scheme in schemes {
-        // Case-insensitive scan for `scheme://...` (non-whitespace run).
-        let lower = result.to_ascii_lowercase();
-        let mut offset = 0;
-        let mut new = String::with_capacity(result.len());
-        while let Some(pos) = lower[offset..].find(&format!("{}://", scheme)) {
-            let abs_pos = offset + pos;
-            // Find end of the URL (next whitespace or end).
-            let end = result[abs_pos..]
-                .find(|c: char| c.is_whitespace())
-                .map_or(result.len(), |i| abs_pos + i);
-            new.push_str(&result[offset..abs_pos]);
-            new.push_str(replacement);
-            offset = end;
+    let lower = text.to_ascii_lowercase();
+    let mut result = String::with_capacity(text.len());
+    let mut offset = 0;
+    loop {
+        let mut earliest: Option<usize> = None;
+        for scheme in schemes {
+            let needle = format!("{}://", scheme);
+            if let Some(rel) = lower[offset..].find(&needle) {
+                let abs = offset + rel;
+                match earliest {
+                    None => earliest = Some(abs),
+                    Some(ep) if abs < ep => earliest = Some(abs),
+                    _ => {}
+                }
+            }
         }
-        new.push_str(&result[offset..]);
-        result = new;
+        match earliest {
+            Some(abs_pos) => {
+                let end = text[abs_pos..]
+                    .find(|c: char| c.is_whitespace())
+                    .map_or(text.len(), |i| abs_pos + i);
+                result.push_str(&text[offset..abs_pos]);
+                result.push_str(replacement);
+                offset = end;
+                if offset >= text.len() {
+                    break;
+                }
+            }
+            None => {
+                result.push_str(&text[offset..]);
+                break;
+            }
+        }
     }
     result
 }
@@ -126,58 +146,88 @@ fn redact_url_schemes(text: &str, schemes: &[&str], replacement: &str) -> String
 /// Redact bearer/token patterns.
 fn redact_tokens(text: &str, replacement: &str) -> String {
     let mut result = String::with_capacity(text.len());
-    let lower = text.to_ascii_lowercase();
-    let bytes = text.as_bytes();
-    let len = text.len();
+    let chars: Vec<char> = text.chars().collect();
+    let lower: Vec<char> = chars.iter().map(|c| c.to_ascii_lowercase()).collect();
+    let len = chars.len();
     let mut i = 0;
 
     while i < len {
-        // Check for "bearer " prefix.
-        if lower[i..].starts_with("bearer ") {
-            result.push_str(&text[i..i + 7]); // "bearer "
+        if lower_matches_at(&lower, i, "bearer ") {
+            for c in &chars[i..i + 7] {
+                result.push(*c);
+            }
             i += 7;
-            // Consume token until whitespace or end.
-            while i < len && !bytes[i].is_ascii_whitespace() {
+            while i < len && !chars[i].is_ascii_whitespace() {
                 i += 1;
             }
             result.push_str(replacement);
             continue;
         }
-        // Check for "token=" or "token:" followed by a value.
-        if lower[i..].starts_with("token=") || lower[i..].starts_with("token:") {
-            let prefix_len = 6; // "token=" or "token:"
-            result.push_str(&text[i..i + prefix_len]);
-            i += prefix_len;
-            while i < len && !bytes[i].is_ascii_whitespace() {
+        if lower_matches_at(&lower, i, "token=") || lower_matches_at(&lower, i, "token:") {
+            for c in &chars[i..i + 6] {
+                result.push(*c);
+            }
+            i += 6;
+            while i < len && !chars[i].is_ascii_whitespace() {
                 i += 1;
             }
             result.push_str(replacement);
             continue;
         }
-        result.push(bytes[i] as char);
+        result.push(chars[i]);
         i += 1;
     }
     result
 }
 
+/// Check whether `lower` contains the ASCII `pat` (already-lowercased) at index `i`.
+fn lower_matches_at(lower: &[char], i: usize, pat: &str) -> bool {
+    let pb = pat.as_bytes();
+    if i + pb.len() > lower.len() {
+        return false;
+    }
+    for (k, &b) in pb.iter().enumerate() {
+        if lower[i + k] != b as char {
+            return false;
+        }
+    }
+    true
+}
+
 /// Redact filesystem paths starting with any of `prefixes`.
 fn redact_paths(text: &str, prefixes: &[&str], replacement: &str) -> String {
-    let mut result = text.to_string();
-    for prefix in prefixes {
-        let mut offset = 0;
-        let mut new = String::with_capacity(result.len());
-        let lower = result.to_ascii_lowercase();
-        while let Some(pos) = lower[offset..].find(prefix) {
-            let abs_pos = offset + pos;
-            let end = result[abs_pos..]
-                .find(|c: char| c.is_whitespace())
-                .map_or(result.len(), |i| abs_pos + i);
-            new.push_str(&result[offset..abs_pos]);
-            new.push_str(replacement);
-            offset = end;
+    let lower = text.to_ascii_lowercase();
+    let mut result = String::with_capacity(text.len());
+    let mut offset = 0;
+    loop {
+        let mut earliest: Option<usize> = None;
+        for prefix in prefixes {
+            if let Some(rel) = lower[offset..].find(prefix) {
+                let abs = offset + rel;
+                match earliest {
+                    None => earliest = Some(abs),
+                    Some(ep) if abs < ep => earliest = Some(abs),
+                    _ => {}
+                }
+            }
         }
-        new.push_str(&result[offset..]);
-        result = new;
+        match earliest {
+            Some(abs_pos) => {
+                let end = text[abs_pos..]
+                    .find(|c: char| c.is_whitespace())
+                    .map_or(text.len(), |i| abs_pos + i);
+                result.push_str(&text[offset..abs_pos]);
+                result.push_str(replacement);
+                offset = end;
+                if offset >= text.len() {
+                    break;
+                }
+            }
+            None => {
+                result.push_str(&text[offset..]);
+                break;
+            }
+        }
     }
     result
 }
@@ -259,13 +309,10 @@ fn redact_hex(text: &str, replacement: &str) -> String {
     let len = chars.len();
 
     while i < len {
-        if chars[i].is_ascii_hexdigit()
-            && (chars[i] as u8) >= b'0'
-            && !chars[i].is_ascii_whitespace()
-        {
+        if chars[i].is_ascii_hexdigit() {
             // Count consecutive hex chars.
             let start = i;
-            while i < len && chars[i].is_ascii_hexdigit() && !chars[i].is_ascii_whitespace() {
+            while i < len && chars[i].is_ascii_hexdigit() {
                 i += 1;
             }
             if i - start >= 16 {
@@ -281,4 +328,63 @@ fn redact_hex(text: &str, replacement: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_tokens_handles_non_ascii_without_panic() {
+        let out = redact_tokens("x café bearer secret", "");
+        assert!(out.contains("café"));
+        assert!(!out.contains("secret"));
+    }
+
+    #[test]
+    fn redact_tokens_preserves_bearer_redaction_on_ascii() {
+        let out = redact_tokens("auth failed: bearer abc123token", "[REDACTED_TOKEN]");
+        assert!(!out.contains("abc123token"));
+        assert!(out.contains("[REDACTED_TOKEN]"));
+        assert!(out.contains("auth failed: bearer "));
+    }
+
+    #[test]
+    fn redact_tokens_redacts_token_equals_with_non_ascii_prefix() {
+        let out = redact_tokens("café token=leak", "[REDACTED_TOKEN]");
+        assert!(out.contains("café "));
+        assert!(out.contains("token="));
+        assert!(!out.contains("leak"));
+        assert!(out.contains("[REDACTED_TOKEN]"));
+    }
+
+    #[test]
+    fn sanitize_message_truncates_multibyte_on_char_boundary() {
+        let msg = "a".to_string() + &"é".repeat(300);
+        let out = sanitize_message(&msg);
+        let suffix = "...[truncated]";
+        assert!(out.ends_with(suffix));
+        let cut = out.len() - suffix.len();
+        assert!(cut <= SANITIZE_MAX_LEN);
+        assert!(out.is_char_boundary(cut));
+    }
+
+    #[test]
+    fn sanitize_message_all_multibyte_truncates_validly() {
+        let msg = "é".repeat(400);
+        let out = sanitize_message(&msg);
+        let suffix = "...[truncated]";
+        assert!(out.ends_with(suffix));
+        let cut = out.len() - suffix.len();
+        assert!(cut <= SANITIZE_MAX_LEN);
+        assert!(out.is_char_boundary(cut));
+    }
+
+    #[test]
+    fn sanitize_message_ascii_truncation_unchanged() {
+        let msg = "x".repeat(600);
+        let out = sanitize_message(&msg);
+        assert!(out.ends_with("...[truncated]"));
+        assert!(out.len() <= SANITIZE_MAX_LEN + "...[truncated]".len());
+    }
 }

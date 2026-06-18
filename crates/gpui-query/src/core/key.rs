@@ -92,13 +92,7 @@ impl QueryKey {
             // An empty prefix matches every valid (non-empty) key.
             return !self.0.is_empty();
         }
-        if prefix.0.len() > self.0.len() {
-            return false;
-        }
-        self.0[..prefix.0.len()]
-            .iter()
-            .zip(prefix.0.iter())
-            .all(|(a, b)| a == b)
+        self.0.starts_with(&prefix.0)
     }
 
     /// Create a new key by appending an extra segment.

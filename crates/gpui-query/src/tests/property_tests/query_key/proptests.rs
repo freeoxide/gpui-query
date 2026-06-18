@@ -9,9 +9,22 @@ use crate::core::*;
 
 use super::strategies::*;
 
+// Audit fix #126: cap the default proptest case count at 64 (down from the
+// default 256). The strategies still exercise unicode, separators, and deep
+// nesting, so the property coverage stays meaningful while keeping the
+// default `cargo test` run cheap. The heavyweight long-key / very-long-string
+// invariants are also covered by the deterministic_tests module.
+fn test_config() -> ProptestConfig {
+    let mut config = ProptestConfig::default();
+    config.cases = 64;
+    config
+}
+
 // ── 1. Equality ─────────────────────────────────────────────────────────
 
 proptest! {
+    #![proptest_config(test_config())]
+
     /// key1 == key2 iff all segments match.
     #[test]
     fn key_equality_same_segments(segments in arb_key()) {
@@ -33,6 +46,8 @@ proptest! {
 // ── 2. Hash consistency ─────────────────────────────────────────────────
 
 proptest! {
+    #![proptest_config(test_config())]
+
     /// Equal keys must produce equal hashes.
     #[test]
     fn key_hash_consistency(segments in arb_key()) {
@@ -45,6 +60,8 @@ proptest! {
 // ── 3. Clone ────────────────────────────────────────────────────────────
 
 proptest! {
+    #![proptest_config(test_config())]
+
     /// Cloning produces an equal key backed by the same Arc allocation.
     #[test]
     fn key_clone_equality(segments in arb_key()) {
@@ -61,6 +78,8 @@ proptest! {
 // ── 4. Serde roundtrip ──────────────────────────────────────────────────
 
 proptest! {
+    #![proptest_config(test_config())]
+
     /// deserialize(serialize(key)) == key for multi-segment keys.
     #[test]
     fn key_serde_roundtrip(segments in arb_key()) {
@@ -83,6 +102,8 @@ proptest! {
 // ── 5. Prefix matching (starts_with) ────────────────────────────────────
 
 proptest! {
+    #![proptest_config(test_config())]
+
     /// Every key is a prefix of itself.
     #[test]
     fn key_prefix_self_match(segments in arb_key()) {
@@ -142,6 +163,8 @@ proptest! {
 // ── 6. to_path format ───────────────────────────────────────────────────
 
 proptest! {
+    #![proptest_config(test_config())]
+
     /// to_path joins segments with "::" separator.
     #[test]
     fn key_to_path_format(segments in arb_key()) {
@@ -155,6 +178,8 @@ proptest! {
 // ── 7. QueryKeyFilter semantics ─────────────────────────────────────────
 
 proptest! {
+    #![proptest_config(test_config())]
+
     /// Exact filter matches only the identical key.
     #[test]
     fn filter_exact_matches_only_identical(
@@ -214,6 +239,8 @@ proptest! {
 // ── 8. Edge cases: unicode and long keys ────────────────────────────────
 
 proptest! {
+    #![proptest_config(test_config())]
+
     /// Unicode segments survive clone, hash, serde, and to_path.
     #[test]
     fn key_unicode_roundtrip(
@@ -229,10 +256,13 @@ proptest! {
         prop_assert_eq!(key.to_path(), segments.join("::"));
     }
 
-    /// Very long keys (50-100 segments) still satisfy all invariants.
+    /// Longer keys still satisfy all invariants.
+    // Audit fix #126: reduced segment bound from 50..100 to 20..40 so the
+    // heavy multi-segment case stays within the default `cargo test` budget.
+    // Deep-nesting correctness is also exercised by the deterministic suite.
     #[test]
     fn key_long_key_correctness(
-        segments in prop::collection::vec(any::<String>(), 50..100),
+        segments in prop::collection::vec(any::<String>(), 20..40),
     ) {
         let key = make_key(&segments);
         let cloned = key.clone();

@@ -46,6 +46,13 @@ pub struct MutationResource<V, T, E = QueryError> {
     retry_policy: RetryPolicy,
     #[serde(skip)]
     signal: Option<QuerySignal>,
+    /// In-flight background mutation task (audit #6). Stored so that a
+    /// replacement mutation or entity drop (component unmount) aborts the prior
+    /// in-flight task instead of leaving it detached. `#[cfg(feature = "client")]`
+    /// because `gpui::Task` is only available with the client feature.
+    #[cfg(feature = "client")]
+    #[serde(skip)]
+    pub(crate) current_task: crate::core::current_task::CurrentTask,
 }
 
 impl<V, T, E> MutationResource<V, T, E> {
@@ -61,6 +68,8 @@ impl<V, T, E> MutationResource<V, T, E> {
             cancelled_count: 0,
             retry_policy,
             signal: None,
+            #[cfg(feature = "client")]
+            current_task: crate::core::current_task::CurrentTask::default(),
         }
     }
 
@@ -261,6 +270,21 @@ impl<V, T, E> MutationResource<V, T, E> {
             signal.cancel();
         }
         self.signal = None;
+    }
+}
+
+#[cfg(feature = "client")]
+impl<V, T, E> MutationResource<V, T, E> {
+    /// Store a new background mutation task, cancelling any previously stored
+    /// task (audit #6). Called from the hook spawn sites so a replacement
+    /// mutation or entity drop aborts the prior in-flight task.
+    pub(crate) fn set_current_task(&mut self, task: gpui::Task<()>) {
+        self.current_task.set(task);
+    }
+
+    /// Abort the stored background mutation task, if any (audit #6).
+    pub(crate) fn abort_current_task(&mut self) {
+        self.current_task.abort();
     }
 }
 

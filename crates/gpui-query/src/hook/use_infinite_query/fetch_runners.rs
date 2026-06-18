@@ -3,6 +3,8 @@
 //! These are the retry-aware async functions that execute the actual fetch
 //! operations with captured `RequestId`s and two-phase completion protocol.
 
+use std::sync::Arc;
+
 use crate::core::{InfiniteQueryResource, RequestId};
 
 use crate::hook::{current_time_ms, read_entity};
@@ -32,23 +34,23 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
     F: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    // #fix #3: Read the last page reference inside the entity update closure
-    // to avoid cloning the entire page data. We only need a reference for the
-    // fetcher. However, since the fetcher is async and we can't hold a borrow
-    // across .await, we clone only if needed. For the initial fetch (no pages),
-    // no clone occurs.
-    let last_page_data: Option<T> = {
-        let e = match entity.upgrade() {
-            Some(e) => e,
-            None => return,
-        };
-        read_entity(&e, cx, |r, _| r.last_page().cloned()).flatten()
-    };
-
     let mut attempt: u32 = 0;
 
     loop {
-        let result = fetcher(last_page_data.as_ref()).await;
+        // Audit fix #5/#73: Read the last page inside the loop via the cheap
+        // refcount-bumped `Arc<T>` accessor (no full page clone), and re-read
+        // it fresh each retry so the fetcher sees up-to-date data. We capture
+        // the `Arc<T>` and hand the fetcher an `Option<&T>` via `as_ref` — the
+        // fetcher signature is unchanged.
+        let last_page_arc: Option<Arc<T>> = {
+            let e = match entity.upgrade() {
+                Some(e) => e,
+                None => return,
+            };
+            read_entity(&e, cx, |r, _| r.last_page_arc()).flatten()
+        };
+
+        let result = fetcher(last_page_arc.as_ref().map(|a| a.as_ref())).await;
 
         let now_ms = current_time_ms();
 
@@ -60,7 +62,7 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
         match result {
             Ok((page, has_more)) => {
                 // #fix #12: Two-phase completion — accept then complete.
-                e.update(cx, |resource, cx| {
+                let _ = e.update(cx, |resource, cx| {
                     if let Some(guard) = resource.accept_current_request(request_id) {
                         resource.complete_success_with_guard(
                             &guard, page, has_more, true, now_ms,
@@ -68,10 +70,7 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
                         // Notify on terminal state change (success).
                         cx.notify();
                     } else {
-                        eprintln!(
-                            "DEBUG: run_fetch_next_page_with_id: request {} no longer active, result discarded",
-                            request_id.label()
-                        );
+                        // stale request, result discarded
                     }
                 });
                 return;
@@ -101,6 +100,16 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
                         return;
                     }
 
+                    // Audit fix #73/#118: After the delay, also confirm this
+                    // request is still the active one. If a newer fetch has
+                    // superseded it, bail out instead of retrying a stale op.
+                    let still_current = read_entity(&e, cx, |r, _| {
+                        r.is_current_request(request_id)
+                    }).unwrap_or(false);
+                    if !still_current {
+                        return;
+                    }
+
                     // #fix #1: No cx.notify() during retry wait. Status stays
                     // LoadingWithData/LoadingEmpty during retries, so the
                     // InfiniteQueryObserver deduplicates and no re-render is
@@ -109,17 +118,16 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
                     // Loop to retry
                 } else {
                     // No more retries — complete with failure using two-phase protocol
-                    e.update(cx, |resource, cx| {
+                    // Audit fix #72: notify is moved INSIDE the accept arm so a
+                    // discarded (stale) result does not trigger a spurious re-render.
+                    let _ = e.update(cx, |resource, cx| {
                         if let Some(guard) = resource.accept_current_request(request_id) {
                             resource.complete_failure_with_guard(&guard, error);
+                            // Notify on terminal state change (failure).
+                            cx.notify();
                         } else {
-                            eprintln!(
-                                "DEBUG: run_fetch_next_page_with_id: request {} no longer active on failure, result discarded",
-                                request_id.label()
-                            );
+                            // stale request, result discarded
                         }
-                        // Notify on terminal state change (failure).
-                        cx.notify();
                     });
                     return;
                 }
@@ -146,19 +154,23 @@ pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
     F: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    // #fix #3: Read the first page reference inside entity update.
-    let first_page_data: Option<T> = {
-        let e = match entity.upgrade() {
-            Some(e) => e,
-            None => return,
-        };
-        read_entity(&e, cx, |r, _| r.first_page().cloned()).flatten()
-    };
-
     let mut attempt: u32 = 0;
 
     loop {
-        let result = fetcher(first_page_data.as_ref()).await;
+        // Audit fix #5/#73: Read the first page inside the loop via the cheap
+        // refcount-bumped `Arc<T>` accessor (no full page clone), and re-read
+        // it fresh each retry so the fetcher sees up-to-date data. We capture
+        // the `Arc<T>` and hand the fetcher an `Option<&T>` via `as_ref` — the
+        // fetcher signature is unchanged.
+        let first_page_arc: Option<Arc<T>> = {
+            let e = match entity.upgrade() {
+                Some(e) => e,
+                None => return,
+            };
+            read_entity(&e, cx, |r, _| r.first_page_arc()).flatten()
+        };
+
+        let result = fetcher(first_page_arc.as_ref().map(|a| a.as_ref())).await;
 
         let now_ms = current_time_ms();
 
@@ -169,7 +181,7 @@ pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
 
         match result {
             Ok((page, has_more)) => {
-                e.update(cx, |resource, cx| {
+                let _ = e.update(cx, |resource, cx| {
                     if let Some(guard) = resource.accept_current_request(request_id) {
                         resource.complete_success_with_guard(
                             &guard, page, has_more, false, now_ms,
@@ -177,10 +189,7 @@ pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
                         // Notify on terminal state change (success).
                         cx.notify();
                     } else {
-                        eprintln!(
-                            "DEBUG: run_fetch_previous_page_with_id: request {} no longer active, result discarded",
-                            request_id.label()
-                        );
+                        // stale request, result discarded
                     }
                 });
                 return;
@@ -208,19 +217,28 @@ pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
                         return;
                     }
 
+                    // Audit fix #73/#118: After the delay, also confirm this
+                    // request is still the active one. If a newer fetch has
+                    // superseded it, bail out instead of retrying a stale op.
+                    let still_current = read_entity(&e, cx, |r, _| {
+                        r.is_current_request(request_id)
+                    }).unwrap_or(false);
+                    if !still_current {
+                        return;
+                    }
+
                     // #fix #1: No cx.notify() during retry wait.
                 } else {
-                    e.update(cx, |resource, cx| {
+                    // Audit fix #72: notify is moved INSIDE the accept arm so a
+                    // discarded (stale) result does not trigger a spurious re-render.
+                    let _ = e.update(cx, |resource, cx| {
                         if let Some(guard) = resource.accept_current_request(request_id) {
                             resource.complete_failure_with_guard(&guard, error);
+                            // Notify on terminal state change (failure).
+                            cx.notify();
                         } else {
-                            eprintln!(
-                                "DEBUG: run_fetch_previous_page_with_id: request {} no longer active on failure, result discarded",
-                                request_id.label()
-                            );
+                            // stale request, result discarded
                         }
-                        // Notify on terminal state change (failure).
-                        cx.notify();
                     });
                     return;
                 }

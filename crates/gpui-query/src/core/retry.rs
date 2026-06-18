@@ -87,7 +87,7 @@ impl RetryPolicy {
         // Cap the shift so the factor stays well within u64 range.
         let shift = attempt.min(62);
         let factor = 1u64 << shift;
-        let delay = self.retry_delay_ms.checked_mul(factor).unwrap_or(u64::MAX);
+        let delay = self.retry_delay_ms.saturating_mul(factor);
         delay
             .min(self.max_retry_delay_ms)
             .min(Self::ABSOLUTE_MAX_DELAY_MS)

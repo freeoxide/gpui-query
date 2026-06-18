@@ -1,5 +1,7 @@
 //! Page management methods for [`InfiniteQueryResource`].
 
+use std::sync::Arc;
+
 use super::{FetchDirection, InfiniteQueryResource};
 
 // ── Page management ─────────────────────────────────────────────────────
@@ -29,8 +31,9 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// accidentally draining all pages. Callers that want no page retention
     /// should use `reset()` instead.
     ///
-    /// Returns evicted pages (if any) so the caller can log or process them.
-    pub fn set_max_pages(&mut self, max: Option<usize>) -> Vec<T> {
+    /// Returns evicted pages (if any) as `Arc<T>` handles so the caller can log
+    /// or process them without cloning the page data (audit #5).
+    pub fn set_max_pages(&mut self, max: Option<usize>) -> Vec<Arc<T>> {
         // Treat 0 as unbounded to prevent draining all pages.
         self.max_pages = match max {
             Some(0) => None,
@@ -43,9 +46,9 @@ impl<T, E> InfiniteQueryResource<T, E> {
     ///
     /// **Audit 3**: Uses `VecDeque::push_back` — O(1) amortized.
     ///
-    /// Returns evicted pages (if any) so the caller can log or process them.
-    pub fn append_page(&mut self, page: T) -> Vec<T> {
-        self.pages.push_back(page);
+    /// Returns evicted pages (if any) as `Arc<T>` handles (audit #5).
+    pub fn append_page(&mut self, page: T) -> Vec<Arc<T>> {
+        self.pages.push_back(Arc::new(page));
         self.enforce_max_pages_remove_front()
     }
 
@@ -54,9 +57,9 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// **Audit 3**: Uses `VecDeque::push_front` — O(1) amortized instead of
     /// the previous `Vec::insert(0, page)` which was O(n).
     ///
-    /// Returns evicted pages (if any) so the caller can log or process them.
-    pub fn prepend_page(&mut self, page: T) -> Vec<T> {
-        self.pages.push_front(page);
+    /// Returns evicted pages (if any) as `Arc<T>` handles (audit #5).
+    pub fn prepend_page(&mut self, page: T) -> Vec<Arc<T>> {
+        self.pages.push_front(Arc::new(page));
         self.enforce_max_pages_remove_back()
     }
 
@@ -67,7 +70,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     ///
     /// **Audit 3**: Uses `VecDeque::drain` — O(k) where k is the number of
     /// evicted pages.
-    pub(super) fn enforce_max_pages_remove_front(&mut self) -> Vec<T> {
+    pub(super) fn enforce_max_pages_remove_front(&mut self) -> Vec<Arc<T>> {
         if let Some(max) = self.max_pages {
             if max > 0 && self.pages.len() > max {
                 return self.pages.drain(..self.pages.len() - max).collect();
@@ -82,7 +85,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// page is always retained. Returns evicted pages for caller inspection.
     ///
     /// **Audit 3**: Uses `VecDeque::pop_back` — O(1) per eviction.
-    pub(super) fn enforce_max_pages_remove_back(&mut self) -> Vec<T> {
+    pub(super) fn enforce_max_pages_remove_back(&mut self) -> Vec<Arc<T>> {
         let mut evicted = Vec::new();
         if let Some(max) = self.max_pages {
             if max > 0 {

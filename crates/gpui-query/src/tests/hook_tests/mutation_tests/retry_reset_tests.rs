@@ -1,7 +1,6 @@
 //! Tests for mutation retry behavior, reset, custom retry policy, and concurrent callback rejection.
 
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
 
@@ -11,7 +10,7 @@ use crate::tests::test_support::*;
 
 #[gpui::test]
 fn test_mutation_retries_on_failure(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    setup_test(cx);
 
     let call_count = Arc::new(Mutex::new(0u32));
     let cc = call_count.clone();
@@ -66,7 +65,7 @@ fn test_mutation_retries_on_failure(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_mutation_reset_clears_state(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    setup_test(cx);
 
     struct H {
         mutation: Entity<MutationResource<String, String, QueryError>>,
@@ -110,7 +109,7 @@ fn test_mutation_reset_clears_state(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_mutation_custom_retry_policy(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    setup_test(cx);
 
     #[allow(dead_code)]
     struct H {
@@ -135,15 +134,15 @@ fn test_mutation_custom_retry_policy(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_mutate_with_callbacks_rejects_concurrent(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    setup_test(cx);
 
     let settled_count = Arc::new(Mutex::new(0u32));
     let sc = settled_count.clone();
 
     // Gate: the first mutation blocks until the test releases it after issuing
-    // the second concurrent mutate_with_callbacks call. Uses AtomicBool +
-    // executor.timer() instead of thread::sleep to avoid blocking the executor.
-    let gate = Arc::new(AtomicBool::new(false));
+    // the second concurrent mutate_with_callbacks call. Uses the shared `Gate`
+    // helper which polls the executor with 1ms timers instead of thread::sleep.
+    let gate = Gate::new();
     let gate_clone = gate.clone();
     let executor = cx.background_executor.clone();
 
@@ -163,12 +162,9 @@ fn test_mutate_with_callbacks_rejects_concurrent(cx: &mut TestAppContext) {
                 let gate_clone = gate_clone.clone();
                 let executor = executor.clone();
                 async move {
-                    // Wait for the gate using executor-aware yield instead of
-                    // thread::sleep. This allows the second mutation call to be
-                    // scheduled while we wait.
-                    while !gate_clone.load(Ordering::Acquire) {
-                        executor.timer(std::time::Duration::from_millis(1)).await;
-                    }
+                    // Wait for the gate via the shared helper. This allows
+                    // the second mutation call to be scheduled while we wait.
+                    gate_clone.wait(&executor).await;
                     Ok::<_, QueryError>("first-result".to_string())
                 }
             },
@@ -191,7 +187,7 @@ fn test_mutate_with_callbacks_rejects_concurrent(cx: &mut TestAppContext) {
     });
 
     // Release the gate so the first mutation can complete.
-    gate.store(true, Ordering::Release);
+    gate.release();
 
     cx.run_until_parked();
 

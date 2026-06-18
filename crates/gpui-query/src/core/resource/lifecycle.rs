@@ -314,10 +314,14 @@ impl<T, E> QueryResource<T, E> {
     }
 
     /// Roll back to the previous data (optimistic update undo).
+    ///
+    /// Clears any stored error to maintain the invariant that `Success`
+    /// implies `error is None` (mirroring `apply_success`).
     pub fn rollback_to_previous(&mut self) -> bool {
         if let Some(prev) = self.previous_data.take() {
             self.data = Some(prev);
             self.status = QueryStatus::Success;
+            self.error = None;
             return true;
         }
         false
@@ -330,8 +334,16 @@ impl<T, E> QueryResource<T, E> {
     }
 
     /// Clear data optimistically. Current data is saved for rollback.
+    ///
+    /// Transitions status to `Idle` to maintain the invariant that `Success`
+    /// implies data is available (mirroring `apply_success_optional`'s `None`
+    /// branch). Without this, a `Success` resource with `data = None` would
+    /// panic on `data.unwrap()`.
     pub fn clear_data(&mut self) {
         self.previous_data = self.data.take();
+        if self.status == QueryStatus::Success {
+            self.status = QueryStatus::Idle;
+        }
     }
 
     /// Seed initial data (only when Idle with no data).

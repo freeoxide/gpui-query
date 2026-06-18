@@ -90,8 +90,8 @@ fn reset_clears_all_counters() {
     let mut r = ttl_resource();
     seed_data(&mut r, "data", STORED_AT_MS);
     let mut seq = test_sequencer();
-    r.begin_request(&mut seq, STORED_AT_MS + 500, QueryFetchMode::Force);
-    r.begin_request(&mut seq, STORED_AT_MS + 600, QueryFetchMode::Force);
+    let _ = r.begin_request(&mut seq, STORED_AT_MS + 500, QueryFetchMode::Force);
+    let _ = r.begin_request(&mut seq, STORED_AT_MS + 600, QueryFetchMode::Force);
     assert_eq!(r.cancelled_count(), 1);
     r.reset();
     assert_eq!(r.cache_hits(), 0);

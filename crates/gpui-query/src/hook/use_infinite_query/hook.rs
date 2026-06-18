@@ -156,18 +156,17 @@ where
         })
     };
 
-    // Apply max_pages if entity was created via QueryClient (which doesn't set it).
-    entity.update(cx, |resource, _| {
+    // Audit fix #117: Apply max_pages (QueryClient-created entities don't set it)
+    // and store the retry policy on the entity in a single update + notify pass.
+    // #fix #10: the retry policy is stored on the entity so that
+    // fetch_next_page_infinite / fetch_previous_page_infinite can read it
+    // from the entity instead of using RetryPolicy::default().
+    entity.update(cx, |resource, cx| {
         if let Some(max) = max_pages {
             resource.set_max_pages(Some(max));
         }
-    });
-
-    // #fix #10: Store the retry policy from options on the entity so that
-    // fetch_next_page_infinite / fetch_previous_page_infinite can read it
-    // from the entity instead of using RetryPolicy::default().
-    entity.update(cx, |resource, _| {
         resource.set_retry_policy(retry_policy.clone());
+        cx.notify();
     });
 
     // #fix #7/#11: Use InfiniteQueryObserver for status deduplication instead
@@ -224,7 +223,7 @@ where
             let weak = entity.downgrade();
             let fetcher = fetch_next;
             let retry = entity.read_with(cx, |r, _| r.retry_policy().clone());
-            cx.spawn(async move |_this, cx| {
+            let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
                 run_fetch_next_page_with_id(
                     &weak,
                     &fetcher,
@@ -233,9 +232,10 @@ where
                     cx,
                 )
                 .await;
-                Ok::<_, ()>(())
-            })
-            .detach();
+            });
+            // Audit fix #6: store the task so a replacement fetch (or entity
+            // drop on unmount) aborts the prior in-flight initial fetch.
+            let _ = entity.update(cx, |r, _| r.set_current_task(task));
         }
     }
 

@@ -1,5 +1,5 @@
 //! Public mutation hooks: `use_mutation`, `mutate`, `mutate_with_callbacks`,
-//! and `use_mutation_state`.
+//! `mutate_by_ref`, `mutate_arc`, and `use_mutation_state`.
 
 use std::sync::Arc;
 
@@ -8,7 +8,10 @@ use gpui::{AppContext as _, BorrowAppContext as _, Context, Entity, Subscription
 use crate::client::{MutationObserver, QueryClient};
 use crate::core::MutationResource;
 
-use super::internals::{run_mutation_loop, run_mutation_loop_with_callbacks};
+use super::internals::{
+    run_mutation_loop, run_mutation_loop_by_ref, run_mutation_loop_by_ref_with_callbacks,
+    run_mutation_loop_with_callbacks,
+};
 use super::super::options::MutationCallbacks;
 use super::super::MutationOptions;
 
@@ -32,6 +35,10 @@ use super::super::MutationOptions;
 /// Audit fix #17: Registers the mutation entity with the global [`QueryClient`]
 /// so that `use_mutation_state` returns it, GC is triggered, and
 /// `MutationOptions::gc_time_ms` is respected.
+///
+/// Audit fix #29: Replaces the production `.expect()` on
+/// `MutationObserver::observe` with a `debug_assert!` + safe fallback so
+/// production builds never panic on a GPUI internal regression.
 ///
 /// # Example
 ///
@@ -82,15 +89,26 @@ where
     // actually changes, preventing excessive re-renders from increment_retry()
     // and prepare_retry() calls that don't change status (stays Loading).
     let mut m_observer = MutationObserver::new(&entity);
-    let subscription = m_observer
-        .observe(cx)
-        .expect("MutationObserver::observe failed: entity was just created");
+    // Audit fix #29: debug_assert + safe fallback instead of .expect() so a
+    // GPUI internal regression does not panic production builds.
+    let subscription = match m_observer.observe(cx) {
+        Some(sub) => sub,
+        None => {
+            debug_assert!(
+                false,
+                "MutationObserver::observe failed: entity was just created and \
+                 cannot be dropped. This indicates a GPUI internal regression."
+            );
+            // Return a no-op subscription so the caller can continue.
+            Subscription::new(|| {})
+        }
+    };
 
     // Audit fix #17: Register the mutation entity with the global QueryClient so
     // that use_mutation_state returns it, GC is triggered, and gc_time_ms
     // is respected.
     if cx.has_global::<QueryClient>() {
-        cx.update_global::<QueryClient, _>(|client, cx| {
+        let _ = cx.update_global::<QueryClient, _>(|client, cx| {
             client.register_mutation(&entity, cx);
         });
     }
@@ -100,7 +118,11 @@ where
 
 /// Hook for executing mutations with a custom retry policy.
 ///
-/// Prefer [`use_mutation`] which now accepts `impl Into<MutationOptions>`.
+/// Audit fix #68 / CL7 (#111): This deprecated entrypoint now delegates to
+/// [`use_mutation`] so it also registers the entity with the global
+/// [`QueryClient`] (the previous implementation skipped registration, leaving
+/// the mutation invisible to `use_mutation_state` and GC). Keeping the
+/// `#[deprecated]` attribute preserves the source-compat migration path.
 #[deprecated(
     since = "0.2.0",
     note = "Use `use_mutation(options, cx)` instead — it now accepts MutationOptions via Into"
@@ -115,15 +137,7 @@ where
     E: Clone + Send + Sync + 'static,
     C: 'static,
 {
-    let entity = cx.new(|_| MutationResource::new(options.retry_policy.clone()));
-
-    // Audit fix #1/#11: Use MutationObserver with status-deduplication.
-    let mut m_observer = MutationObserver::new(&entity);
-    let subscription = m_observer
-        .observe(cx)
-        .expect("MutationObserver::observe failed: entity was just created");
-
-    (entity, subscription)
+    use_mutation(options.clone(), cx)
 }
 
 /// Hook to observe all mutation state across the application for a given
@@ -175,14 +189,28 @@ where
 /// 3. On success, completes with the result data
 /// 4. On failure, retries according to the entity's retry policy
 ///
-/// Audit fix #8: Guards against concurrent calls by checking whether the
-/// mutation is already in Loading state. If so, returns without starting a
-/// new mutation to prevent the second call's async task from overwriting
-/// the first.
+/// Audit fix #8/#7: Guards against concurrent calls by checking whether the
+/// mutation is already in Loading state *inside the same `entity.update` that
+/// calls `begin`*, so the check+begin is atomic and a racing caller cannot
+/// slip a `begin` in between. If already Loading, returns without starting a
+/// new mutation.
 ///
 /// Audit fix #3: Variables are wrapped in `Arc<V>` internally so that the
 /// retry loop only performs an `Arc::clone` (cheap reference count increment)
-/// per attempt, rather than cloning the full variables payload.
+/// per attempt, rather than cloning the full variables payload. For the
+/// no-`V::clone`-per-attempt path, prefer [`mutate_by_ref`] or
+/// [`mutate_arc`].
+///
+/// Audit fix #6: The spawned task is stored on the resource via
+/// `set_current_task` so a replacement call (or entity drop) aborts the prior
+/// in-flight task. Previously the task was `.detach()`ed and kept running
+/// after unmount/replacement.
+///
+/// Audit fix #67: The shared guard/begin/spawn logic lives in
+/// [`begin_and_spawn`] and is shared with [`mutate_with_callbacks`].
+///
+/// Audit fix #119: The unused `+ Clone` bound on `F` has been dropped — the
+/// mutator is only ever borrowed, never cloned.
 ///
 /// # Example
 ///
@@ -209,33 +237,10 @@ pub fn mutate<V, T, E, C, F, Fut>(
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: 'static,
-    F: Fn(V) -> Fut + 'static + Clone,
+    F: Fn(V) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    // Audit fix #8: Guard against concurrent calls. If the mutation is already
-    // Loading, do not start a new one. This prevents a second mutate() call
-    // from cancelling the first mutation's signal and then overwriting its
-    // state with stale data when the first async task completes.
-    let already_loading = entity.read_with(cx, |r, _| r.is_loading());
-    if already_loading {
-        return;
-    }
-
-    // Begin the mutation: transition to Loading
-    entity.update(cx, |resource, cx| {
-        resource.begin(variables.clone());
-        cx.notify();
-    });
-
-    let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-    let weak = entity.downgrade();
-    let variables_arc = Arc::new(variables);
-
-    cx.spawn(async move |_this, cx| {
-        run_mutation_loop(&weak, variables_arc, &mutator, &retry_policy, cx).await;
-        Ok::<_, ()>(())
-    })
-    .detach();
+    begin_and_spawn(entity, variables, mutator, cx, None);
 }
 
 /// Like [`mutate`] but with lifecycle callbacks.
@@ -247,12 +252,12 @@ pub fn mutate<V, T, E, C, F, Fut>(
 /// entity borrow, so they may safely call `entity.update()` or other GPUI
 /// mutations without risk of deadlock or panic.
 ///
-/// Audit fix #8: Guards against concurrent calls (see [`mutate`] for details).
-///
+/// Audit fix #8/#7: Guards against concurrent calls atomically (see [`mutate`]).
 /// Audit fix #9: If the entity is dropped during the mutation, `on_error` and
 /// `on_settled` are still invoked so callers always get a terminal callback.
-///
 /// Audit fix #3: Variables are wrapped in `Arc<V>` for cheap retries.
+/// Audit fix #67: Delegates to the shared [`begin_and_spawn`] helper.
+/// Audit fix #119: The unused `+ Clone` bound on `F` has been dropped.
 pub fn mutate_with_callbacks<V, T, E, C, F, Fut>(
     entity: &Entity<MutationResource<V, T, E>>,
     variables: V,
@@ -264,36 +269,186 @@ pub fn mutate_with_callbacks<V, T, E, C, F, Fut>(
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: 'static,
-    F: Fn(V) -> Fut + 'static + Clone,
+    F: Fn(V) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    // Audit fix #8: Guard against concurrent calls.
-    let already_loading = entity.read_with(cx, |r, _| r.is_loading());
-    if already_loading {
+    begin_and_spawn(entity, variables, mutator, cx, Some(callbacks));
+}
+
+/// Audit fix #3: Like [`mutate`] but the mutator receives `&V` instead of
+/// `V`, so the retry loop borrows the variables from the stored `Arc<V>` and
+/// performs **no `V::clone` per attempt**. The caller is responsible for
+/// cloning `V` inside the mutator only if the fetcher needs an owned value
+/// across an `.await` (otherwise no clone is needed at all).
+///
+/// `V` is still required to be `Clone` because the initial `begin` call
+/// stores an owned copy on the resource. Only the retry path is clone-free.
+///
+/// Audit fix #119: No `+ Clone` bound on `F`.
+pub fn mutate_by_ref<V, T, E, C, F, Fut>(
+    entity: &Entity<MutationResource<V, T, E>>,
+    variables: V,
+    mutator: F,
+    cx: &mut Context<C>,
+) where
+    V: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    C: 'static,
+    F: Fn(&V) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+{
+    begin_and_spawn_by_ref(entity, Arc::new(variables), mutator, cx, None);
+}
+
+/// Audit fix #3: Like [`mutate_by_ref`] but accepts `Arc<V>` directly, letting
+/// the caller share the variables buffer across multiple mutation invocations
+/// (or with other readers) without an extra `Arc::new`.
+///
+/// Audit fix #119: No `+ Clone` bound on `F`.
+pub fn mutate_arc<V, T, E, C, F, Fut>(
+    entity: &Entity<MutationResource<V, T, E>>,
+    variables: Arc<V>,
+    mutator: F,
+    cx: &mut Context<C>,
+) where
+    V: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    C: 'static,
+    F: Fn(&V) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+{
+    begin_and_spawn_by_ref(entity, variables, mutator, cx, None);
+}
+
+// ── Shared helpers ───────────────────────────────────────────────────────
+
+/// Audit fix #67: Shared guard/begin/spawn for [`mutate`] and
+/// [`mutate_with_callbacks`] (legacy `Fn(V) -> Fut` mutator).
+///
+/// Audit fix #7: The `is_loading` guard and the `begin` transition happen
+/// inside the *same* `entity.update` closure, so the check+begin is atomic
+/// — a racing caller cannot slip a `begin` in between the check and our own
+/// `begin`.
+///
+/// Audit fix #6: The spawned task is stored on the resource via
+/// `set_current_task` so a replacement / unmount aborts the prior task.
+fn begin_and_spawn<V, T, E, C, F, Fut>(
+    entity: &Entity<MutationResource<V, T, E>>,
+    variables: V,
+    mutator: F,
+    cx: &mut Context<C>,
+    callbacks: Option<MutationCallbacks<T, E>>,
+) where
+    V: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    C: 'static,
+    F: Fn(V) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+{
+    let variables_arc = Arc::new(variables);
+
+    let began = entity.update(cx, |resource, cx| {
+        // Audit fix #7: atomic check+begin.
+        if resource.is_loading() {
+            return false;
+        }
+        resource.begin((*variables_arc).clone());
+        cx.notify();
+        true
+    });
+    if !began {
         return;
     }
 
-    // Begin the mutation
-    entity.update(cx, |resource, cx| {
-        resource.begin(variables.clone());
+    let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
+    let weak = entity.downgrade();
+
+    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+        // `mutator` is moved by value into exactly one arm (run_mutation_loop*
+        // now own the closure). A `match` keeps the two moves mutually exclusive.
+        match callbacks {
+            Some(callbacks) => {
+                run_mutation_loop_with_callbacks(
+                    &weak,
+                    variables_arc,
+                    mutator,
+                    &retry_policy,
+                    callbacks,
+                    cx,
+                )
+                .await;
+            }
+            None => {
+                run_mutation_loop(&weak, variables_arc, mutator, &retry_policy, cx).await;
+            }
+        }
+    });
+    // Audit fix #6: store the task so it is aborted on replacement / drop.
+    let _ = entity.update(cx, |r, cx| {
+        r.set_current_task(task);
         cx.notify();
     });
+}
+
+/// Audit fix #3/#67: Shared guard/begin/spawn for [`mutate_by_ref`] and
+/// [`mutate_arc`] (new `Fn(&V) -> Fut` mutator). The retry loop borrows the
+/// variables from the `Arc<V>` and performs no `V::clone` per attempt.
+///
+/// Preserves the #7 atomic-check fix and the #6 task-storage fix.
+fn begin_and_spawn_by_ref<V, T, E, C, F, Fut>(
+    entity: &Entity<MutationResource<V, T, E>>,
+    variables: Arc<V>,
+    mutator: F,
+    cx: &mut Context<C>,
+    callbacks: Option<MutationCallbacks<T, E>>,
+) where
+    V: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    C: 'static,
+    F: Fn(&V) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+{
+    let began = entity.update(cx, |resource, cx| {
+        // Audit fix #7: atomic check+begin.
+        if resource.is_loading() {
+            return false;
+        }
+        resource.begin((*variables).clone());
+        cx.notify();
+        true
+    });
+    if !began {
+        return;
+    }
 
     let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
     let weak = entity.downgrade();
-    let variables_arc = Arc::new(variables);
 
-    cx.spawn(async move |_this, cx| {
-        run_mutation_loop_with_callbacks(
-            &weak,
-            variables_arc,
-            &mutator,
-            &retry_policy,
-            callbacks,
-            cx,
-        )
-        .await;
-        Ok::<_, ()>(())
-    })
-    .detach();
+    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+        match callbacks {
+            Some(callbacks) => {
+                run_mutation_loop_by_ref_with_callbacks(
+                    &weak,
+                    variables,
+                    mutator,
+                    &retry_policy,
+                    callbacks,
+                    cx,
+                )
+                .await;
+            }
+            None => {
+                run_mutation_loop_by_ref(&weak, variables, mutator, &retry_policy, cx).await;
+            }
+        }
+    });
+    // Audit fix #6: store the task so it is aborted on replacement / drop.
+    let _ = entity.update(cx, |r, cx| {
+        r.set_current_task(task);
+        cx.notify();
+    });
 }

@@ -99,12 +99,22 @@ impl<T, E> QueryResource<T, E> {
 
     /// Record a stale cache hit (data served from stale window).
     ///
-    /// Increments cache hit counter and keeps the data as `Success` status.
-    /// The caller is expected to also trigger a background revalidation.
+    /// Increments cache hit counter and transitions status to
+    /// [`Success`](QueryStatus::Success) **only if the resource is not in a
+    /// terminal failure state** (`Failure` or `Cancelled`), mirroring
+    /// [`record_cache_hit`]. The caller is expected to also trigger a
+    /// background revalidation.
+    ///
+    /// [`record_cache_hit`]: Self::record_cache_hit
     pub(crate) fn record_stale_cache_hit(&mut self) {
         self.cache_hits += 1;
-        // Keep status as Success — we are still serving valid data to the consumer.
-        self.error = None;
+        // Mirror record_cache_hit: only transition to Success from
+        // non-terminal states, so a stale hit does not silently clear a
+        // failure error the consumer is already handling.
+        if !matches!(self.status, QueryStatus::Failure | QueryStatus::Cancelled) {
+            self.status = QueryStatus::Success;
+            self.error = None;
+        }
     }
 
     /// Invalidate the cache (clear last-updated timestamp).

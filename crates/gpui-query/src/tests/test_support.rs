@@ -1,11 +1,15 @@
 //! Shared test infrastructure for gpui-query.
 //!
 //! Provides:
-//! - [`TestAppContext`] setup helpers via [`setup_test_cx`]
+//! - [`TestAppContext`] setup helpers via [`setup_test`] / [`setup_query_client`]
 //! - [`QueryClient`] as a [`Global`] for tests via [`setup_query_client`]
-//! - Mock fetcher functions: [`immediate_fetcher`], [`delayed_fetcher`], [`failing_fetcher`]
-//! - Core resource constructors: [`test_resource`], [`test_resource_with_policies`]
-//! - Assertion helpers: [`assert_status`], [`assert_data`], [`assert_error_message`]
+//! - Core resource constructors: [`test_resource`], [`test_resource_with_policies`],
+//!   [`resource_with_sequencer`]
+//! - Assertion helpers: [`assert_status`], [`begin_request_id`]
+//! - Cache/mutation option factories: [`no_cache_options`], [`ttl_zero_options`],
+//!   [`no_retry_mutation_options`]
+//! - Async test helpers: [`Gate`], [`run_until_parked_and_read`],
+//!   [`observe_with_dummy_view`], [`DummyView`]
 //!
 //! # Usage
 //!
@@ -14,23 +18,23 @@
 //!
 //! #[gpui::test]
 //! fn my_test(cx: &mut TestAppContext) {
-//!     setup_query_client(cx);
+//!     setup_test(cx);
 //!     cx.update(|cx| {
 //!         // ... test code using cx.global::<QueryClient>() ...
 //!     });
 //! }
 //! ```
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gpui::{BackgroundExecutor, TestAppContext};
+use gpui::{App, AppContext as _, BackgroundExecutor, Entity, TestAppContext};
 
 use crate::client::QueryClient;
+#[cfg(feature = "hook")]
+use crate::hook::{MutationOptions, QueryOptions};
 use crate::core::{
-    CachePolicy, QueryBeginResult, QueryError, QueryFetchMode, QueryKey, QueryResource, QueryStatus,
+    CachePolicy, QueryBeginResult, QueryFetchMode, QueryKey, QueryResource, QueryStatus,
     RequestId, RequestPolicy, RequestSequencer,
 };
 
@@ -41,10 +45,21 @@ use crate::core::{
 /// Call this at the start of any integration test that needs the client
 /// layer. After this, `cx.global::<QueryClient>()` and
 /// `cx.update_global::<QueryClient, _>(…)` are available.
+///
+/// [`setup_test`] is the preferred shorter alias for this helper.
 pub fn setup_query_client(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_global(QueryClient::new());
     });
+}
+
+/// Preferred entry point for test setup. Installs a default [`QueryClient`]
+/// as a [`Global`] on the context. Equivalent to [`setup_query_client`].
+///
+/// Tests that need custom policies should use [`setup_query_client_with_policies`]
+/// or [`setup_query_client_with_gc`] instead.
+pub fn setup_test(cx: &mut TestAppContext) {
+    setup_query_client(cx);
 }
 
 /// Install a [`QueryClient`] with custom policies as a [`Global`].
@@ -85,191 +100,42 @@ pub fn test_resource_with_policies(
     QueryResource::new(key, cache_policy, request_policy)
 }
 
-/// Create a typed test resource (for testing with non-string data).
-#[allow(dead_code)]
-pub fn typed_test_resource<T: Clone + Send + Sync + 'static>(
-    key: impl Into<QueryKey>,
-) -> QueryResource<T> {
-    QueryResource::new(key, CachePolicy::Ttl { ttl_ms: 1_000 }, RequestPolicy::LatestWins)
-}
-
 /// Create a [`RequestSequencer`] for use in lifecycle tests.
 pub fn test_sequencer() -> RequestSequencer {
     RequestSequencer::new()
 }
 
-// ── Mock fetcher functions ─────────────────────────────────────────────
-
-/// A fetcher that immediately returns the given value.
+/// Create a fresh resource paired with a new [`RequestSequencer`].
 ///
-/// Use in tests where you want a deterministic, instant result.
-#[allow(dead_code)]
-pub fn immediate_fetcher<T: Clone + Send + 'static>(
-    value: T,
-) -> impl Fn() -> std::future::Ready<Result<T, QueryError>> + Send + 'static {
-    move || std::future::ready(Ok(value.clone()))
-}
-
-/// A fetcher that returns a value after the given delay (ms).
+/// Returns `(QueryResource, RequestSequencer)` so tests can immediately call
+/// `begin_request(&mut r, &mut seq, now, mode)` without boilerplate. The
+/// sequencer is a fresh `RequestSequencer::new()`.
 ///
-/// Uses the GPUI [`BackgroundExecutor::timer`] for an async-compatible delay
-/// instead of blocking with `thread::sleep`. Callers must provide an
-/// [`BackgroundExecutor`] reference (obtainable from `cx.background_executor()`
-/// on any GPUI context).
-///
-/// In tests, pair this with `cx.executor().advance_clock(duration)` to
-/// fast-forward through the delay without wall-clock waiting.
-#[allow(dead_code)]
-pub fn delayed_fetcher<T: Clone + Send + 'static>(
-    value: T,
-    delay_ms: u64,
-    executor: BackgroundExecutor,
-) -> Box<dyn Fn() -> Pin<Box<dyn Future<Output = Result<T, QueryError>> + Send>> + Send + 'static>
-{
-    Box::new(move || {
-        let value = value.clone();
-        let executor = executor.clone();
-        let delay = Duration::from_millis(delay_ms);
-        Box::pin(async move {
-            if !delay.is_zero() {
-                executor.timer(delay).await;
-            }
-            Ok(value)
-        })
-            as Pin<Box<dyn Future<Output = Result<T, QueryError>> + Send>>
-    })
-}
-
-/// A fetcher that always returns the given error.
-#[allow(dead_code)]
-pub fn failing_fetcher(
-    message: impl Into<String>,
-) -> impl Fn() -> std::future::Ready<Result<(), QueryError>> + Send + 'static {
-    let message = message.into();
-    move || std::future::ready(Err(QueryError::response(message.clone())))
-}
-
-/// A fetcher that succeeds on the Nth call and fails before that.
-///
-/// Uses an `Arc<Mutex<>>` counter so the state is observable across calls.
-#[allow(dead_code)]
-pub fn flaky_fetcher(
-    succeed_after: u32,
+/// Uses `CachePolicy::NoCache` so every `begin_request` returns `Started`
+/// (never `CacheHit`), giving deterministic control over each fetch lifecycle
+/// step without worrying about TTL freshness windows.
+pub fn resource_with_sequencer(
+    key: impl Into<QueryKey>,
 ) -> (
-    Arc<Mutex<u32>>,
-    impl Fn() -> std::future::Ready<Result<&'static str, QueryError>> + Send + 'static,
+    QueryResource<&'static str>,
+    RequestSequencer,
 ) {
-    let call_count = Arc::new(Mutex::new(0u32));
-    let count_clone = call_count.clone();
-    let fetcher = move || {
-        let mut count = count_clone.lock().unwrap();
-        *count += 1;
-        if *count > succeed_after {
-            std::future::ready(Ok("recovered"))
-        } else {
-            std::future::ready(Err(QueryError::transport("transient failure")))
-        }
-    };
-    (call_count, fetcher)
-}
-
-/// A fetcher that records how many times it was called.
-///
-/// Returns `Ok("called")` on each invocation. Inspect `call_count` to verify.
-#[allow(dead_code)]
-pub fn counting_fetcher() -> (
-    Arc<Mutex<u32>>,
-    impl Fn() -> std::future::Ready<Result<&'static str, QueryError>> + Send + 'static,
-) {
-    let call_count = Arc::new(Mutex::new(0u32));
-    let count_clone = call_count.clone();
-    let fetcher = move || {
-        let mut count = count_clone.lock().unwrap();
-        *count += 1;
-        std::future::ready(Ok("called"))
-    };
-    (call_count, fetcher)
-}
-
-// ── Signal-aware mock fetchers ─────────────────────────────────────────
-
-/// A fetcher that respects the cancellation signal.
-///
-/// Checks `signal.is_cancelled()` before returning. If cancelled, returns
-/// a cancellation error.
-#[allow(dead_code)]
-pub fn signal_aware_fetcher<T: Clone + Send + 'static>(
-    value: T,
-) -> impl Fn(crate::core::QuerySignal) -> std::future::Ready<Result<T, QueryError>> + Send + 'static
-{
-    move |signal| {
-        if signal.is_cancelled() {
-            std::future::ready(Err(QueryError::cancelled("fetch cancelled")))
-        } else {
-            std::future::ready(Ok(value.clone()))
-        }
-    }
-}
-
-/// A signal-aware fetcher that fails, allowing retry tests.
-#[allow(dead_code)]
-pub fn signal_aware_failing_fetcher(
-    message: impl Into<String>,
-) -> impl Fn(crate::core::QuerySignal) -> std::future::Ready<Result<(), QueryError>> + Send + 'static
-{
-    let message = message.into();
-    move |_signal| std::future::ready(Err(QueryError::response(message.clone())))
+    (
+        QueryResource::new(key, CachePolicy::NoCache, RequestPolicy::LatestWins),
+        RequestSequencer::new(),
+    )
 }
 
 // ── Assertion helpers ──────────────────────────────────────────────────
 
 /// Assert that a resource has the expected status.
-#[allow(dead_code)]
+// Audit fix #123: removed `#[allow(dead_code)]` — used by request_policy/lifecycle tests.
 pub fn assert_status(resource: &QueryResource<impl Clone, impl Clone>, expected: QueryStatus) {
     let actual = resource.status();
     assert_eq!(
         actual, expected,
         "expected status {:?} but got {:?}",
         expected, actual
-    );
-}
-
-/// Assert that a resource's data matches the expected value.
-#[allow(dead_code)]
-pub fn assert_data<T: PartialEq + std::fmt::Debug>(
-    resource: &QueryResource<T, impl Clone>,
-    expected: Option<&T>,
-) {
-    let actual = resource.data();
-    assert_eq!(
-        actual, expected,
-        "expected data {:?} but got {:?}",
-        expected, actual
-    );
-}
-
-/// Extract the error message from a resource, if it has an error.
-#[allow(dead_code)]
-pub fn error_message<E: Clone>(resource: &QueryResource<impl Clone, E>) -> Option<String>
-where
-    E: std::fmt::Display,
-{
-    resource.error().map(|e| e.to_string())
-}
-
-/// Assert that a resource's error message matches the expected string.
-#[allow(dead_code)]
-pub fn assert_error_message<E: Clone + std::fmt::Display>(
-    resource: &QueryResource<impl Clone, E>,
-    expected: &str,
-) {
-    let msg = error_message(resource);
-    assert_eq!(
-        msg.as_deref(),
-        Some(expected),
-        "expected error message {:?} but got {:?}",
-        expected,
-        msg
     );
 }
 
@@ -288,7 +154,7 @@ pub fn nocache_resource(key: impl Into<QueryKey>) -> QueryResource<&'static str>
 ///
 /// Convenience alias for [`nocache_resource`] with key `"invariant-test"`.
 /// Every `begin_request` on this resource will return `Started` (never `CacheHit`).
-#[allow(dead_code)]
+// Audit fix #123: removed `#[allow(dead_code)]` — used by coverage_gaps tests.
 pub fn fresh_resource() -> QueryResource<&'static str> {
     nocache_resource("invariant-test")
 }
@@ -316,10 +182,195 @@ pub fn begin_request_id(
     }
 }
 
+// ── Cache/mutation option factories ────────────────────────────────────
+
+/// Build [`QueryOptions`] for a key with [`CachePolicy::NoCache`].
+///
+/// Equivalent to `QueryOptions::new(key).cache_policy(CachePolicy::NoCache)`.
+/// Every `begin_request` on the resulting resource will return `Started`
+/// (never `CacheHit`), so each `use_query`/`fetch_query` triggers a new fetch.
+#[cfg(feature = "hook")]
+pub fn no_cache_options(key: impl Into<QueryKey>) -> QueryOptions {
+    QueryOptions::new(key).cache_policy(CachePolicy::NoCache)
+}
+
+/// Build [`QueryOptions`] for a key with `CachePolicy::Ttl { ttl_ms: 0 }`.
+///
+/// Equivalent to `QueryOptions::new(key).cache_policy(CachePolicy::Ttl { ttl_ms: 0 })`.
+/// With TTL=0, data is fresh only at age=0, so any subsequent `begin_request`
+/// at a later timestamp triggers a new fetch — useful for tests that want
+/// `can_short_circuit()` to be true (unlike `NoCache`) but still want every
+/// fetch to run.
+#[cfg(feature = "hook")]
+pub fn ttl_zero_options(key: impl Into<QueryKey>) -> QueryOptions {
+    QueryOptions::new(key).cache_policy(CachePolicy::Ttl { ttl_ms: 0 })
+}
+
+/// Build [`MutationOptions`] with `RetryPolicy::no_retries()` and the
+/// standard test GC time (`gc_time_ms: 300_000`).
+///
+/// Equivalent to:
+/// ```ignore
+/// MutationOptions {
+///     retry_policy: RetryPolicy::no_retries(),
+///     gc_time_ms: 300_000,
+/// }
+/// ```
+#[cfg(feature = "hook")]
+pub fn no_retry_mutation_options() -> MutationOptions {
+    MutationOptions {
+        retry_policy: crate::core::RetryPolicy::no_retries(),
+        gc_time_ms: 300_000,
+    }
+}
+
+// ── Async test helpers ─────────────────────────────────────────────────
+
+/// A minimal `DummyView` unit struct for tests that need a view entity to
+/// drive `observer.observe(cx)` on a hook-managed entity.
+///
+/// Many hook-layer tests create a local `struct DummyView;` inside the test
+/// body just to host an observer subscription. This shared struct lets those
+/// tests call `cx.new(|_| DummyView)` without redefining the unit type each
+/// time, and pairs with [`observe_with_dummy_view`] for the
+/// create-view-then-observe dance.
+#[derive(Default)]
+pub struct DummyView;
+
+/// Create a `DummyView` entity, then run `observer.observe(cx)` inside a
+/// view-scoped update. Returns the [`gpui::Subscription`] (or `None` if the
+/// observer's weak reference is no longer live).
+///
+/// This collapses the common pattern:
+/// ```ignore
+/// struct DummyView;
+/// let view = cx.new(|_| DummyView);
+/// let sub = view.update(cx, |_view, cx| observer.observe(cx));
+/// ```
+pub fn observe_with_dummy_view<T, E>(
+    cx: &mut App,
+    observer: &mut crate::client::QueryObserver<T, E>,
+) -> Option<gpui::Subscription>
+where
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + 'static,
+{
+    let view: Entity<DummyView> = cx.new(|_| DummyView);
+    view.update(cx, |_view, cx| observer.observe(cx))
+}
+
+/// Run the executor until parked, then read from `entity` inside a fresh
+/// `cx.update` closure.
+///
+/// Equivalent to:
+/// ```ignore
+/// cx.run_until_parked();
+/// cx.update(|cx| {
+///     let value = entity.read_with(cx, |state, _| /* projection */);
+///     // ... assert on value ...
+/// });
+/// ```
+/// The closure receives the borrowed state and inner `App`, mirroring
+/// `entity.read_with` so callers don't need to re-wrap each read.
+pub fn run_until_parked_and_read<T, R>(
+    cx: &mut TestAppContext,
+    entity: &Entity<T>,
+    f: impl FnOnce(&T, &App) -> R,
+) -> R
+where
+    T: 'static,
+{
+    cx.run_until_parked();
+    cx.update(|cx| entity.read_with(cx, f))
+}
+
+/// A one-shot async gate for tests that need to hold a fetcher/mutation in
+/// flight while a second call is issued.
+///
+/// Replaces the busy-wait `while !gate.load(Ordering::Acquire) {
+/// executor.timer(Duration::from_millis(1)).await; }` pattern duplicated
+/// across several hook tests. The gate is `Arc`-friendly and clonable so it
+/// can be moved into a `move || async move { ... }` fetcher closure.
+///
+/// # Usage
+///
+/// ```ignore
+/// use crate::tests::test_support::*;
+///
+/// let gate = Gate::new();
+/// let gate_clone = gate.clone();
+/// let executor = cx.background_executor.clone();
+/// let harness = cx.new(|cx| {
+///     fetch_query(
+///         &entity,
+///         move || {
+///             let gate = gate.clone();
+///             async move {
+///                 gate.wait(&executor).await;
+///                 Ok::<_, QueryError>("first")
+///             }
+///         },
+///         cx,
+///     );
+///     // issue a second call while the first is gated...
+/// });
+///
+/// gate.release();
+/// cx.run_until_parked();
+/// ```
+pub struct Gate {
+    inner: Arc<Mutex<bool>>,
+}
+
+impl Clone for Gate {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Gate {
+    /// Create a closed gate — [`Gate::wait`] will block until [`Gate::release`]
+    /// is called.
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    /// Release the gate, unblocking all current and future [`Gate::wait`]
+    /// callers. Releasing twice is a no-op.
+    pub fn release(&self) {
+        *self.inner.lock().unwrap() = true;
+    }
+
+    /// Returns `true` once [`Gate::release`] has been called.
+    pub fn is_released(&self) -> bool {
+        *self.inner.lock().unwrap()
+    }
+
+    /// Wait until the gate is released, polling the `executor` with 1ms timers
+    /// (matching the prior busy-wait pattern). When released, returns
+    /// immediately. Uses `executor.timer()` so the wait is async-friendly
+    /// and does not block the executor thread.
+    pub async fn wait(&self, executor: &BackgroundExecutor) {
+        while !self.is_released() {
+            executor.timer(Duration::from_millis(1)).await;
+        }
+    }
+}
+
 // ── Test fixture types ─────────────────────────────────────────────────
 
 /// A simple user struct for integration tests.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct User {
     pub id: u32,
     pub name: String,
@@ -332,44 +383,17 @@ impl User {
             name: name.to_string(),
         }
     }
-
-    /// A default test user (id: 1, name: "Alice").
-    pub fn default() -> Self {
-        Self::new(1, "Alice")
-    }
 }
 
 /// A simple post struct for integration tests.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Post {
     pub id: u32,
     pub title: String,
 }
 
-impl Post {
-    #[allow(dead_code)]
-    pub fn new(id: u32, title: &str) -> Self {
-        Self {
-            id,
-            title: title.to_string(),
-        }
-    }
-
-    /// A default test post (id: 1, title: "Hello World").
-    #[allow(dead_code)]
-    pub fn default() -> Self {
-        Self::new(1, "Hello World")
-    }
-}
-
 // ── Time helpers ───────────────────────────────────────────────────────
 
 /// A fixed "now" timestamp for deterministic cache tests (ms since UNIX epoch).
-#[allow(dead_code)]
+// Audit fix #123: removed `#[allow(dead_code)]` — used by request_policy/lifecycle tests.
 pub const TEST_NOW_MS: u128 = 1_000_000;
-
-/// Advance test time by the given number of milliseconds.
-#[allow(dead_code)]
-pub fn test_time_after(base_ms: u128, delta_ms: u64) -> u128 {
-    base_ms + delta_ms as u128
-}

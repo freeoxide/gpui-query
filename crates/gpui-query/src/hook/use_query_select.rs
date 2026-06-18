@@ -122,18 +122,25 @@ where
     let mapped_weak = mapped_entity.downgrade();
     let mapped_subscription = cx.observe(&query_entity, move |_, entity, cx| {
         if let Some(mapped) = mapped_weak.upgrade() {
-            let changed = mapped.read_with(cx, |m, _| {
-                let fresh_ref = entity.read(cx).data();
-                match (m.source_data(), fresh_ref) {
-                    (Some(cached), Some(fresh)) => cached != fresh,
-                    (None, None) => false,
-                    _ => true,
-                }
+            // Audit fix #115: Read the fresh source data ONCE before borrowing
+            // the mapped entity, so we never hold a borrow on `mapped` while
+            // reading `entity`. Previously a nested entity read happened inside
+            // `mapped.read_with`; that was shared-borrow-safe today but fragile.
+            // Capturing `fresh` by move keeps the comparison logic identical.
+            let fresh: Option<T> = entity.read(cx).data().cloned();
+            let changed = mapped.read_with(cx, |m, _| match (m.source_data(), fresh.as_ref()) {
+                (Some(cached), Some(fresh_ref)) => cached != fresh_ref,
+                (None, None) => false,
+                _ => true,
             });
             if changed {
-                let fresh_data: Option<T> = entity.read(cx).data().cloned();
-                mapped.update(cx, |m, _| {
-                    m.update_source(fresh_data);
+                // Audit fix #116: Notify after updating the mapped source so
+                // third-party observers of the mapped entity (not just the
+                // primary caller, which already re-renders via the query
+                // subscription) see the derived change. Safe and correct.
+                mapped.update(cx, |m, cx2| {
+                    m.update_source(fresh);
+                    cx2.notify();
                 });
             }
         }

@@ -11,13 +11,9 @@
 
 use gpui::App;
 
-use crate::core::{
-    CachePolicy, QueryKey, QueryStatus, RequestPolicy,
-};
-use crate::client::bucket::QueryBucket;
+use crate::core::{CachePolicy, MutationStatus, QueryKey, QueryStatus, RequestPolicy};
 use crate::client::devtools::{ClientDiagnostic, DehydratedEntry, DehydratedState};
 use crate::client::erased::current_time_ms;
-use crate::client::infinite_bucket::InfiniteQueryBucket;
 use crate::client::prepared_fetch::PreparedFetch;
 
 use super::QueryClient;
@@ -53,133 +49,15 @@ impl QueryClient {
         }
     }
 
-    // ── Test helpers (pub(crate) for deterministic GC tests) ────────────
-
-    /// Update the cached `StatusSnapshot` for a bucket entry.
-    ///
-    /// This is the test-only counterpart to the hook layer's snapshot update.
-    /// In production, the hook layer calls `bucket.update_status_snapshot()`
-    /// after each request completion. In tests that bypass the hook layer
-    /// (using `PreparedFetch` or direct entity manipulation), this method
-    /// allows controlling the snapshot so GC behavior is deterministic.
-    ///
-    /// Without this, GC reads a stale snapshot (status=Idle, last_updated_ms=None)
-    /// and may evict resources that the test expects to survive.
-    #[allow(dead_code)]
-    pub(crate) fn update_query_snapshot<
-        T: Clone + Send + Sync + 'static,
-        E: Clone + Send + Sync + 'static,
-    >(
-        &mut self,
-        key: &QueryKey,
-        status: QueryStatus,
-        last_updated_ms: Option<u128>,
-        cache_policy: CachePolicy,
-    ) {
-        let type_id = std::any::TypeId::of::<(T, E)>();
-        if let Some(bucket) = self.buckets.get_mut(&type_id) {
-            if let Some(typed) = bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>() {
-                typed.update_status_snapshot(key, status, last_updated_ms, cache_policy);
-            }
-        }
-    }
-
-    /// Update the cached `StatusSnapshot` for an infinite query bucket entry.
-    ///
-    /// Test helper for deterministic GC tests on infinite queries. In production,
-    /// the hook layer calls `bucket.update_status_snapshot()` after each request
-    /// completion. In tests that bypass the hook layer, this method allows
-    /// controlling the snapshot so GC behavior is deterministic.
-    #[allow(dead_code)]
-    pub(crate) fn update_infinite_snapshot<
-        T: Clone + Send + Sync + 'static,
-        E: Clone + Send + Sync + 'static,
-    >(
-        &mut self,
-        key: &QueryKey,
-        status: QueryStatus,
-        last_updated_ms: Option<u128>,
-        cache_policy: CachePolicy,
-    ) {
-        let type_id = std::any::TypeId::of::<(T, E)>();
-        if let Some(bucket) = self.infinite_buckets.get_mut(&type_id) {
-            if let Some(typed) = bucket.as_any_mut().downcast_mut::<InfiniteQueryBucket<T, E>>() {
-                typed.update_status_snapshot(key, status, last_updated_ms, cache_policy);
-            }
-        }
-    }
-
-    /// Increment the observer count for a query bucket entry.
-    ///
-    /// Test helper to simulate the hook layer's `bucket.retain()` call so
-    /// that GC protection for observed resources can be tested without the
-    /// full hook pipeline.
-    #[allow(dead_code)]
-    pub(crate) fn retain_query<
-        T: Clone + Send + Sync + 'static,
-        E: Clone + Send + Sync + 'static,
-    >(
-        &mut self,
-        key: &QueryKey,
-    ) {
-        let type_id = std::any::TypeId::of::<(T, E)>();
-        if let Some(bucket) = self.buckets.get_mut(&type_id) {
-            if let Some(typed) = bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>() {
-                typed.retain(key);
-            }
-        }
-    }
-
-    /// Decrement the observer count for a query bucket entry.
-    #[allow(dead_code)]
-    pub(crate) fn release_query<
-        T: Clone + Send + Sync + 'static,
-        E: Clone + Send + Sync + 'static,
-    >(
-        &mut self,
-        key: &QueryKey,
-    ) {
-        let type_id = std::any::TypeId::of::<(T, E)>();
-        if let Some(bucket) = self.buckets.get_mut(&type_id) {
-            if let Some(typed) = bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>() {
-                typed.release(key);
-            }
-        }
-    }
-
-    /// Increment the observer count for an infinite query bucket entry.
-    #[allow(dead_code)]
-    pub(crate) fn retain_infinite_query<
-        T: Clone + Send + Sync + 'static,
-        E: Clone + Send + Sync + 'static,
-    >(
-        &mut self,
-        key: &QueryKey,
-    ) {
-        let type_id = std::any::TypeId::of::<(T, E)>();
-        if let Some(bucket) = self.infinite_buckets.get_mut(&type_id) {
-            if let Some(typed) = bucket.as_any_mut().downcast_mut::<InfiniteQueryBucket<T, E>>() {
-                typed.retain(key);
-            }
-        }
-    }
-
-    /// Decrement the observer count for an infinite query bucket entry.
-    #[allow(dead_code)]
-    pub(crate) fn release_infinite_query<
-        T: Clone + Send + Sync + 'static,
-        E: Clone + Send + Sync + 'static,
-    >(
-        &mut self,
-        key: &QueryKey,
-    ) {
-        let type_id = std::any::TypeId::of::<(T, E)>();
-        if let Some(bucket) = self.infinite_buckets.get_mut(&type_id) {
-            if let Some(typed) = bucket.as_any_mut().downcast_mut::<InfiniteQueryBucket<T, E>>() {
-                typed.release(key);
-            }
-        }
-    }
+    // ── Test helpers ───────────────────────────────────────────────────
+    //
+    // The previous `update_*_snapshot` / `retain_*` / `release_*` helpers were
+    // removed: GC now reads live entity state directly via `entity.read(cx)`
+    // (audit #CL2/#106), so there is no cached `StatusSnapshot` to set; and
+    // `observer_count` was removed (audit #8) in favor of `WeakEntity::upgrade()`
+    // liveness, so there is no retain/release to drive. Tests that need a
+    // specific GC state now simply transition the entity itself (e.g.
+    // `apply_success`, `begin_fetch_next`) — GC observes that real state.
 
     // ── Diagnostics (Audit 3, Finding 7) ────────────────────────────────
 
@@ -238,13 +116,15 @@ impl QueryClient {
     /// the metadata (keys, type IDs) needed for typed restoration.
     pub fn dehydrate(&self, cx: &App) -> DehydratedState {
         let mut entries = Vec::new();
+        // Audit fix #92: cache the timestamp once instead of calling
+        // `current_time_ms()` per bucket (avoids repeated syscalls).
+        let now_ms = current_time_ms();
 
         for (type_id, bucket) in &self.buckets {
-            let diagnostics = bucket.collect_diagnostics(current_time_ms(), cx);
-            for diag in &diagnostics {
+            for diag in bucket.collect_diagnostics(now_ms, cx) {
                 if diag.status == QueryStatus::Success {
                     entries.push(DehydratedEntry {
-                        key: diag.key.clone(),
+                        key: diag.key,
                         type_id: *type_id,
                         kind: "query",
                         data_json: None,
@@ -254,15 +134,32 @@ impl QueryClient {
         }
 
         for (type_id, bucket) in &self.infinite_buckets {
-            let diagnostics = bucket.collect_diagnostics(current_time_ms(), cx);
-            for diag in &diagnostics {
+            for diag in bucket.collect_diagnostics(now_ms, cx) {
                 if diag.status == QueryStatus::Success {
                     entries.push(DehydratedEntry {
-                        key: diag.key.clone(),
+                        key: diag.key,
                         type_id: *type_id,
                         kind: "infinite",
                         data_json: None,
                     });
+                }
+            }
+        }
+
+        // Audit fix #113: include successful mutations, which were previously
+        // skipped entirely. Mutations without a key are skipped (a keyless
+        // mutation can't be meaningfully addressed for typed restoration).
+        for (type_id, bucket) in &self.mutation_buckets {
+            for diag in bucket.collect_diagnostics(cx) {
+                if diag.status == MutationStatus::Success {
+                    if let Some(key) = diag.key {
+                        entries.push(DehydratedEntry {
+                            key,
+                            type_id: *type_id,
+                            kind: "mutation",
+                            data_json: None,
+                        });
+                    }
                 }
             }
         }

@@ -1,6 +1,6 @@
 //! Fetch, prefetch, and cancel query tests (tests 31–38).
 
-use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
+use gpui::{BorrowAppContext as _, TestAppContext};
 
 use crate::client::QueryClient;
 use crate::core::*;
@@ -91,15 +91,15 @@ fn test_prepare_fetch_query_refetch_after_ttl(cx: &mut TestAppContext) {
 // -- 33. prepare_prefetch_query returns None for fresh data ------------------
 //
 // Finding 4/7 fix: Asserts the actual return value of prepare_prefetch_query.
-// Uses the current wall-clock time via current_time_ms() to set a timestamp
-// that is guaranteed fresh (age ~0ms, well within the 60s TTL).
 //
-// WALL-CLOCK DEPENDENCY: This test relies on current_time_ms() for both the
-// data timestamp and the freshness check inside prepare_prefetch_query. The
-// 60-second TTL provides a large margin against clock skew in CI, but if this
-// test ever flakes, the root cause will be a system clock discontinuity (e.g.,
-// NTP step). An alternative would be to mock current_time_ms, but that would
-// require a crate-level time abstraction that is not currently available.
+// Determinism: captures a single `now` via `current_time_ms()` ONCE and uses
+// it for both `apply_success(now)` AND an explicit age precondition check
+// before calling `prepare_prefetch_query`. The 60s TTL gives a huge margin,
+// so the test is deterministic as long as the wall clock doesn't jump >60s
+// between the captured `now` and the internal `current_time_ms()` call
+// inside `prepare_prefetch_query` (nanoseconds apart in practice). If a
+// future production change adds a time-injection API, this test should be
+// updated to pass `now` directly to `prepare_prefetch_query` instead.
 
 #[gpui::test]
 fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
@@ -113,10 +113,22 @@ fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("prefresh_fresh");
             let entity = client.resource::<String, QueryError>(key.clone(), cx);
-            // Use the current wall-clock time so the data is fresh when
-            // prepare_prefetch_query checks is_cache_fresh(current_time_ms()).
+            // Capture `now` once and use it for the data timestamp so the
+            // freshness check inside prepare_prefetch_query (which calls
+            // current_time_ms() again nanoseconds later) sees age ~0ms.
             let now = crate::client::current_time_ms();
             entity.update(cx, |r, _| r.apply_success("fresh_data".to_string(), now));
+
+            // Explicit precondition: verify the age is well within the 60s
+            // TTL before asserting on prepare_prefetch_query's result. This
+            // makes any wall-clock discontinuity surface as a clear
+            // precondition failure rather than a silent flake.
+            let age_ms = crate::client::current_time_ms().saturating_sub(now);
+            assert!(
+                age_ms < 60_000,
+                "precondition: age {}ms must be < 60s TTL for deterministic result",
+                age_ms,
+            );
 
             // prepare_prefetch_query uses Normal mode. Since the data was set
             // at ~now, age is ~0ms, which is within the 60s TTL, so the cache
@@ -193,7 +205,7 @@ fn test_cancel_queries_across_type_buckets(cx: &mut TestAppContext) {
                 .next_request_id_for_key::<String, QueryError>(&key_s)
                 .expect("rid");
             entity_s.update(cx, |r, _| {
-                r.begin_request_with_id(Some(rid_s), 1_000, QueryFetchMode::Normal);
+                let _ = r.begin_request_with_id(Some(rid_s), 1_000, QueryFetchMode::Normal);
             });
 
             let key_u = QueryKey::from("target");
@@ -202,7 +214,7 @@ fn test_cancel_queries_across_type_buckets(cx: &mut TestAppContext) {
                 .next_request_id_for_key::<u32, QueryError>(&key_u)
                 .expect("rid");
             entity_u.update(cx, |r, _| {
-                r.begin_request_with_id(Some(rid_u), 1_000, QueryFetchMode::Normal);
+                let _ = r.begin_request_with_id(Some(rid_u), 1_000, QueryFetchMode::Normal);
             });
 
             let sig_s = entity_s.read(cx).signal().unwrap().clone();
@@ -234,10 +246,10 @@ fn test_cancel_queries_all_filter(cx: &mut TestAppContext) {
             let rid2 = client.next_request_id_for_key::<String, QueryError>(&key2).unwrap();
 
             e1.update(cx, |r, _| {
-                r.begin_request_with_id(Some(rid1), 1_000, QueryFetchMode::Normal);
+                let _ = r.begin_request_with_id(Some(rid1), 1_000, QueryFetchMode::Normal);
             });
             e2.update(cx, |r, _| {
-                r.begin_request_with_id(Some(rid2), 1_000, QueryFetchMode::Normal);
+                let _ = r.begin_request_with_id(Some(rid2), 1_000, QueryFetchMode::Normal);
             });
 
             client.cancel_queries(&QueryKeyFilter::All, cx);

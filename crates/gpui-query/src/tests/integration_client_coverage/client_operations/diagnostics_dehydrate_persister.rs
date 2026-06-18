@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
+use gpui::{BorrowAppContext as _, TestAppContext};
 
 use crate::client::{
     DehydratedEntry, DehydratedState, QueryClient,

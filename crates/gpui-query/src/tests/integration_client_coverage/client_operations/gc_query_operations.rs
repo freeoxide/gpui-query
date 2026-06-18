@@ -254,14 +254,16 @@ fn test_infinite_query_observer_weak_entity_pattern(cx: &mut TestAppContext) {
 #[gpui::test]
 fn test_current_time_ms_is_reasonable(_cx: &mut TestAppContext) {
     let now = crate::client::current_time_ms();
-    // Should be > 1_700_000_000_000 (after 2023) and < 2_000_000_000_000 (before 2033)
+    // Should be > 1_700_000_000_000 (after 2023). Upper bound widened to
+    // 4_000_000_000_000 (pre-2128) per audit #128 so the test doesn't fail
+    // once wall-clock crosses the old 2_000_000_000_000 (2033) threshold.
     assert!(
         now > 1_700_000_000_000,
         "current_time_ms should be post-2023"
     );
     assert!(
-        now < 2_000_000_000_000,
-        "current_time_ms should be pre-2033"
+        now < 4_000_000_000_000,
+        "current_time_ms should be pre-2128"
     );
 }
 

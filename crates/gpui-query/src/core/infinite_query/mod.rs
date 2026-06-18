@@ -241,7 +241,7 @@ mod tests {
 
         // Pages are still valid despite failure
         assert!(r.is_page_data_valid());
-        assert_eq!(r.pages().front(), Some(&vec!["page1".to_string()]));
+        assert_eq!(r.first_page(), Some(&vec!["page1".to_string()]));
     }
 
     #[test]
@@ -291,7 +291,7 @@ mod tests {
 
         let evicted = r.set_max_pages(Some(2));
         assert_eq!(evicted.len(), 1);
-        assert_eq!(evicted[0], vec!["a".to_string()]);
+        assert_eq!(evicted[0].as_ref(), &vec!["a".to_string()]);
         assert_eq!(r.page_count(), 2);
     }
 
@@ -308,7 +308,7 @@ mod tests {
 
         let evicted3 = r.append_page(vec!["c".to_string()]);
         assert_eq!(evicted3.len(), 1);
-        assert_eq!(evicted3[0], vec!["a".to_string()]);
+        assert_eq!(evicted3[0].as_ref(), &vec!["a".to_string()]);
         assert_eq!(r.page_count(), 2);
     }
 
@@ -322,7 +322,7 @@ mod tests {
 
         let evicted = r.prepend_page(vec!["c".to_string()]);
         assert_eq!(evicted.len(), 1);
-        assert_eq!(evicted[0], vec!["a".to_string()]);
+        assert_eq!(evicted[0].as_ref(), &vec!["a".to_string()]);
         assert_eq!(r.page_count(), 2);
         // c, b are the remaining pages (c was prepended most recently)
         assert_eq!(r.first_page(), Some(&vec!["c".to_string()]));

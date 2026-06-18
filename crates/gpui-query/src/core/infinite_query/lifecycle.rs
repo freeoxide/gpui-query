@@ -1,6 +1,8 @@
 //! Lifecycle methods for [`InfiniteQueryResource`]: fetch, complete, reset,
 //! invalidate, and two-phase protocol.
 
+use std::sync::Arc;
+
 use crate::core::{
     QuerySignal, QueryStatus, QueryTimestamp, RequestGuard, RequestId, RequestSequencer,
 };
@@ -266,11 +268,11 @@ impl<T, E> InfiniteQueryResource<T, E> {
         now_ms: u128,
     ) {
         if is_next {
-            self.pages.push_back(page);
+            self.pages.push_back(Arc::new(page));
             self.has_next_page = has_more;
             self.enforce_max_pages_remove_front();
         } else {
-            self.pages.push_front(page);
+            self.pages.push_front(Arc::new(page));
             self.has_previous_page = has_more;
             self.enforce_max_pages_remove_back();
         }
@@ -321,11 +323,11 @@ impl<T, E> InfiniteQueryResource<T, E> {
         }
 
         if is_next {
-            self.pages.push_back(page);
+            self.pages.push_back(Arc::new(page));
             self.has_next_page = has_more;
             self.enforce_max_pages_remove_front();
         } else {
-            self.pages.push_front(page);
+            self.pages.push_front(Arc::new(page));
             self.has_previous_page = has_more;
             self.enforce_max_pages_remove_back();
         }

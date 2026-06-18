@@ -1,6 +1,7 @@
 //! Accessor (getter / setter) methods for [`InfiniteQueryResource`].
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use super::{FetchDirection, InfiniteQueryResource};
 use crate::core::{
@@ -13,15 +14,17 @@ use crate::core::{
 impl<T, E> InfiniteQueryResource<T, E> {
     /// All loaded pages, in order from first to last.
     ///
+    /// Pages are stored internally as `Arc<T>` (audit #5) so that fetchers can
+    /// receive a cheap `Arc::clone` via [`first_page_arc`](Self::first_page_arc) /
+    /// [`last_page_arc`](Self::last_page_arc) instead of copying the page data.
+    /// Most call sites only need a `&T` view — use [`first_page`](Self::first_page)
+    /// / [`last_page`](Self::last_page), or iterate with `.iter().map(|a| a.as_ref())`.
+    ///
     /// **Note**: When `status()` is `Failure`, previously loaded pages are still
     /// present and valid — the failure applies only to the most recent page fetch.
     /// Use [`is_page_data_valid`](Self::is_page_data_valid) to check whether the
     /// current page data can be relied upon.
-    ///
-    /// **Audit 3**: Returns `&VecDeque<T>` instead of `&[T]`. `VecDeque` supports
-    /// iteration and indexing, so most call sites are unaffected. Use `.as_slices()`
-    /// if you need a split view, or `.iter()` for sequential access.
-    pub fn pages(&self) -> &VecDeque<T> {
+    pub fn pages(&self) -> &VecDeque<Arc<T>> {
         &self.pages
     }
 
@@ -30,14 +33,30 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.pages.len()
     }
 
-    /// The first loaded page, if any.
+    /// The first loaded page, if any (borrowed view).
     pub fn first_page(&self) -> Option<&T> {
-        self.pages.front()
+        self.pages.front().map(|a| a.as_ref())
     }
 
-    /// The last loaded page, if any.
+    /// The last loaded page, if any (borrowed view).
     pub fn last_page(&self) -> Option<&T> {
-        self.pages.back()
+        self.pages.back().map(|a| a.as_ref())
+    }
+
+    /// Cheap `Arc::clone` of the first page, if any (audit #5).
+    ///
+    /// Hand this to a `fetch_previous_page` fetcher instead of cloning the full
+    /// page data — only the refcount is bumped.
+    pub fn first_page_arc(&self) -> Option<Arc<T>> {
+        self.pages.front().cloned()
+    }
+
+    /// Cheap `Arc::clone` of the last page, if any (audit #5).
+    ///
+    /// Hand this to a `fetch_next_page` fetcher instead of cloning the full
+    /// page data — only the refcount is bumped.
+    pub fn last_page_arc(&self) -> Option<Arc<T>> {
+        self.pages.back().cloned()
     }
 
     /// Whether there are more pages after the last loaded page.
@@ -173,7 +192,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// Increment the retry counter.
     pub fn increment_retry_count(&mut self) {
-        self.retry_count += 1;
+        self.retry_count = self.retry_count.saturating_add(1);
     }
 
     /// Reset the retry counter to zero.

@@ -28,7 +28,7 @@ fn begin_request_with_id_swr_ignore_while_loading_with_active_request() {
     r.apply_success("cached", 100);
 
     // Start a fetch to create an active request
-    r.begin_request(&mut seq, 1_500, QueryFetchMode::Force);
+    let _ = r.begin_request(&mut seq, 1_500, QueryFetchMode::Force);
     assert!(r.is_loading());
 
     // Now call begin_request_with_id when data is stale and a request is active.
@@ -128,7 +128,7 @@ fn ignore_while_loading_rejects_forced_fetch_when_loading() {
     );
     let mut s = test_sequencer();
 
-    r.begin_request(&mut s, 100, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut s, 100, QueryFetchMode::Normal);
 
     let result = r.begin_request(&mut s, 200, QueryFetchMode::Force);
     assert!(
@@ -193,7 +193,7 @@ fn record_cache_hit_does_not_clear_cancelled_status() {
 
     // Use Force mode to bypass the fresh cache and start a real request
     let mut seq = test_sequencer();
-    r.begin_request(&mut seq, 1_100, QueryFetchMode::Force);
+    let _ = r.begin_request(&mut seq, 1_100, QueryFetchMode::Force);
     r.cancel(QueryError::cancelled("abort"));
     assert_eq!(r.status(), QueryStatus::Cancelled);
 
