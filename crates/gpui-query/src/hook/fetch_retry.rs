@@ -11,9 +11,7 @@ use super::{current_time_ms, read_entity};
 
 // ── Request lifecycle helpers ───────────────────────────────────────────
 
-/// Call `begin_request` on a query entity, using the bucket's co-located
-/// sequencer when available for globally unique, monotonically increasing
-/// RequestIds.
+/// Call `begin_request` on a query entity.
 ///
 /// This transitions the resource to a Loading status, creates a fresh signal,
 /// and returns `Some(RequestId)` that must be used for completion.
@@ -31,12 +29,24 @@ use super::{current_time_ms, read_entity};
 /// `StaleCacheHit` / `IgnoredWhileLoading` distinction is preserved via
 /// [`QueryBeginResult`].
 ///
-/// For `QueryFetchMode::Force` (no cache check, always begin), the bucket
-/// sequencer is still used so Force fetches keep their monotonic request IDs.
+/// Audit fix #2: Accepts an optional `known_key` so callers that already hold
+/// the key avoid re-reading it from the entity; otherwise it is read once here.
 ///
-/// Audit fix #2: Accepts an optional `known_key` parameter. When provided by
-/// the caller (e.g., from `use_query` which already has `opts.key`), the key
-/// clone and entity re-read are avoided on the Force path.
+/// `RequestId` source: when a `QueryClient` global is available, the bucket's
+/// co-located sequencer mints a monotonic `RequestId` (shared with the
+/// imperative `prepare_fetch_query` path, so the two never collide); otherwise
+/// `begin_request_with_id` falls back to the resource's own stored sequencer
+/// (the N3 fix, monotonic per-resource). Done for BOTH fetch modes so
+/// Normal-mode fetches also receive unique, monotonic ids.
+///
+/// Note (audit H5 reverted): an earlier pass minted lazily from the resource's
+/// own sequencer even when a `QueryClient` was present. That split the ID space
+/// from the imperative fetch path — both sequencers start at scope 1 — so a
+/// hook fetch and an imperative `prepare_fetch_query` on the same key could
+/// both mint `RequestId(1,1)` and defeat stale-request rejection. The bucket
+/// sequencer is restored here; the minor cost is one consumed sequence number
+/// on `CacheHit` / `IgnoredWhileLoading` paths, which is not worth the
+/// correctness risk.
 pub(crate) fn begin_request_on_entity<T, E, C>(
     entity: &Entity<QueryResource<T, E>>,
     cx: &mut Context<C>,
@@ -51,12 +61,9 @@ where
     let now_ms = current_time_ms();
 
     // Use the bucket's co-located sequencer for a monotonic `RequestId` when a
-    // QueryClient is available; otherwise fall back to a transient sequencer
-    // inside `begin_request_with_id`. This is done for BOTH fetch modes so that
-    // Normal-mode fetches also receive unique, monotonic ids. (Previously the
-    // Normal path used a transient sequencer via `try_begin_request`, which
-    // minted the same `RequestId` for every fetch and broke LatestWins
-    // replacement — the superseded fetch's id matched the active one.)
+    // QueryClient is available; otherwise fall back to the resource's stored
+    // sequencer inside `begin_request_with_id` (N3). Shared with the imperative
+    // fetch path, so ids never collide across hook/imperative for the same key.
     let maybe_request_id = if cx.has_global::<QueryClient>() {
         let key = known_key.unwrap_or_else(|| entity.read_with(cx, |r, _| r.key().clone()));
         cx.update_global::<QueryClient, _>(|client, _cx| {
@@ -169,9 +176,21 @@ async fn run_query_retry_loop<T, E, F, Fut>(
                     // Audit fix #6: After the retry delay, check whether the
                     // request has been cancelled (e.g., by a newer begin_request
                     // under LatestWins). If so, stop retrying immediately.
+                    // Audit H6: fuse the cancellation check and the fresh-signal
+                    // re-read into a single read_entity pass (was two sequential
+                    // reads). `fresh_signal` is computed unconditionally but only
+                    // used when `signal` is `Some` (audit fix #14).
                     let Some(e) = entity.upgrade() else { return };
-                    let request_still_active =
-                        read_entity(&e, cx, |r, _| r.is_current_request(request_id)).unwrap_or(false);
+                    let (request_still_active, fresh_signal) =
+                        read_entity(&e, cx, |r, _| {
+                            (
+                                r.is_current_request(request_id),
+                                // Audit fix #24: `QuerySignal::new` directly instead
+                                // of the redundant closure.
+                                r.signal().cloned().unwrap_or_else(QuerySignal::new),
+                            )
+                        })
+                        .unwrap_or((false, QuerySignal::new()));
                     if !request_still_active {
                         #[cfg(debug_assertions)]
                         eprintln!(
@@ -185,12 +204,7 @@ async fn run_query_retry_loop<T, E, F, Fut>(
                     // signal after the retry-delay cancellation check. The
                     // no-signal variant leaves `signal` as `None` forever.
                     if let Some(ref mut sig) = signal {
-                        *sig = read_entity(&e, cx, |r, _| {
-                            // Audit fix #24: `QuerySignal::new` directly instead
-                            // of the redundant closure.
-                            r.signal().cloned().unwrap_or_else(QuerySignal::new)
-                        })
-                        .unwrap_or_else(QuerySignal::new);
+                        *sig = fresh_signal;
                     }
                     // Loop to retry
                 } else {

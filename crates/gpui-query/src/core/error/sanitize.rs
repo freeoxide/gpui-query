@@ -11,33 +11,26 @@ pub const SANITIZE_MAX_LEN: usize = 512;
 pub(crate) fn sanitize_message(msg: &str) -> String {
     use std::borrow::Cow;
 
-    let mut out = Cow::Borrowed(msg);
+    // N6/N13: keep a Cow throughout. `replace_regex` returns `Cow<str>` and
+    // short-circuits to `Cow::Borrowed` when the pattern cannot match, so a
+    // clean message skips every allocation (the previous code unconditionally
+    // wrapped each call in `Cow::Owned`, defeating the optimization).
+    let mut out: Cow<str> = Cow::Borrowed(msg);
 
     // Redact database connection strings.
-    out = Cow::Owned(out.replace_regex(
-        r"(?i)(postgres|mysql|mongodb|redis)://\S+",
-        "[REDACTED_CONNECTION]",
-    ));
+    out = replace_regex(out, r"(?i)(postgres|mysql|mongodb|redis)://\S+", "[REDACTED_CONNECTION]");
     // Redact bearer/token patterns.
-    out = Cow::Owned(out.replace_regex(
-        r"(?i)(bearer\s+|token[=:]\s*)\S+",
-        "$1[REDACTED_TOKEN]",
-    ));
+    out = replace_regex(out, r"(?i)(bearer\s+|token[=:]\s*)\S+", "$1[REDACTED_TOKEN]");
     // Redact common filesystem paths.
-    out = Cow::Owned(out.replace_regex(
-        r"(?i)(/home/|/Users/|/etc/|/var/)\S+",
-        "[REDACTED_PATH]",
-    ));
+    out = replace_regex(out, r"(?i)(/home/|/Users/|/etc/|/var/)\S+", "[REDACTED_PATH]");
     // Redact email addresses.
-    out = Cow::Owned(out.replace_regex(
+    out = replace_regex(
+        out,
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
         "[REDACTED_EMAIL]",
-    ));
+    );
     // Redact long hex sequences (likely API keys or secrets).
-    out = Cow::Owned(out.replace_regex(
-        r"\b[0-9a-fA-F]{16,}\b",
-        "[REDACTED_HEX]",
-    ));
+    out = replace_regex(out, r"\b[0-9a-fA-F]{16,}\b", "[REDACTED_HEX]");
 
     let mut s = out.into_owned();
     if s.len() > SANITIZE_MAX_LEN {
@@ -52,68 +45,133 @@ pub(crate) fn sanitize_message(msg: &str) -> String {
     s
 }
 
-/// Helper trait so we can call `replace_regex` on `String` / `Cow<str>`.
+/// Redact `pattern` with `replacement` across `input`.
+///
 /// Uses a simple approach without pulling in the `regex` crate: manual
 /// scan-and-replace for each pattern. This keeps the dependency footprint
 /// minimal for a utility that only runs on DevTools / logging paths.
-trait Redact {
-    fn replace_regex(&self, pattern: &str, replacement: &str) -> String;
+///
+/// N6: returns `Cow<str>` so clean messages skip the full-text copy entirely
+/// (the input cow is returned unchanged when no match is possible). Each arm
+/// first checks a cheap `contains` guard so the heavier scan only runs when
+/// the pattern could plausibly match. Implemented on `Cow<'a, str>` (taking it
+/// by value) so the borrowed variant keeps the lifetime of the original
+/// message, allowing the chain of reassignments in `sanitize_message` to
+/// compile.
+fn replace_regex<'a>(
+    mut input: std::borrow::Cow<'a, str>,
+    pattern: &str,
+    replacement: &str,
+) -> std::borrow::Cow<'a, str> {
+    // Operate on the current contents (borrowed or owned) via a single
+    // `&str` view. When no redaction is needed, return `input` unchanged so
+    // a borrowed input stays borrowed (N6/N13).
+    let text: &str = &input;
+    // Lightweight pattern matching without the regex crate.
+    // We only handle the specific patterns used by `sanitize_message`.
+    let owned = match pattern {
+        // Database connection strings. N11: pre-compute the needles once.
+        p if p.contains("postgres")
+            || p.contains("mysql")
+            || p.contains("mongodb")
+            || p.contains("redis") =>
+        {
+            // N6: cheap guard — no scheme needle can match, so skip.
+            if !contains_any_scheme(&text.to_ascii_lowercase()) {
+                return input;
+            }
+            redact_url_schemes(text, &["postgres", "mysql", "mongodb", "redis"], replacement)
+        }
+        // Bearer/token patterns.
+        p if p.contains("bearer") || p.contains("token") => {
+            let lower = text.to_ascii_lowercase();
+            if !lower.contains("bearer") && !lower.contains("token") {
+                return input;
+            }
+            redact_tokens(text, replacement)
+        }
+        // Filesystem paths.
+        p if p.contains("/home/")
+            || p.contains("/Users/")
+            || p.contains("/etc/")
+            || p.contains("/var/") =>
+        {
+            let lower = text.to_ascii_lowercase();
+            if !lower.contains("/home/")
+                && !lower.contains("/users/")
+                && !lower.contains("/etc/")
+                && !lower.contains("/var/")
+            {
+                return input;
+            }
+            redact_paths(text, &["/home/", "/Users/", "/etc/", "/var/"], replacement)
+        }
+        // Email addresses.
+        p if p.contains("@") && p.contains(".") => {
+            if !text.contains('@') {
+                return input;
+            }
+            redact_emails(text, replacement)
+        }
+        // Long hex sequences.
+        p if p.contains("0-9a-f") => {
+            if !has_long_hex_run(text) {
+                return input;
+            }
+            redact_hex(text, replacement)
+        }
+        // N30: unknown pattern. Every pattern passed to `replace_regex`
+        // must have a matching arm — surface a missing arm in debug builds
+        // instead of silently no-oping.
+        _ => {
+            debug_assert!(false, "replace_regex: unrecognized pattern {pattern:?}");
+            return input;
+        }
+    };
+    // A redaction actually happened; install the owned result.
+    input = std::borrow::Cow::Owned(owned);
+    input
 }
 
-impl Redact for str {
-    fn replace_regex(&self, pattern: &str, replacement: &str) -> String {
-        // Lightweight pattern matching without the regex crate.
-        // We only handle the specific patterns used by `sanitize_message`.
-        match pattern {
-            // Database connection strings.
-            p if p.contains("postgres")
-                || p.contains("mysql")
-                || p.contains("mongodb")
-                || p.contains("redis") =>
-            {
-                redact_url_schemes(
-                    self,
-                    &["postgres", "mysql", "mongodb", "redis"],
-                    replacement,
-                )
+/// N6 guard: whether `lower` (already lowercased) contains any of the
+/// recognized URL-scheme needles.
+fn contains_any_scheme(lower: &str) -> bool {
+    // N11: pre-computed const table of the literal "scheme://" needles so we
+    // avoid re-allocating `format!("{scheme}://")` per scheme per loop
+    // iteration in `redact_url_schemes`, and reuse it here for the cheap guard.
+    const SCHEME_NEEDLES: [&str; 4] = ["postgres://", "mysql://", "mongodb://", "redis://"];
+    SCHEME_NEEDLES.iter().any(|needle| lower.contains(needle))
+}
+
+/// N6 guard: whether `text` contains a run of 16+ hex digits.
+fn has_long_hex_run(text: &str) -> bool {
+    let mut run = 0usize;
+    for c in text.chars() {
+        if c.is_ascii_hexdigit() {
+            run += 1;
+            if run >= 16 {
+                return true;
             }
-            // Bearer/token patterns.
-            p if p.contains("bearer") || p.contains("token") => {
-                redact_tokens(self, replacement)
-            }
-            // Filesystem paths.
-            p if p.contains("/home/")
-                || p.contains("/Users/")
-                || p.contains("/etc/")
-                || p.contains("/var/") =>
-            {
-                redact_paths(
-                    self,
-                    &["/home/", "/Users/", "/etc/", "/var/"],
-                    replacement,
-                )
-            }
-            // Email addresses.
-            p if p.contains("@") && p.contains(".") => {
-                redact_emails(self, replacement)
-            }
-            // Long hex sequences.
-            p if p.contains("0-9a-f") => redact_hex(self, replacement),
-            _ => self.to_string(),
+        } else {
+            run = 0;
         }
     }
+    false
 }
 
 /// Redact URL-like connection strings starting with any of `schemes`.
-fn redact_url_schemes(text: &str, schemes: &[&str], replacement: &str) -> String {
+fn redact_url_schemes(text: &str, _schemes: &[&str], replacement: &str) -> String {
+    // N11: pre-computed const table of the literal "scheme://" needles instead
+    // of re-allocating `format!("{scheme}://")` per scheme per loop iteration.
+    const SCHEME_NEEDLES: [&str; 4] = ["postgres://", "mysql://", "mongodb://", "redis://"];
+
     let lower = text.to_ascii_lowercase();
     let mut result = String::with_capacity(text.len());
     let mut offset = 0;
     loop {
         let mut earliest: Option<usize> = None;
-        for scheme in schemes {
-            let needle = format!("{scheme}://");
-            if let Some(rel) = lower[offset..].find(&needle) {
+        for needle in SCHEME_NEEDLES {
+            if let Some(rel) = lower[offset..].find(needle) {
                 let abs = offset + rel;
                 match earliest {
                     None => earliest = Some(abs),
@@ -234,7 +292,7 @@ fn redact_paths(text: &str, prefixes: &[&str], replacement: &str) -> String {
 
 /// Redact email addresses (simple heuristic: word@word.word).
 fn redact_emails(text: &str, replacement: &str) -> String {
-    let mut result = String::new();
+    let mut result = String::with_capacity(text.len());
     let mut i = 0;
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
@@ -303,7 +361,7 @@ fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
 
 /// Redact long hex sequences (16+ hex chars).
 fn redact_hex(text: &str, replacement: &str) -> String {
-    let mut result = String::new();
+    let mut result = String::with_capacity(text.len());
     let mut i = 0;
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();

@@ -6,6 +6,7 @@
 use crate::core::*;
 use crate::tests::test_support::*;
 use crate::tests::core_lifecycle::transitions::*;
+use std::num::NonZero;
 
 // ═══════════════════════════════════════════════════════════════════════
 // 14. Double begin_loading: LatestWins cancels old request
@@ -241,7 +242,7 @@ fn stale_while_revalidate_serves_stale_and_starts_background() {
 #[test]
 fn begin_request_with_id_uses_provided_id() {
     let mut r = resource();
-    let custom_id = RequestId::scoped(42, 7);
+    let custom_id = RequestId::scoped(NonZero::new(42).unwrap(), 7);
 
     let result = r.begin_request_with_id(Some(custom_id), 100, QueryFetchMode::Normal);
 
@@ -263,7 +264,7 @@ fn begin_request_with_id_none_uses_transient_sequencer() {
     match result {
         QueryBeginResult::Started { request_id, .. } => {
             // Transient sequencer starts at scope 1, sequence 1
-            assert_eq!(request_id, RequestId::scoped(1, 1));
+            assert_eq!(request_id, RequestId::scoped(NonZero::new(1).unwrap(), 1));
         }
         _ => panic!("expected Started"),
     }

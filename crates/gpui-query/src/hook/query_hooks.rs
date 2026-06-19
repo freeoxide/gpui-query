@@ -67,19 +67,29 @@ where
     F: Fn(QuerySignal) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    let opts = options.into();
+    // Audit H7: destructure opts so retry_policy can be moved (not cloned)
+    // into the entity store; it has no later use. key is still cloned once for
+    // use_query_manual (audit #61 moves the original into begin_request below).
+    let crate::hook::QueryOptions {
+        key,
+        cache_policy,
+        request_policy,
+        retry_policy,
+        force_fetch,
+        ..
+    } = options.into();
     let (entity, subscription) =
-        use_query_manual(opts.key.clone(), opts.cache_policy, opts.request_policy, cx);
+        use_query_manual(key.clone(), cache_policy, request_policy, cx);
 
     // Audit fix #16: Propagate the user's retry policy to the resource entity.
     // Without this, the resource defaults to RetryPolicy::no_retries() and
     // the user's QueryOptions::retry_policy() builder is a dead API.
-    entity.update(cx, |r, _| r.set_retry_policy(opts.retry_policy.clone()));
+    entity.update(cx, |r, _| r.set_retry_policy(retry_policy));
 
     // Start fetch if resource is idle
     let should_fetch = entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle);
     if should_fetch {
-        let fetch_mode = if opts.force_fetch {
+        let fetch_mode = if force_fetch {
             QueryFetchMode::Force
         } else {
             QueryFetchMode::Normal
@@ -90,7 +100,7 @@ where
         // Audit fix #61: opts.key was cloned once above for use_query_manual
         // and is no longer needed after this call, so move it instead of
         // cloning again (removes a redundant second clone of the key).
-        if let Some(request_id) = begin_request_on_entity(&entity, cx, fetch_mode, Some(opts.key))
+        if let Some(request_id) = begin_request_on_entity(&entity, cx, fetch_mode, Some(key))
         {
             // Read signal *after* begin_request creates it, not before.
             let signal = entity.read_with(cx, |r, _| {

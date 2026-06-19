@@ -40,7 +40,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
     ///
     /// Uses `HashMap::retain()` to avoid the intermediate `Vec<QueryKey>`
     /// allocation.
-    fn gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &App) {
+    fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         QueryBucket::gc(self, now_ms, gc_time_ms, cx);
     }
 
@@ -121,7 +121,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
     }
 
     /// Collect per-resource diagnostic details for all live entries.
-    fn collect_diagnostics(&self, now_ms: u128, cx: &App) -> Vec<QueryDiagnostic> {
+    fn collect_diagnostics(&self, now_ms: u64, cx: &App) -> Vec<QueryDiagnostic> {
         self.entries
             .iter()
             .filter_map(|(key, entry)| {

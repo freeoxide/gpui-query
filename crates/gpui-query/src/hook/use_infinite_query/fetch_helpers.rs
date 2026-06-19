@@ -52,7 +52,7 @@ pub fn fetch_next_page_infinite<T, E, C, FNext, Fut>(
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: 'static,
-    FNext: Fn(Option<&T>) -> Fut + 'static + Clone,
+    FNext: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
     fetch_page_infinite(entity, fetcher, cx, PageDirection::Next);
@@ -77,7 +77,7 @@ pub fn fetch_previous_page_infinite<T, E, C, FPrev, Fut>(
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: 'static,
-    FPrev: Fn(Option<&T>) -> Fut + 'static + Clone,
+    FPrev: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
     fetch_page_infinite(entity, fetcher, cx, PageDirection::Previous);
@@ -100,7 +100,7 @@ fn fetch_page_infinite<T, E, C, F, Fut>(
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: 'static,
-    F: Fn(Option<&T>) -> Fut + 'static + Clone,
+    F: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
     let weak = entity.downgrade();

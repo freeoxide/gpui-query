@@ -12,8 +12,12 @@ use super::InfiniteQueryResource;
 
 /// Direction of an infinite-query page fetch, used internally to share logic
 /// between the four `begin_fetch_*` entry points (audit #12).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PageDirection {
+///
+/// `pub(super)` so it can back the collapsed `fetching_direction` field on
+/// [`InfiniteQueryResource`] (N18). Derives `Serialize`/`Deserialize` because
+/// it is now a serde-serialized field on the resource.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) enum PageDirection {
     Next,
     Previous,
 }
@@ -54,7 +58,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub fn begin_fetch_next(
         &mut self,
         sequencer: &mut RequestSequencer,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
         self.begin_fetch(
             PageDirection::Next,
@@ -86,7 +90,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub fn begin_fetch_previous(
         &mut self,
         sequencer: &mut RequestSequencer,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
         self.begin_fetch(
             PageDirection::Previous,
@@ -111,7 +115,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub fn begin_fetch_next_with_id(
         &mut self,
         maybe_request_id: Option<RequestId>,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
         self.begin_fetch(
             PageDirection::Next,
@@ -136,7 +140,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub fn begin_fetch_previous_with_id(
         &mut self,
         maybe_request_id: Option<RequestId>,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
         self.begin_fetch(
             PageDirection::Previous,
@@ -155,12 +159,12 @@ impl<T, E> InfiniteQueryResource<T, E> {
         &mut self,
         direction: PageDirection,
         id_source: MaybeRequestId,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
         let (has_page, is_fetching_same_direction) = match direction {
-            PageDirection::Next => (self.has_next_page, self.is_fetching_next_page),
+            PageDirection::Next => (self.has_next_page, self.is_fetching_next_page()),
             PageDirection::Previous => {
-                (self.has_previous_page, self.is_fetching_previous_page)
+                (self.has_previous_page, self.is_fetching_previous_page())
             }
         };
 
@@ -175,7 +179,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
         }
 
         if self.active_request_id.is_some() {
-            self.cancelled_count += 1;
+            self.cancelled_count = self.cancelled_count.saturating_add(1);
         }
 
         // v2 fix: Cancel old signal before replacing
@@ -183,21 +187,19 @@ impl<T, E> InfiniteQueryResource<T, E> {
             old_signal.cancel();
         }
 
-        match direction {
-            PageDirection::Next => {
-                self.is_fetching_next_page = true;
-                self.is_fetching_previous_page = false;
-            }
-            PageDirection::Previous => {
-                self.is_fetching_previous_page = true;
-                self.is_fetching_next_page = false;
-            }
-        }
+        // N18: collapse the two mutually-exclusive direction bools into a
+        // single Option<PageDirection>. The single assignment is what makes
+        // the invariant (only one direction in flight) unbreakable.
+        self.fetching_direction = Some(direction);
 
         let request_id = match id_source {
             MaybeRequestId::FromSequencer(sequencer) => sequencer.next_request(),
             MaybeRequestId::Provided(maybe_id) => {
-                maybe_id.unwrap_or_else(|| RequestSequencer::new().next_request())
+                // N3: fall back to the resource's own sequencer so transient
+                // callers without a QueryClient still get monotonic,
+                // collision-free ids instead of every call producing
+                // RequestId(1,1).
+                maybe_id.unwrap_or_else(|| self.transient_sequencer.next_request())
             }
         };
         self.active_request_id = Some(request_id);
@@ -228,6 +230,9 @@ impl<T, E> InfiniteQueryResource<T, E> {
             self.active_request_id = None;
             Some(RequestGuard::new(request_id))
         } else {
+            // Mirror QueryResource::accept_current_request: a stale/replaced
+            // request's result is ignored, so bump the diagnostic counter (N1).
+            self.mark_ignored_result();
             None
         }
     }
@@ -239,13 +244,19 @@ impl<T, E> InfiniteQueryResource<T, E> {
     ///
     /// **Audit 3**: Uses `VecDeque::push_back` for append and `VecDeque::push_front`
     /// for prepend — both O(1) amortized.
+    ///
+    /// **N27**: Any pages evicted by `enforce_max_pages_remove_*` are silently
+    /// dropped here (their `Arc<T>` refcounts are decremented, no leak). This
+    /// differs from `append_page`/`prepend_page`, which return evicted pages.
+    /// Returning them would change this method's signature, so the drop is
+    /// intentional and documented.
     pub fn complete_success_with_guard(
         &mut self,
         _guard: RequestGuard,
         page: T,
         has_more: bool,
         is_next: bool,
-        now_ms: u128,
+        now_ms: u64,
     ) {
         if is_next {
             self.pages.push_back(Arc::new(page));
@@ -260,8 +271,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.status = QueryStatus::Success;
         self.error = None;
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
     }
 
@@ -278,8 +288,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub fn complete_failure_with_guard(&mut self, _guard: RequestGuard, error: E) {
         self.status = QueryStatus::Failure;
         self.error = Some(error);
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
     }
 
@@ -289,16 +298,21 @@ impl<T, E> InfiniteQueryResource<T, E> {
     ///
     /// **Audit 3**: Uses `VecDeque::push_back` for append and `VecDeque::push_front`
     /// for prepend — both O(1) amortized.
+    ///
+    /// **N27**: Any pages evicted by `enforce_max_pages_remove_*` are silently
+    /// dropped (their `Arc<T>` refcounts are decremented, no leak); see
+    /// [`complete_success_with_guard`](Self::complete_success_with_guard) for
+    /// the rationale.
     pub fn complete_page_success(
         &mut self,
         request_id: RequestId,
         page: T,
         has_more: bool,
         is_next: bool,
-        now_ms: u128,
+        now_ms: u64,
     ) -> bool {
         if self.active_request_id != Some(request_id) {
-            self.ignored_results += 1;
+            self.ignored_results = self.ignored_results.saturating_add(1);
             return false;
         }
 
@@ -316,8 +330,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.error = None;
         self.active_request_id = None;
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
 
         true
@@ -334,15 +347,14 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// data can be relied upon.
     pub fn complete_page_failure(&mut self, request_id: RequestId, error: E) -> bool {
         if self.active_request_id != Some(request_id) {
-            self.ignored_results += 1;
+            self.ignored_results = self.ignored_results.saturating_add(1);
             return false;
         }
 
         self.status = QueryStatus::Failure;
         self.error = Some(error);
         self.active_request_id = None;
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
 
         true
@@ -387,8 +399,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
         };
         self.has_next_page = has_next;
         self.has_previous_page = has_prev;
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
     }
 

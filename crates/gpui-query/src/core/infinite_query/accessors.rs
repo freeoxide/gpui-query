@@ -71,12 +71,12 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// Whether a `fetch_next_page` request is in flight.
     pub fn is_fetching_next_page(&self) -> bool {
-        self.is_fetching_next_page
+        matches!(self.fetching_direction, Some(super::lifecycle::PageDirection::Next))
     }
 
     /// Whether a `fetch_previous_page` request is in flight.
     pub fn is_fetching_previous_page(&self) -> bool {
-        self.is_fetching_previous_page
+        matches!(self.fetching_direction, Some(super::lifecycle::PageDirection::Previous))
     }
 
     /// Maximum number of pages to retain.
@@ -157,13 +157,27 @@ impl<T, E> InfiniteQueryResource<T, E> {
     }
 
     /// When the current request started (ms).
-    pub fn started_at_ms(&self) -> Option<u128> {
+    pub fn started_at_ms(&self) -> Option<u64> {
         self.started_at.map(QueryTimestamp::as_millis)
     }
 
     /// When data was last updated (ms).
-    pub fn last_updated_at_ms(&self) -> Option<u128> {
+    pub fn last_updated_at_ms(&self) -> Option<u64> {
         self.last_updated_at.map(QueryTimestamp::as_millis)
+    }
+
+    /// Cache age in milliseconds (L6).
+    ///
+    /// Mirrors [`QueryResource::cache_age_ms`]: returns `None` when there is
+    /// no recorded `last_updated_at`, and also `None` on clock skew
+    /// (`now_ms` before the recorded timestamp) via `checked_sub`. Used by
+    /// `InfiniteQueryBucket::collect_diagnostics` so the infinite diagnostic
+    /// matches the regular query's `cache_age_ms` behavior (the previous
+    /// inline `saturating_sub` returned `Some(0)` on skew).
+    ///
+    /// [`QueryResource::cache_age_ms`]: crate::core::QueryResource::cache_age_ms
+    pub fn cache_age_ms(&self, now_ms: u64) -> Option<u64> {
+        QueryTimestamp::from(now_ms).elapsed_since(self.last_updated_at?)
     }
 
     /// Total cache hits.
@@ -191,8 +205,17 @@ impl<T, E> InfiniteQueryResource<T, E> {
     }
 
     /// Increment the retry counter.
-    pub fn increment_retry_count(&mut self) {
+    pub fn increment_retry(&mut self) {
         self.retry_count = self.retry_count.saturating_add(1);
+    }
+
+    /// Increment the ignored-results counter.
+    ///
+    /// Mirrors `QueryResource::mark_ignored_result` so the client layer's
+    /// bulk-cancel path can bump `ignored_results` for infinite queries the
+    /// same way it does for regular queries (M5 core half).
+    pub fn mark_ignored_result(&mut self) {
+        self.ignored_results = self.ignored_results.saturating_add(1);
     }
 
     /// Reset the retry counter to zero.

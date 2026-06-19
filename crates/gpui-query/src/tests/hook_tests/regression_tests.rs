@@ -184,7 +184,10 @@ fn test_mutate_from_two_spawn_contexts_second_rejected(cx: &mut TestAppContext) 
     // entity from inside that distinct context to call `mutate`. This is the
     // real TOCTOU shape: an independent task racing the in-flight one.
     let sc = second_call_count.clone();
-    let second_ran = Arc::new(Mutex::new(false));
+    // T4: signal completion of the spawned second mutate via a Gate instead of
+    // busy-waiting on a Mutex<bool>. The spawned task releases the gate once it
+    // has executed its spawn context; the main task drains once.
+    let second_ran = Gate::new();
     let second_ran_clone = second_ran.clone();
     let _second_task = harness.update(cx, |_this, cx| {
         cx.spawn(async move |weak_self, async_cx| {
@@ -205,21 +208,16 @@ fn test_mutate_from_two_spawn_contexts_second_rejected(cx: &mut TestAppContext) 
                     );
                 });
             }
-            *second_ran_clone.lock().unwrap() = true;
+            second_ran_clone.release();
         })
     });
 
-    // Drive the executor until the spawned second mutate has actually run (and,
-    // because the first is still Loading, been rejected). Bounded so a
-    // regression that leaves it pending fails loudly.
-    for _ in 0..200 {
-        cx.run_until_parked();
-        if *second_ran.lock().unwrap() {
-            break;
-        }
-    }
+    // Drain the executor once so the spawned second mutate runs (and, because
+    // the first is still Loading, is rejected). The Gate signals that the
+    // spawn context executed; a regression that leaves it pending fails loudly.
+    cx.run_until_parked();
     assert!(
-        *second_ran.lock().unwrap(),
+        second_ran.is_released(),
         "second mutate's spawn context must execute so the TOCTOU guard is \
          actually exercised"
     );

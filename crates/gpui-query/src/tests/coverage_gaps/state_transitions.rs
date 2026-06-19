@@ -152,7 +152,6 @@ fn invariant_after_reset() {
     let mut s = test_sequencer();
     let rid = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
     r.complete_current_success(rid, "data", 200);
-    r.set_placeholder_data(Some("placeholder"));
     r.increment_retry();
 
     r.reset();
@@ -162,9 +161,7 @@ fn invariant_after_reset() {
     assert!(r.error().is_none(), "reset clears error");
     assert!(r.active_request_id().is_none());
     assert!(r.signal().is_none());
-    assert!(r.placeholder_data().is_none());
     assert!(r.previous_data().is_none());
-    assert!(r.initial_data().is_none());
     assert_eq!(r.cache_hits(), 0);
     assert_eq!(r.cancelled_count(), 0);
     assert_eq!(r.ignored_results(), 0);

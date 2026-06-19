@@ -364,8 +364,8 @@ mod tests {
     fn retry_count_accessors() {
         let mut r = make_resource();
         assert_eq!(r.retry_count(), 0);
-        r.increment_retry_count();
-        r.increment_retry_count();
+        r.increment_retry();
+        r.increment_retry();
         assert_eq!(r.retry_count(), 2);
         r.reset_retry_count();
         assert_eq!(r.retry_count(), 0);
@@ -380,8 +380,8 @@ mod tests {
         let id = r.begin_fetch_next(&mut seq, 1_000).unwrap();
         r.complete_page_success(id, vec!["page1".to_string()], true, true, 2_000);
         r.set_max_pages(Some(10));
-        r.increment_retry_count();
-        r.increment_retry_count();
+        r.increment_retry();
+        r.increment_retry();
 
         r.reset();
 

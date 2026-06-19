@@ -114,7 +114,7 @@ where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
     C: 'static,
-    FNext: Fn(Option<&T>) -> Fut + 'static + Clone,
+    FNext: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
     let InfiniteQueryOptions {
@@ -147,12 +147,11 @@ where
             );
         }
         cx.new(|_| {
-            let mut resource =
-                InfiniteQueryResource::new(key, cache_policy, request_policy);
-            if let Some(max) = max_pages {
-                resource.set_max_pages(Some(max));
-            }
-            resource
+            // Audit H12: max_pages is NOT set here — the unconditional
+            // entity.update below already applies it for both QueryClient and
+            // standalone entities, so setting it here was redundant on the
+            // standalone path.
+            InfiniteQueryResource::new(key, cache_policy, request_policy)
         })
     };
 
@@ -165,6 +164,9 @@ where
         if let Some(max) = max_pages {
             resource.set_max_pages(Some(max));
         }
+        // Audit H13: clone for the entity store; the original local is reused
+        // in the initial-fetch spawn below (avoids the re-read + second clone
+        // that previously happened at the spawn site).
         resource.set_retry_policy(retry_policy.clone());
         cx.notify();
     });
@@ -183,11 +185,9 @@ where
         );
         #[cfg(not(debug_assertions))]
         {
-            eprintln!(
-                "WARNING: InfiniteQueryObserver::observe returned None. \
-                 Entity may have been dropped unexpectedly. \
-                 Falling back to a no-op subscription."
-            );
+            // Audit fix #5 / H10: silently fall back to a no-op subscription in
+            // release builds (matching use_query_manual and use_mutation); the
+            // eprintln! was inconsistent with the rest of the hook layer.
             return (entity, Subscription::new(|| {}));
         }
     };
@@ -219,7 +219,9 @@ where
         if let Some(request_id) = request_id {
             let weak = entity.downgrade();
             let fetcher = fetch_next;
-            let retry = entity.read_with(cx, |r, _| r.retry_policy().clone());
+            // Audit H13: reuse the retry_policy local set above instead of
+            // re-reading + re-cloning from the entity.
+            let retry = retry_policy.clone();
             let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
                 run_fetch_next_page_with_id(
                     &weak,

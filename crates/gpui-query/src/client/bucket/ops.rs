@@ -30,34 +30,69 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
     /// Evict the oldest (least-recently-updated) entry to make room for a new one.
     ///
     /// Called when `get_or_create` would exceed `max_entries`. Selects the
-    /// entry with the smallest `last_updated_at_ms` (reading entity state
-    /// directly — CL2/#106). Entries that are actively loading are skipped
-    /// (#109) so in-flight requests are never evicted. The chosen key is
-    /// cloned once (#59) rather than on every iteration.
+    /// entry with the smallest mirrored `last_updated_ms`. Entries that are
+    /// mirrored as loading are skipped (#109) so in-flight requests are never
+    /// evicted.
+    ///
+    /// **M2 (O(n)→O(1) entity reads)**: the scan reads only the entry MIRRORS
+    /// (cheap field reads + `WeakEntity::upgrade` liveness, no `entity.read`),
+    /// then performs **one** `entity.read` on the single winner to confirm
+    /// `!is_loading()` (guards #109 against a stale mirror where a fetch began
+    /// after the last refresh) and read the authoritative
+    /// `last_updated_at_ms`. If the winner is actually loading, its mirror is
+    /// marked and we re-pick. Typical cost: 1 entity read.
+    ///
+    /// The chosen key is cloned once (#59) rather than on every iteration.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
-        // Audit fix #59: find the winning key by reference first (no clone in
-        // the filter), then clone exactly once for the `remove`. Previously
-        // every candidate cloned its `QueryKey` just to feed `min_by_key`.
-        let target = self
-            .entries
-            .iter()
-            .filter_map(|(key, entry)| {
-                let entity = entry.entity.upgrade()?;
-                let resource = entity.read(cx);
-                if resource.is_loading() {
-                    return None;
-                }
-                let age = resource.last_updated_at_ms().unwrap_or(0);
-                Some((key, age))
-            })
-            .min_by_key(|&(_, age)| age);
+        loop {
+            // Mirror scan: NO entity.read here. Pick min mirror-timestamp
+            // among entries whose mirror says !loading AND whose weak ref is
+            // still live (a dead entry is GC's job, not eviction's, but it
+            // also can't be the "oldest live" winner).
+            let target = self
+                .entries
+                .iter()
+                .filter_map(|(key, entry)| {
+                    if entry.loading {
+                        return None;
+                    }
+                    if entry.entity.upgrade().is_none() {
+                        return None;
+                    }
+                    Some((key, entry.last_updated_ms.unwrap_or(0)))
+                })
+                .min_by_key(|&(_, age)| age);
 
-        // Clone the winning key out of the immutable borrow so `remove` can
-        // take `&mut self.entries` (E0502: the iterator above still holds the
-        // shared borrow through `key`). One clone total — same as audit fix #59.
-        if let Some((key, _)) = target {
+            let Some((key, _)) = target else {
+                // Every live entry is mirrored as loading: nothing safe to evict.
+                return;
+            };
+
+            // Single confirm read on the winner. Cloned out of the shared
+            // borrow so `remove` can take `&mut self.entries` (E0502).
             let key = key.clone();
-            self.entries.remove(&key);
+            let still_loading = self
+                .entries
+                .get(&key)
+                .and_then(|e| e.entity.upgrade())
+                .map(|entity| entity.read(cx).is_loading());
+
+            match still_loading {
+                Some(true) => {
+                    // Mirror was stale: a fetch began after the last refresh.
+                    // Mark it and re-pick so #109 is honored.
+                    if let Some(entry) = self.entries.get_mut(&key) {
+                        entry.loading = true;
+                    }
+                    continue;
+                }
+                _ => {
+                    // Confirmed not loading (or already dead/collected between
+                    // the scan and the confirm): evict.
+                    self.entries.remove(&key);
+                    return;
+                }
+            }
         }
     }
 
@@ -87,12 +122,18 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         // `self.entries` conflicts with `self.evict_oldest`'s borrow of `self`),
         // so the dead/miss path re-probes via `insert` — best-effort, noted in
         // the audit. The common alive-hit path is still a single hash.
-        if let Some(entry) = self.entries.get(&key) {
+        if let Some(entry) = self.entries.get_mut(&key) {
             if let Some(entity) = entry.entity.upgrade() {
-                let needs_update = entity.read_with(cx, |resource, _| {
-                    resource.cache_policy() != cache_policy
-                        || resource.request_policy() != request_policy
-                });
+                // M2: refresh the mirror from the same read we already do for
+                // the policy check (zero extra reads).
+                let (needs_update, last_updated, loading) =
+                    entity.read_with(cx, |resource, _| {
+                        let needs_update = resource.cache_policy() != cache_policy
+                            || resource.request_policy() != request_policy;
+                        (needs_update, resource.last_updated_at_ms(), resource.is_loading())
+                    });
+                entry.last_updated_ms = last_updated;
+                entry.loading = loading;
                 if needs_update {
                     entity.update(cx, |resource, _| {
                         resource.set_cache_policy(cache_policy);
@@ -114,6 +155,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
             BucketEntry {
                 entity: entity.downgrade(),
                 sequencer: RequestSequencer::new(),
+                // Fresh resource: never completed, not loading.
+                last_updated_ms: None,
+                loading: false,
             },
         );
         entity
@@ -155,14 +199,19 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
     /// Reads entity state directly via `entity.read(cx)` (CL2/#106) rather
     /// than trusting a cached snapshot. The snapshot machinery was never
     /// refreshed from production hooks, so it was always stale.
-    pub(crate) fn gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &App) {
+    pub(crate) fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_time_ms = gc_time_ms.max(MIN_GC_TIME_MS);
-        let gc_threshold = gc_time_ms as u128;
-        let success_threshold = gc_threshold * (super::types::SUCCESS_GC_MULTIPLIER as u128);
+        let gc_threshold = gc_time_ms;
+        let success_threshold = gc_threshold * (super::types::SUCCESS_GC_MULTIPLIER as u64);
 
         self.entries.retain(|_key, entry| {
             let Some(entity) = entry.entity.upgrade() else { return false };
             let resource = entity.read(cx);
+
+            // M2: refresh the eviction mirror from this read (gc walks every
+            // entry anyway, so this is the canonical refresh point).
+            entry.last_updated_ms = resource.last_updated_at_ms();
+            entry.loading = resource.is_loading();
 
             if resource.is_loading() {
                 return true;

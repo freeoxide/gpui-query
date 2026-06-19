@@ -32,7 +32,7 @@ pub struct RetryPolicy {
 
 impl RetryPolicy {
     /// Create a policy that never retries.
-    pub fn no_retries() -> Self {
+    pub const fn no_retries() -> Self {
         Self {
             max_retries: 0,
             retry_delay_ms: 0,
@@ -42,7 +42,7 @@ impl RetryPolicy {
     }
 
     /// Create a policy with the given maximum number of retries.
-    pub fn new(max_retries: u32) -> Self {
+    pub const fn new(max_retries: u32) -> Self {
         Self {
             max_retries,
             retry_delay_ms: 1000,

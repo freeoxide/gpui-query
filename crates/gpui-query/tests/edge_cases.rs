@@ -29,7 +29,7 @@ fn make_resource(cache: CachePolicy) -> QueryResource<String, QueryError> {
 fn begin_request_with_seq(
     resource: &mut QueryResource<String, QueryError>,
     seq: &mut RequestSequencer,
-    now_ms: u128,
+    now_ms: u64,
 ) -> QueryBeginResult {
     resource.begin_request(seq, now_ms, gpui_query::core::QueryFetchMode::Normal)
 }
@@ -38,7 +38,7 @@ fn complete_success(
     resource: &mut QueryResource<String, QueryError>,
     request_id: gpui_query::core::RequestId,
     data: &str,
-    now_ms: u128,
+    now_ms: u64,
 ) -> bool {
     resource.complete_current_success(request_id, data.to_string(), now_ms)
 }
@@ -102,7 +102,7 @@ fn ttl_max_data_is_always_fresh() {
     }
 
     // Even a very large age should still be fresh under u64::MAX TTL.
-    let result2 = begin_request_with_seq(&mut resource, &mut seq, u64::MAX as u128);
+    let result2 = begin_request_with_seq(&mut resource, &mut seq, u64::MAX);
     assert!(matches!(result2, QueryBeginResult::CacheHit));
 }
 

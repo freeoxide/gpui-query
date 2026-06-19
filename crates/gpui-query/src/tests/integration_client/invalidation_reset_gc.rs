@@ -157,11 +157,10 @@ fn test_reset_queries_prefix_preserves_non_matching(cx: &mut TestAppContext) {
 
 // ── 6. GC evicts stale Idle/Failure/Success resources ───────────────────
 //
-// GC uses a cached StatusSnapshot (not the live entity). The snapshot is
-// updated by the hook layer in production. For deterministic tests, we use
-// `client.update_query_snapshot()` to set the snapshot to a known state
-// before calling `gc_with_time()`, then assert the expected outcome
-// unconditionally.
+// GC reads live entity state directly via `entity.read(cx)` (CL2/#106); no
+// cached snapshot is involved. For deterministic tests, we drive resources
+// to a known status / `last_updated_ms` via direct entity updates before
+// calling `gc_with_time()`, then assert the expected outcome unconditionally.
 //
 // gc_time_ms=1000 means: MIN_GC_TIME_MS=1000 (enforced floor), so
 //   - Idle/Failure: evicted when age >= gc_threshold (1000ms)

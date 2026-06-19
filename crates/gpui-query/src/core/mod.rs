@@ -34,7 +34,7 @@
 mod error;
 mod infinite_query;
 mod key;
-pub mod key_filter;
+mod key_filter;
 mod mutation;
 mod network_mode;
 mod policy;

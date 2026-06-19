@@ -75,7 +75,13 @@ pub struct QueryClient {
     /// Wall-clock ms of the last opportunistic GC sweep. Combined with the op
     /// counter, this debounces GC so a burst of insertions (or a fast test that
     /// creates many resources within `MIN_GC_TIME_MS`) does not trigger GC.
-    last_gc_ms: u128,
+    ///
+    /// **L11**: initialized to `0` (rather than `current_time_ms()`) so
+    /// `QueryClient` construction does not perform a syscall. The
+    /// `MIN_GC_TIME_MS` debounce in `maybe_opportunistic_gc` still suppresses
+    /// GC for the first ~1s of life because the very first sweep sets this to
+    /// the real clock on its way through.
+    last_gc_ms: u64,
 }
 
 impl Global for QueryClient {}
@@ -95,7 +101,7 @@ impl Default for QueryClient {
             default_request_policy: RequestPolicy::default(),
             gc_time_ms: 300_000,
             op_count: 0,
-            last_gc_ms: current_time_ms(),
+            last_gc_ms: 0,
         }
     }
 }
@@ -135,10 +141,16 @@ impl QueryClient {
     /// would render the memory-bound fixes (#1, #2, #8, #91, #108) academic.
     ///
     /// Debounced by BOTH operation count (every `GC_INTERVAL` ops) and wall
-    /// clock time (no sweep within `MIN_GC_TIME_MS` of the last). The time
-    /// debounce is initialized to creation time, so a fast test that creates
-    /// many resources in well under a second never triggers GC. `gc_time_ms`
+    /// clock time (no sweep within `MIN_GC_TIME_MS` of the last). `gc_time_ms`
     /// of 0 disables GC entirely.
+    ///
+    /// **L11**: `last_gc_ms` starts at `0` (no `current_time_ms` syscall at
+    /// construction). To preserve the "no GC in the first ~1s of life"
+    /// debounce that the prior `current_time_ms()` initialization provided,
+    /// the sentinel `0` is treated as "uninitialized": the first time
+    /// `maybe_opportunistic_gc` reaches the time check, it seeds `last_gc_ms`
+    /// to `now_ms` and skips that sweep, so a fast test that creates many
+    /// resources in well under a second never triggers GC.
     fn maybe_opportunistic_gc(&mut self, cx: &App) {
         if self.gc_time_ms == 0 {
             return;
@@ -148,7 +160,13 @@ impl QueryClient {
             return;
         }
         let now_ms = current_time_ms();
-        if now_ms.saturating_sub(self.last_gc_ms) < MIN_GC_TIME_MS as u128 {
+        // L11: seed the debounce window on first reach instead of syscalling
+        // at construction.
+        if self.last_gc_ms == 0 {
+            self.last_gc_ms = now_ms;
+            return;
+        }
+        if now_ms.saturating_sub(self.last_gc_ms) < MIN_GC_TIME_MS as u64 {
             return;
         }
         self.last_gc_ms = now_ms;
@@ -184,40 +202,14 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(QueryBucket::<T, E>::new()));
 
-        // Audit fix #11: Replace the redundant first `downcast_mut` (which
-        // performed the downcast twice) with a single `TypeId` comparison.
-        // `Any::downcast_mut` fails only when `TypeId`s disagree, so checking
-        // `bucket.type_id()` upfront tells us whether the real downcast will
-        // succeed without paying for it twice. On mismatch we log the type
-        // name and swap in a fresh bucket, exactly as before.
-        let expected_type_id = TypeId::of::<QueryBucket<T, E>>();
-        if bucket.as_any().type_id() != expected_type_id {
-            eprintln!(
-                "QueryClient: type mismatch in bucket downcast for {}. \
-                 Replacing with a fresh bucket.",
-                std::any::type_name::<(T, E)>()
-            );
-            *bucket = Box::new(QueryBucket::<T, E>::new());
-        }
-        // Audit fix #29: replace the production `.expect()` with a safe match.
-        // On the (impossible, since `TypeId` was just verified) `None` branch we
-        // construct a fresh *typed* `QueryBucket`, perform the operation on it,
-        // and then store it back as the erased entry — no second downcast and no
-        // production panic. The normal path is identical to the prior `.expect()`.
-        let typed = bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>();
-        let entity = match typed {
-            Some(typed) => typed.get_or_create(key.into(), cache_policy, request_policy, cx),
-            None => {
-                debug_assert!(
-                    false,
-                    "QueryBucket downcast failed after TypeId verification"
-                );
-                let mut fresh = QueryBucket::<T, E>::new();
-                let entity = fresh.get_or_create(key.into(), cache_policy, request_policy, cx);
-                *bucket = Box::new(fresh);
-                entity
-            }
-        };
+        // M4: `bucket_or_recreate` downcasts once; `downcast_mut` already
+        // performs the TypeId check internally, so the prior redundant
+        // `bucket.type_id() != expected` pre-check is dropped (it was the
+        // double-check that audit fix #11 left in). On the (impossible)
+        // mismatch we log + swap in a fresh bucket + return it, all in one
+        // place — killing the 5x duplicated recovery block across the client.
+        let typed = Self::bucket_or_recreate::<T, E>(bucket);
+        let entity = typed.get_or_create(key.into(), cache_policy, request_policy, cx);
         // Audit fix CL1/#105: opportunistically run GC on this op.
         self.maybe_opportunistic_gc(cx);
         entity
@@ -265,28 +257,44 @@ impl QueryClient {
     ) -> Option<crate::core::RequestId> {
         let type_id = TypeId::of::<(T, E)>();
         let bucket = self.buckets.get_mut(&type_id)?;
-        // Audit fix #11: TypeId comparison replaces the redundant double downcast.
-        let expected_type_id = TypeId::of::<QueryBucket<T, E>>();
-        if bucket.as_any().type_id() != expected_type_id {
+        // M4: single downcast via the shared helper (redundant TypeId
+        // pre-check dropped).
+        let typed = Self::bucket_or_recreate::<T, E>(bucket);
+        typed.sequencer_mut(key).map(|seq| seq.next_request())
+    }
+
+    // ── Erased-bucket recovery helper (M4) ──────────────────────────────
+
+    /// Downcast an erased query bucket to `&mut QueryBucket<T, E>`, recreating
+    /// it in place on the (impossible) type mismatch.
+    ///
+    /// **M4**: this replaces the 5x duplicated `TypeId` pre-check + `eprintln`
+    /// + fresh-bucket + `downcast_mut` match block. `Any::downcast_mut` checks
+    /// `TypeId` internally, so the explicit pre-check was redundant; we now
+    /// downcast once and, only on the (impossible-after-construction) `None`,
+    /// log + swap in a fresh typed bucket and downcast *that* (which always
+    /// succeeds). No production panic.
+    fn bucket_or_recreate<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
+        bucket: &mut Box<dyn ErasedBucket>,
+    ) -> &mut QueryBucket<T, E> {
+        if bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>().is_none() {
             eprintln!(
                 "QueryClient: type mismatch in bucket downcast for {}. \
                  Replacing with a fresh bucket.",
                 std::any::type_name::<(T, E)>()
             );
             *bucket = Box::new(QueryBucket::<T, E>::new());
+            debug_assert!(
+                bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>().is_some(),
+                "QueryBucket downcast failed after fresh reconstruction"
+            );
         }
-        // Audit fix #29: replace `.expect()` with a safe match. Returns `None`
-        // if (impossibly) the downcast fails after the TypeId verification.
-        match bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>() {
-            Some(typed) => typed.sequencer_mut(key).map(|seq| seq.next_request()),
-            None => {
-                debug_assert!(
-                    false,
-                    "QueryBucket downcast failed after TypeId verification"
-                );
-                None
-            }
-        }
+        // Unwrap is infallible here: either the original downcast succeeded,
+        // or we just replaced `*bucket` with a freshly-constructed typed one.
+        bucket
+            .as_any_mut()
+            .downcast_mut::<QueryBucket<T, E>>()
+            .expect("QueryBucket downcast succeeds after bucket_or_recreate")
     }
 
     // ── Data accessors (Audit 3, Finding 6) ─────────────────────────────

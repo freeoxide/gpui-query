@@ -3,6 +3,7 @@
 use crate::core::*;
 use crate::tests::core_cache::*;
 use crate::tests::test_support::*;
+use std::num::NonZero;
 
 // ══════════════════════════════════════════════════════════════════════════
 // CACHE INTERACTIONS WITH REQUEST POLICIES
@@ -94,7 +95,7 @@ fn record_cache_hit_transitions_to_success() {
     let mut r = ttl_resource();
     seed_data(&mut r, "data", STORED_AT_MS);
     assert_eq!(r.status(), QueryStatus::Success);
-    r.begin_loading(RequestId::scoped(1, 1), STORED_AT_MS + 100);
+    r.begin_loading(RequestId::scoped(NonZero::new(1).unwrap(), 1), STORED_AT_MS + 100);
     assert_eq!(r.status(), QueryStatus::LoadingWithData);
     r.record_cache_hit();
     assert_eq!(r.status(), QueryStatus::Success);

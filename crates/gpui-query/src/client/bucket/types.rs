@@ -37,7 +37,25 @@ pub(crate) const SUCCESS_GC_MULTIPLIER: u32 = 2;
 ///
 /// GC reads entity state directly via `entity.read(cx)` (CL2/#106 fix) rather
 /// than trusting a cached snapshot, so no status snapshot is stored here.
+///
+/// # M2 eviction mirror
+///
+/// `last_updated_ms` and `loading` are a *mirror* of the entity's live
+/// `last_updated_at_ms()` / `is_loading()` state, refreshed wherever the
+/// bucket already reads the entity (zero extra reads). `evict_oldest` scans
+/// these cheap fields + `WeakEntity::upgrade` liveness — with **one**
+/// `entity.read` on the winning entry to confirm `!is_loading()` (guards audit
+/// #109 against a stale mirror where a fetch began after the last refresh) and
+/// read the authoritative timestamp — turning the previous O(n) entity reads
+/// into O(1) typical.
 pub(crate) struct BucketEntry<T, E> {
     pub entity: WeakEntity<QueryResource<T, E>>,
     pub sequencer: RequestSequencer,
+    /// Mirror of `QueryResource::last_updated_at_ms()`. `None` until first
+    /// refresh after a terminal completion (or for a freshly-created Idle
+    /// resource that has never completed).
+    pub(crate) last_updated_ms: Option<u64>,
+    /// Mirror of `QueryResource::is_loading()`. `false` until a fetch is
+    /// observed to start; refreshed on every bucket read of the entity.
+    pub(crate) loading: bool,
 }

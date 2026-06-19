@@ -161,9 +161,19 @@ macro_rules! impl_query_options_builders {
 impl QueryOptions {
     /// Create options with just a key.
     pub fn new(key: impl Into<crate::core::QueryKey>) -> Self {
+        // Construct directly to avoid Default::default() allocating a default
+        // key that is immediately overwritten (audit H4).
         Self {
             key: key.into(),
-            ..Default::default()
+            cache_policy: CachePolicy::default(),
+            request_policy: RequestPolicy::default(),
+            retry_policy: RetryPolicy::default(),
+            gc_time_ms: 300_000,
+            keep_previous_data: false,
+            force_fetch: false,
+            refetch_on_mount: RefetchTrigger::default(),
+            refetch_on_window_focus: RefetchTrigger::default(),
+            refetch_on_reconnect: RefetchTrigger::default(),
         }
     }
 
@@ -283,8 +293,10 @@ pub type MutationSettledCallback<T, E> =
 
 /// Lifecycle callbacks for mutations.
 ///
-/// Not `Clone` because trait-object callbacks cannot be cloned.
-/// Construct with `MutationCallbacks::new()` and the builder methods.
+/// `Clone` is implemented manually (no `T: Clone` / `E: Clone` bound needed)
+/// because every field is an `Option<Arc<...>>` — cloning bumps the refcount,
+/// it does not clone `T`/`E`. Construct with `MutationCallbacks::new()` and
+/// the builder methods.
 ///
 /// Callbacks are wrapped in `Arc` so they can be shared across concurrent
 /// mutation invocations. `E` should implement `std::fmt::Debug` so that
@@ -296,7 +308,16 @@ pub struct MutationCallbacks<T, E> {
     pub on_error: MutationErrorCallback<E>,
     /// Fired on every terminal outcome (success, failure, or discard).
     pub on_settled: MutationSettledCallback<T, E>,
-    _phantom: std::marker::PhantomData<(T, E)>,
+}
+
+impl<T, E> Clone for MutationCallbacks<T, E> {
+    fn clone(&self) -> Self {
+        Self {
+            on_success: self.on_success.clone(),
+            on_error: self.on_error.clone(),
+            on_settled: self.on_settled.clone(),
+        }
+    }
 }
 
 impl<T, E> Default for MutationCallbacks<T, E> {
@@ -305,7 +326,6 @@ impl<T, E> Default for MutationCallbacks<T, E> {
             on_success: None,
             on_error: None,
             on_settled: None,
-            _phantom: std::marker::PhantomData,
         }
     }
 }
@@ -368,9 +388,15 @@ impl Default for InfiniteQueryOptions {
 impl InfiniteQueryOptions {
     /// Create with just a key.
     pub fn new(key: impl Into<crate::core::QueryKey>) -> Self {
+        // Construct directly to avoid Default::default() allocating a default
+        // key that is immediately overwritten (audit H4).
         Self {
             key: key.into(),
-            ..Default::default()
+            cache_policy: CachePolicy::default(),
+            request_policy: RequestPolicy::default(),
+            max_pages: Some(50),
+            retry_policy: RetryPolicy::default(),
+            gc_time_ms: 300_000,
         }
     }
 

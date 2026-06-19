@@ -27,24 +27,24 @@ use crate::client::devtools::{MutationDiagnostic, QueryDiagnostic};
 /// deliberate silent clamp rather than a propagating error because every
 /// caller treats `now_ms` as infallible and time-sensitive operations
 /// degrading to "collect now" is the safest default under a broken clock.
-pub fn current_time_ms() -> u128 {
+pub fn current_time_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis()
+        .as_millis() as u64
 }
 
 /// Type-erased bucket trait for storage in a homogeneous map.
 pub(crate) trait ErasedBucket {
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-    fn gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &gpui::App);
+    fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &gpui::App);
     fn count(&self) -> usize;
     fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
     fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
     fn remove_matching(&mut self, filter: &QueryKeyFilter);
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
-    fn collect_diagnostics(&self, now_ms: u128, cx: &gpui::App) -> Vec<QueryDiagnostic>;
+    fn collect_diagnostics(&self, now_ms: u64, cx: &gpui::App) -> Vec<QueryDiagnostic>;
     /// Yield only `(key, status)` pairs for live entries without building full
     /// `QueryDiagnostic`s (#9). Used by `dehydrate`, which only needs the key
     /// and status, avoiding the per-entry allocations of `collect_diagnostics`.
@@ -55,13 +55,13 @@ pub(crate) trait ErasedBucket {
 pub(crate) trait ErasedInfiniteBucket {
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-    fn gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &gpui::App);
+    fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &gpui::App);
     fn count(&self) -> usize;
     fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
     fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
     fn remove_matching(&mut self, filter: &QueryKeyFilter);
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
-    fn collect_diagnostics(&self, now_ms: u128, cx: &gpui::App) -> Vec<QueryDiagnostic>;
+    fn collect_diagnostics(&self, now_ms: u64, cx: &gpui::App) -> Vec<QueryDiagnostic>;
     /// Yield only `(key, status)` pairs for live entries without building full
     /// `QueryDiagnostic`s (#9). See [`ErasedBucket::collect_key_status`].
     fn collect_key_status(&self, cx: &gpui::App) -> Vec<(String, QueryStatus)>;
@@ -71,7 +71,7 @@ pub(crate) trait ErasedInfiniteBucket {
 pub(crate) trait ErasedMutationBucket {
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-    fn gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &gpui::App);
+    fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &gpui::App);
     fn count(&self) -> usize;
     fn collect_diagnostics(&self, cx: &gpui::App) -> Vec<MutationDiagnostic>;
     /// Yield only `(key, status)` pairs for live entries without building full

@@ -40,11 +40,11 @@ fn test_gc_with_zero_time_clamped_evicts_idle(cx: &mut TestAppContext) {
 // -- 40. GC uses gc_with_time with deterministic time control ----------------
 //
 // Finding 2 fix: Assert concrete GC outcomes using the documented eviction
-// rules. The bucket's status snapshot is only updated when the hook layer
-// calls update_status_snapshot (not from direct resource mutations), so
-// resources created via client.resource() always appear as Idle with
-// last_updated_ms=None to GC. Idle resources with no timestamp are evicted
-// at any gc_with_time value (age defaults to gc_threshold).
+// rules. GC reads live entity state directly via `entity.read(cx)` (CL2/#106;
+// no cached snapshot), so resources created via client.resource() always
+// appear as Idle with last_updated_ms=None to GC. Idle resources with no
+// timestamp are evicted at any gc_with_time value (age defaults to
+// gc_threshold).
 
 #[gpui::test]
 fn test_gc_with_time_explicit_time_value(cx: &mut TestAppContext) {

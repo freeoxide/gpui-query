@@ -81,8 +81,11 @@ where
     E: Clone + Send + Sync + 'static,
     C: 'static,
 {
+    // Audit H8: move retry_policy out of opts instead of cloning (opts is not
+    // used afterwards).
     let opts = options.into();
-    let entity = cx.new(|_| MutationResource::new(opts.retry_policy.clone()));
+    let retry_policy = opts.retry_policy;
+    let entity = cx.new(|_| MutationResource::new(retry_policy));
 
     // Audit fix #1/#11: Use MutationObserver with status-deduplication instead
     // of raw cx.observe. The observer only calls cx.notify() when MutationStatus
@@ -391,9 +394,11 @@ fn begin_and_spawn<V, T, E, C, F, Fut>(
         }
     });
     // Audit fix #6: store the task so it is aborted on replacement / drop.
-    entity.update(cx, |r, cx| {
+    // Audit H9: no cx.notify() here — set_current_task does not change
+    // MutationStatus (status is already Loading from `begin` above, which
+    // notified), so MutationObserver dedupes this to a no-op anyway.
+    entity.update(cx, |r, _| {
         r.set_current_task(task);
-        cx.notify();
     });
 }
 
@@ -451,8 +456,8 @@ fn begin_and_spawn_by_ref<V, T, E, C, F, Fut>(
         }
     });
     // Audit fix #6: store the task so it is aborted on replacement / drop.
-    entity.update(cx, |r, cx| {
+    // Audit H9: no cx.notify() here — set_current_task does not change status.
+    entity.update(cx, |r, _| {
         r.set_current_task(task);
-        cx.notify();
     });
 }

@@ -97,6 +97,16 @@ impl<T, U> std::fmt::Debug for SelectTransform<T, U> {
     }
 }
 
+impl<T, U> PartialEq for SelectTransform<T, U> {
+    fn eq(&self, other: &Self) -> bool {
+        // Closures have no PartialEq; compare by shared pointer identity,
+        // mirroring QuerySignal's Arc::ptr_eq approach (signal.rs).
+        Arc::ptr_eq(&self.transform, &other.transform)
+    }
+}
+
+impl<T, U> Eq for SelectTransform<T, U> {}
+
 impl<T, U> SelectTransform<T, U> {
     /// Create a new select transform from a closure.
     pub fn new(transform: impl Fn(&T) -> U + Send + Sync + 'static) -> Self {
@@ -131,7 +141,7 @@ impl<T, U> SelectTransform<T, U> {
 /// `MappedQueryResource` (e.g. for derived views) is a cheap `Arc::clone`
 /// rather than a full copy of `T`. `Arc<T>` is `Send + Sync` exactly when `T`
 /// is, so the existing bounds are preserved.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MappedQueryResource<T, U, E> {
     source_data: Option<Arc<T>>,
     transform: SelectTransform<T, U>,

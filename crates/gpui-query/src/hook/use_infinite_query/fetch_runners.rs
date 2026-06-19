@@ -119,12 +119,20 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
                             .await;
                     }
 
-                    // #fix #7: After the retry delay, check whether the signal
-                    // has been cancelled. A cancelled fetch should not retry.
+                    // #fix #7 / Audit H14: After the retry delay, check whether
+                    // the signal has been cancelled AND whether this request is
+                    // still the active one in a single read_entity pass (was two
+                    // sequential reads). A cancelled or superseded fetch should
+                    // not retry.
                     let Some(e) = entity.upgrade() else { return };
-                    let cancelled = read_entity(&e, cx, |r, _| {
-                        r.signal().map(|s| s.is_cancelled()).unwrap_or(false)
-                    }).unwrap_or(true);
+                    let (cancelled, still_current) =
+                        read_entity(&e, cx, |r, _| {
+                            (
+                                r.signal().map(|s| s.is_cancelled()).unwrap_or(false),
+                                r.is_current_request(request_id),
+                            )
+                        })
+                        .unwrap_or((true, false));
                     if cancelled {
                         return;
                     }
@@ -132,9 +140,6 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
                     // Audit fix #73/#118: After the delay, also confirm this
                     // request is still the active one. If a newer fetch has
                     // superseded it, bail out instead of retrying a stale op.
-                    let still_current = read_entity(&e, cx, |r, _| {
-                        r.is_current_request(request_id)
-                    }).unwrap_or(false);
                     if !still_current {
                         return;
                     }

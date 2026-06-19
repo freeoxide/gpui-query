@@ -1,8 +1,7 @@
 //! Concurrency / two-phase completion protocol tests.
 //!
 //! Verify that the two-phase completion protocol maintains invariants even when
-//! requests are interleaved. Also covers signal, display_data, initial_data,
-//! and is_data_stale tests.
+//! requests are interleaved. Also covers signal and is_data_stale tests.
 
 use crate::core::*;
 use crate::tests::test_support::*;
@@ -133,44 +132,6 @@ fn signal_cancelled_on_reset() {
     r.reset();
     assert!(signal.is_cancelled(), "signal should be cancelled on reset");
     assert!(r.signal().is_none(), "no signal after reset");
-}
-
-#[test]
-fn display_data_falls_back_to_placeholder() {
-    let mut r = fresh_resource();
-    assert!(r.display_data().is_none());
-
-    r.set_placeholder_data(Some("placeholder"));
-    assert_eq!(r.display_data(), Some(&"placeholder"));
-
-    // When data is present, data takes priority.
-    let mut s = test_sequencer();
-    let rid = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
-    r.complete_current_success(rid, "real_data", 200);
-    assert_eq!(r.display_data(), Some(&"real_data"), "data takes priority over placeholder");
-}
-
-#[test]
-fn initial_data_seeded_when_idle() {
-    let mut r = fresh_resource();
-    r.set_initial_data("seeded", 500);
-    assert_eq!(r.data(), Some(&"seeded"), "initial data should populate data");
-    assert_eq!(r.last_updated_at_ms(), Some(500));
-    assert!(r.initial_data().is_some());
-
-    // Seeding again while not Idle+None should be a no-op.
-    r.set_initial_data("ignored", 600);
-    assert_eq!(r.data(), Some(&"seeded"), "second seed should be ignored");
-}
-
-#[test]
-fn initial_data_cleared_on_reset() {
-    let mut r = fresh_resource();
-    r.set_initial_data("seeded", 500);
-    assert!(r.initial_data().is_some());
-    r.reset();
-    assert!(r.initial_data().is_none(), "initial_data cleared on reset");
-    assert!(r.data().is_none(), "data cleared on reset");
 }
 
 #[test]

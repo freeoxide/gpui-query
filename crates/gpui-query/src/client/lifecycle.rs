@@ -37,7 +37,13 @@ impl QueryClient {
     /// Use this when you call GC frequently and want to amortize the cost of
     /// `SystemTime::now()` across multiple calls. The `now_ms` parameter should
     /// be milliseconds since the UNIX epoch (as returned by [`current_time_ms`]).
-    pub fn gc_with_time(&mut self, now_ms: u128, cx: &App) {
+    ///
+    /// **L5**: sets `self.last_gc_ms = now_ms` at the top so a *manual* GC call
+    /// debounces the next opportunistic GC sweep (otherwise the caller's
+    /// explicit `gc()` would not push back the `MIN_GC_TIME_MS` window and the
+    /// next op could immediately re-trigger GC).
+    pub fn gc_with_time(&mut self, now_ms: u64, cx: &App) {
+        self.last_gc_ms = now_ms;
         for bucket in self.buckets.values_mut() {
             bucket.gc(now_ms, self.gc_time_ms, cx);
         }
@@ -73,21 +79,33 @@ impl QueryClient {
     /// diagnostics via `collect_diagnostics` on each erased bucket.
     pub fn diagnostics(&self, cx: &App) -> ClientDiagnostic {
         let now_ms = current_time_ms();
-        let mut queries = Vec::new();
-        let mut mutations = Vec::new();
+        // L1: pre-size the diagnostic Vecs from the bucket `count()` sums so
+        // `collect_diagnostics` (which allocates a Vec per bucket and then
+        // `extend`s) does not repeatedly reallocate the destination Vec as it
+        // grows. `count()` is `entries.len()` — exact for live entries, an
+        // upper bound for the diagnostics (dead entries are skipped), so this
+        // never under-allocates.
         let mut query_count = 0;
         let mut mutation_count = 0;
-
         for bucket in self.buckets.values() {
             query_count += bucket.count();
-            queries.extend(bucket.collect_diagnostics(now_ms, cx));
         }
         for bucket in self.infinite_buckets.values() {
             query_count += bucket.count();
-            queries.extend(bucket.collect_diagnostics(now_ms, cx));
         }
         for bucket in self.mutation_buckets.values() {
             mutation_count += bucket.count();
+        }
+        let mut queries = Vec::with_capacity(query_count);
+        let mut mutations = Vec::with_capacity(mutation_count);
+
+        for bucket in self.buckets.values() {
+            queries.extend(bucket.collect_diagnostics(now_ms, cx));
+        }
+        for bucket in self.infinite_buckets.values() {
+            queries.extend(bucket.collect_diagnostics(now_ms, cx));
+        }
+        for bucket in self.mutation_buckets.values() {
             mutations.extend(bucket.collect_diagnostics(cx));
         }
 
@@ -115,7 +133,15 @@ impl QueryClient {
     /// data and serialize it externally. The `DehydratedState` provides
     /// the metadata (keys, type IDs) needed for typed restoration.
     pub fn dehydrate(&self, cx: &App) -> DehydratedState {
-        let mut entries = Vec::new();
+        // L2: pre-size the entries Vec from the bucket `count()` sums. Only
+        // `Success` entries are pushed, so this is an upper bound — never
+        // under-allocates, avoids reallocation churn as entries accumulate.
+        // (The three maps hold different erased trait objects, so they are
+        // summed separately rather than chained.)
+        let cap = self.buckets.values().map(|b| b.count()).sum::<usize>()
+            + self.infinite_buckets.values().map(|b| b.count()).sum::<usize>()
+            + self.mutation_buckets.values().map(|b| b.count()).sum::<usize>();
+        let mut entries = Vec::with_capacity(cap);
 
         // Audit fix #94: collapse the three near-duplicate loops into a single
         // helper closure. Each loop previously iterated full `QueryDiagnostic`/
@@ -205,7 +231,12 @@ impl QueryClient {
     /// the persister, callers must iterate and restore typed data themselves
     /// using `set_query_data`. This method loads the raw entries and returns
     /// them for inspection and typed restoration.
-    pub fn restore(&self, persister: &dyn QueryPersister) -> Vec<DehydratedEntry> {
+    ///
+    /// **L4**: this is an *associated* function rather than a method — it does
+    /// not read any `&self` state, so callers invoke it as
+    /// `QueryClient::restore(&persister)` instead of `client.restore(...)`,
+    /// avoiding the need for a borrow on the client.
+    pub fn restore(persister: &dyn QueryPersister) -> Vec<DehydratedEntry> {
         persister.load()
     }
 
@@ -261,35 +292,22 @@ impl QueryClient {
         // Get or create a request ID via the bucket's sequencer
         let request_id = self.next_request_id_for_key::<T, E>(&key);
 
-        // Begin the request on the resource. Audit fix #16: the previous code
-        // captured the `started` boolean from this closure but then discarded
-        // it via a no-op `.then(|| false).unwrap_or(false)` chain, so it always
-        // read `false`. We now capture `started` directly (mirroring
-        // `prepare_prefetch_query`) so callers can distinguish a started fetch
-        // from a cache-hit / ignored-while-loading result.
-        let started = entity.update(cx, |resource, _| {
+        // Begin the request on the resource purely for its side effect.
+        // **L7**: the previous code captured a `started` boolean from
+        // `begin_request_with_id`, matched it exhaustively, and then discarded
+        // it via `let _ = started;` — `prepare_fetch_query` (force mode)
+        // always returns a `PreparedFetch` regardless, so the value was
+        // useless. We now call `begin_request_with_id` for its side effect
+        // only, dropping the dead match + binding.
+        entity.update(cx, |resource, _| {
             if let Some(rid) = request_id {
-                let result = resource.begin_request_with_id(
+                let _ = resource.begin_request_with_id(
                     Some(rid),
                     now_ms,
                     crate::core::QueryFetchMode::Force,
                 );
-                match result {
-                    crate::core::QueryBeginResult::Started { .. }
-                    | crate::core::QueryBeginResult::StaleCacheHit { .. } => true,
-                    crate::core::QueryBeginResult::CacheHit => false,
-                    crate::core::QueryBeginResult::IgnoredWhileLoading { .. } => false,
-                }
-            } else {
-                false
             }
         });
-
-        // Suppress unused-warning while preserving the captured value for
-        // symmetry with `prepare_prefetch_query`. `prepare_fetch_query`
-        // (force mode) always returns a `PreparedFetch` regardless of `started`
-        // — the caller drives the fetch — so the value is informational here.
-        let _ = started;
 
         // Re-read to get the signal and request ID
         let (request_id, signal) = entity.read_with(cx, |resource, _| {
@@ -302,6 +320,7 @@ impl QueryClient {
             entity,
             request_id,
             signal,
+            now_ms,
         })
     }
 
@@ -377,6 +396,7 @@ impl QueryClient {
             entity,
             request_id,
             signal,
+            now_ms,
         })
     }
 }

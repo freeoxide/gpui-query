@@ -23,7 +23,7 @@ fn key_empty_string_segment_distinguishes_from_multi() {
 fn key_single_empty_segment_properties() {
     let key = QueryKey::from([""]);
     assert_eq!(key.parts().len(), 1);
-    assert_eq!(key.as_str(), "");
+    assert_eq!(key.first_segment(), "");
     assert_eq!(key.to_path(), "");
     assert_eq!(key.as_single(), Some(""));
 }

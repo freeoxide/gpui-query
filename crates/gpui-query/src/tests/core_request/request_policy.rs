@@ -9,6 +9,7 @@ use crate::core::{
     CachePolicy, QueryBeginResult, QueryFetchMode, QueryResource, QuerySignal, QueryStatus,
     RequestId, RequestPolicy,
 };
+use std::num::NonZero;
 use crate::tests::test_support::{
     assert_status, begin_request_id, test_resource_with_policies, test_sequencer, TEST_NOW_MS,
 };
@@ -147,7 +148,7 @@ fn each_request_gets_a_fresh_signal() {
 
     // Complete request 1 — completion does not clear the signal;
     // it remains until replaced by the next begin_loading call.
-    let id_1 = RequestId::scoped(1, 1);
+    let id_1 = RequestId::scoped(NonZero::new(1).unwrap(), 1);
     resource.complete_current_success(id_1, "result", TEST_NOW_MS);
 
     // Request 2 — begin_loading cancels the old signal and creates a new one
@@ -198,7 +199,7 @@ fn request_id_from_different_scope_is_rejected() {
     let active_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     // Manually craft a request id in a different scope
-    let fake_id = RequestId::scoped(999, 1);
+    let fake_id = RequestId::scoped(NonZero::new(999).unwrap(), 1);
     let result = resource.accept_current_request(fake_id);
     assert!(
         result.is_none(),

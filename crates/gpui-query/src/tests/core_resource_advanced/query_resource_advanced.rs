@@ -13,6 +13,7 @@
 
 use crate::core::*;
 use crate::tests::test_support::*;
+use std::num::NonZero;
 
 // ── QueryResource: Error recovery paths ────────────────────────────────────
 
@@ -173,10 +174,9 @@ fn serde_roundtrip_with_data_and_error_state() {
 
     assert_eq!(back.status(), QueryStatus::Success);
     assert_eq!(back.data(), Some(&"hello".to_string()));
-    assert_eq!(back.key().as_str(), "serde-test");
+    assert_eq!(back.key().first_segment(), "serde-test");
     assert_eq!(back.cache_policy(), CachePolicy::Ttl { ttl_ms: 5_000 });
     assert!(back.signal().is_none(), "signal is #[serde(skip)]");
-    assert!(back.initial_data().is_none(), "initial_data is #[serde(skip)]");
 }
 
 // ── QueryResource: mark_ignored_result ────────────────────────────────────
@@ -256,12 +256,12 @@ fn begin_request_with_id_respects_ignore_while_loading() {
         CachePolicy::NoCache,
         RequestPolicy::IgnoreWhileLoading,
     );
-    let custom_id = RequestId::scoped(10, 1);
+    let custom_id = RequestId::scoped(NonZero::new(10).unwrap(), 1);
     let _ = r.begin_request_with_id(Some(custom_id), 100, QueryFetchMode::Normal);
     assert_eq!(r.active_request_id(), Some(custom_id));
 
     // Second request should be ignored
-    let result = r.begin_request_with_id(Some(RequestId::scoped(10, 2)), 200, QueryFetchMode::Normal);
+    let result = r.begin_request_with_id(Some(RequestId::scoped(NonZero::new(10).unwrap(), 2)), 200, QueryFetchMode::Normal);
     match result {
         QueryBeginResult::IgnoredWhileLoading { active_request_id } => {
             assert_eq!(active_request_id, custom_id);

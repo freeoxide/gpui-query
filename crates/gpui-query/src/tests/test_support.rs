@@ -6,8 +6,7 @@
 //! - Core resource constructors: [`test_resource`], [`test_resource_with_policies`],
 //!   [`resource_with_sequencer`]
 //! - Assertion helpers: [`assert_status`], [`begin_request_id`]
-//! - Cache/mutation option factories: [`no_cache_options`], [`ttl_zero_options`],
-//!   [`no_retry_mutation_options`]
+//! - Cache/mutation option factories: [`no_retry_mutation_options`]
 //! - Async test helpers: [`Gate`], [`run_until_parked_and_read`],
 //!   [`observe_with_dummy_view`], [`DummyView`]
 //!
@@ -30,9 +29,10 @@ use std::time::Duration;
 
 use gpui::{App, AppContext as _, BackgroundExecutor, Entity, TestAppContext};
 
+#[cfg(feature = "client")]
 use crate::client::QueryClient;
 #[cfg(feature = "hook")]
-use crate::hook::{MutationOptions, QueryOptions};
+use crate::hook::MutationOptions;
 use crate::core::{
     CachePolicy, QueryBeginResult, QueryFetchMode, QueryKey, QueryResource, QueryStatus,
     RequestId, RequestPolicy, RequestSequencer,
@@ -47,6 +47,7 @@ use crate::core::{
 /// `cx.update_global::<QueryClient, _>(…)` are available.
 ///
 /// [`setup_test`] is the preferred shorter alias for this helper.
+#[cfg(feature = "client")]
 pub fn setup_query_client(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_global(QueryClient::new());
@@ -58,11 +59,13 @@ pub fn setup_query_client(cx: &mut TestAppContext) {
 ///
 /// Tests that need custom policies should use [`setup_query_client_with_policies`]
 /// or [`setup_query_client_with_gc`] instead.
+#[cfg(feature = "client")]
 pub fn setup_test(cx: &mut TestAppContext) {
     setup_query_client(cx);
 }
 
 /// Install a [`QueryClient`] with custom policies as a [`Global`].
+#[cfg(feature = "client")]
 pub fn setup_query_client_with_policies(
     cx: &mut TestAppContext,
     cache_policy: CachePolicy,
@@ -74,6 +77,7 @@ pub fn setup_query_client_with_policies(
 }
 
 /// Install a [`QueryClient`] with a custom GC time.
+#[cfg(feature = "client")]
 pub fn setup_query_client_with_gc(cx: &mut TestAppContext, gc_time_ms: u64) {
     cx.update(|cx| {
         cx.set_global(QueryClient::new().with_gc_time(gc_time_ms));
@@ -167,7 +171,7 @@ pub fn fresh_resource() -> QueryResource<&'static str> {
 pub fn begin_request_id(
     r: &mut QueryResource<impl Clone, impl Clone>,
     seq: &mut RequestSequencer,
-    now_ms: u128,
+    now_ms: u64,
     mode: QueryFetchMode,
 ) -> RequestId {
     match r.begin_request(seq, now_ms, mode) {
@@ -194,34 +198,12 @@ pub fn complete_success_id<T, E>(
     r: &mut QueryResource<T, E>,
     request_id: RequestId,
     data: T,
-    now_ms: u128,
+    now_ms: u64,
 ) -> bool {
     r.complete_current_success(request_id, data, now_ms)
 }
 
 // ── Cache/mutation option factories ────────────────────────────────────
-
-/// Build [`QueryOptions`] for a key with [`CachePolicy::NoCache`].
-///
-/// Equivalent to `QueryOptions::new(key).cache_policy(CachePolicy::NoCache)`.
-/// Every `begin_request` on the resulting resource will return `Started`
-/// (never `CacheHit`), so each `use_query`/`fetch_query` triggers a new fetch.
-#[cfg(feature = "hook")]
-pub fn no_cache_options(key: impl Into<QueryKey>) -> QueryOptions {
-    QueryOptions::new(key).cache_policy(CachePolicy::NoCache)
-}
-
-/// Build [`QueryOptions`] for a key with `CachePolicy::Ttl { ttl_ms: 0 }`.
-///
-/// Equivalent to `QueryOptions::new(key).cache_policy(CachePolicy::Ttl { ttl_ms: 0 })`.
-/// With TTL=0, data is fresh only at age=0, so any subsequent `begin_request`
-/// at a later timestamp triggers a new fetch — useful for tests that want
-/// `can_short_circuit()` to be true (unlike `NoCache`) but still want every
-/// fetch to run.
-#[cfg(feature = "hook")]
-pub fn ttl_zero_options(key: impl Into<QueryKey>) -> QueryOptions {
-    QueryOptions::new(key).cache_policy(CachePolicy::Ttl { ttl_ms: 0 })
-}
 
 /// Build [`MutationOptions`] with `RetryPolicy::no_retries()` and the
 /// standard test GC time (`gc_time_ms: 300_000`).
@@ -252,7 +234,7 @@ pub fn no_retry_mutation_options() -> MutationOptions {
 /// time, and pairs with [`observe_with_dummy_view`] for the
 /// create-view-then-observe dance.
 #[derive(Default)]
-pub struct DummyView;
+pub(crate) struct DummyView;
 
 /// Create a `DummyView` entity, then run `observer.observe(cx)` inside a
 /// view-scoped update. Returns the [`gpui::Subscription`] (or `None` if the
@@ -264,6 +246,7 @@ pub struct DummyView;
 /// let view = cx.new(|_| DummyView);
 /// let sub = view.update(cx, |_view, cx| observer.observe(cx));
 /// ```
+#[cfg(feature = "client")]
 pub fn observe_with_dummy_view<T, E>(
     cx: &mut App,
     observer: &mut crate::client::QueryObserver<T, E>,
@@ -425,15 +408,27 @@ impl User {
     }
 }
 
-/// A simple post struct for integration tests.
+/// A simple post type tag for integration tests. Only used as a type
+/// parameter (`client.resource::<Post, _>`), never constructed with data.
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct Post {
-    pub id: u32,
-    pub title: String,
-}
+pub struct Post;
 
 // ── Time helpers ───────────────────────────────────────────────────────
 
 /// A fixed "now" timestamp for deterministic cache tests (ms since UNIX epoch).
 // Audit fix #123: removed `#[allow(dead_code)]` — used by request_policy/lifecycle tests.
-pub const TEST_NOW_MS: u128 = 1_000_000;
+pub const TEST_NOW_MS: u64 = 1_000_000;
+
+/// Assert that every value in `cases` survives a JSON serialize -> deserialize
+/// roundtrip unchanged. Shared helper for the serde-roundtrip tests (extends
+/// audit #129).
+pub fn assert_serde_roundtrip<T>(cases: &[T])
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug,
+{
+    for value in cases {
+        let json = serde_json::to_string(value).expect("serialize");
+        let back: T = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(&back, value, "serde roundtrip changed value (json={})", json);
+    }
+}

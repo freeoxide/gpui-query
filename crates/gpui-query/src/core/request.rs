@@ -32,6 +32,7 @@
 //! [`QueryResource`]: super::QueryResource
 
 use serde::{Deserialize, Serialize};
+use std::num::NonZero;
 
 /// A unique identifier for an in-flight request.
 ///
@@ -43,22 +44,26 @@ use serde::{Deserialize, Serialize};
 ///
 /// ```
 /// use gpui_query::core::RequestId;
+/// use std::num::NonZero;
 ///
-/// let id = RequestId::scoped(1, 42);
-/// assert_eq!(id.scope_id(), 1);
+/// let id = RequestId::scoped(NonZero::new(1).unwrap(), 42);
+/// assert_eq!(id.scope_id(), NonZero::new(1).unwrap());
 /// assert_eq!(id.value(), 42);
 /// assert_eq!(id.label(), "1:42");
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[must_use]
 pub struct RequestId {
-    scope_id: u64,
+    scope_id: NonZero<u64>,
     sequence: u64,
 }
 
 impl RequestId {
     /// Create a request id with explicit scope and sequence.
-    pub fn scoped(scope_id: u64, sequence: u64) -> Self {
+    ///
+    /// The scope must be non-zero; passing a zero scope would violate the
+    /// `NonZero<u64>` niche invariant, so it is taken as `NonZero<u64>` directly.
+    pub fn scoped(scope_id: NonZero<u64>, sequence: u64) -> Self {
         Self { scope_id, sequence }
     }
 
@@ -68,7 +73,9 @@ impl RequestId {
     }
 
     /// The scope identifier.
-    pub fn scope_id(self) -> u64 {
+    ///
+    /// Returns the scope as `NonZero<u64>`. Use `.get()` if a plain `u64` is needed.
+    pub fn scope_id(self) -> NonZero<u64> {
         self.scope_id
     }
 
@@ -116,7 +123,7 @@ impl std::fmt::Display for RequestId {
 /// collision risk remains theoretical but documented here for completeness.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestSequencer {
-    pub(crate) scope_id: u64,
+    pub(crate) scope_id: NonZero<u64>,
     pub(crate) next_request_id: u64,
 }
 
@@ -130,7 +137,7 @@ impl RequestSequencer {
     /// Create a new sequencer starting at scope 1, sequence 1.
     pub fn new() -> Self {
         Self {
-            scope_id: 1,
+            scope_id: NonZero::new(1).unwrap(),
             next_request_id: 1,
         }
     }
@@ -156,7 +163,8 @@ impl RequestSequencer {
     /// overflows (astronomically unlikely), it wraps to 1 and the sequence
     /// resets, as documented on the struct.
     pub fn advance_scope(&mut self) {
-        self.scope_id = self.scope_id.checked_add(1).unwrap_or(1);
+        self.scope_id = NonZero::new(self.scope_id.get().checked_add(1).unwrap_or(1))
+            .unwrap_or(NonZero::new(1).unwrap());
         self.next_request_id = 1;
     }
 
@@ -172,27 +180,27 @@ impl RequestSequencer {
 /// recording when data was last updated. Obtain the current time via
 /// `QueryTimestamp::from_millis(...)` using your application's clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct QueryTimestamp(u128);
+pub struct QueryTimestamp(u64);
 
 impl QueryTimestamp {
     /// Create a timestamp from milliseconds.
-    pub fn from_millis(value: u128) -> Self {
+    pub fn from_millis(value: u64) -> Self {
         Self(value)
     }
 
     /// The timestamp in milliseconds.
-    pub fn as_millis(self) -> u128 {
+    pub fn as_millis(self) -> u64 {
         self.0
     }
 
     /// Compute elapsed time since an earlier timestamp.
-    pub(super) fn elapsed_since(self, earlier: Self) -> Option<u128> {
+    pub(super) fn elapsed_since(self, earlier: Self) -> Option<u64> {
         self.0.checked_sub(earlier.0)
     }
 }
 
-impl From<u128> for QueryTimestamp {
-    fn from(value: u128) -> Self {
+impl From<u64> for QueryTimestamp {
+    fn from(value: u64) -> Self {
         Self::from_millis(value)
     }
 }

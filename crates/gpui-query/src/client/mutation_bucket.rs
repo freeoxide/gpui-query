@@ -37,7 +37,6 @@ use crate::core::{MutationResource, MutationStatus};
 
 use super::bucket::types::{DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
 use super::devtools::MutationDiagnostic;
-use super::erased::current_time_ms;
 use super::ErasedMutationBucket;
 
 // (Audit #75: `DEFAULT_MUTATION_GC_TIME_MS` was dead code — never referenced
@@ -52,10 +51,18 @@ use super::ErasedMutationBucket;
 /// if the entity was already collected, the entry is treated as dead and
 /// cleaned up by GC.
 ///
-/// (The `loading` flag was previously maintained via hook-side `set_loading`/
-/// `set_not_loading` calls; those were removed as dead code in audit #75. The
-/// flag now stays `false` and the primary loading check in `gc` reads live
-/// entity state via `entity.read(cx).is_loading()`.)
+/// # M2 eviction mirror (supersedes M1)
+///
+/// `loading` is no longer the dead always-`false` field from M1 — it is now a
+/// *real mirror* of `MutationResource::is_loading()`, and `last_updated_ms`
+/// mirrors `MutationResource::last_updated_at_ms()` (the terminal-completion
+/// time). Both are refreshed wherever the bucket already reads the entity
+/// (zero extra reads). `evict_oldest` scans the mirrors + `WeakEntity::upgrade`
+/// liveness with **one** `entity.read` on the winner to confirm `!is_loading()`
+/// (guards #109 against a stale mirror), turning O(n) entity reads into O(1).
+///
+/// `updated_at` remains the insertion timestamp (fallback recency for a
+/// mutation that has never completed — audit #112).
 struct MutationEntry<V, T, E> {
     entity: WeakEntity<MutationResource<V, T, E>>,
     /// Monotonic millisecond timestamp recorded at insertion.
@@ -64,12 +71,12 @@ struct MutationEntry<V, T, E> {
     /// (terminal-completion time) over this insertion time when measuring
     /// recency (audit #112); this value is the fallback used for mutations that
     /// have never completed (Idle / in-flight).
-    updated_at: u128,
-    /// Whether the mutation is currently in-flight (Loading state).
-    ///
-    /// Retained as a secondary GC guard (read in `gc`). With `set_loading`/
-    /// `set_not_loading` removed as dead code (#75) it stays `false` in
-    /// practice; the primary loading check reads `entity.read(cx).is_loading()`.
+    updated_at: u64,
+    /// Mirror of `MutationResource::last_updated_at_ms()` (completion time).
+    /// `None` until first refresh after a terminal completion.
+    last_updated_ms: Option<u64>,
+    /// Mirror of `MutationResource::is_loading()`. Refreshed on every bucket
+    /// read of the entity; read by `evict_oldest`'s mirror scan and by `gc`.
     loading: bool,
 }
 
@@ -101,39 +108,73 @@ impl<
 
     /// Evict the oldest (least-recently-updated) entry to make room for a new one.
     ///
-    /// Called when `insert` would exceed `max_entries`. Selects the entry with
-    /// the smallest `updated_at` whose entity is **not** currently loading
-    /// (upgrade the weak entity, call `entity.read(cx).is_loading()` and skip
-    /// if loading), mirroring `QueryBucket::evict_oldest`. The chosen id is
-    /// captured once before removal.
+    /// **M2 (O(n)→O(1) entity reads)**: scans entry MIRRORS (no `entity.read`)
+    /// + `WeakEntity::upgrade` liveness, picking the entry with the smallest
+    /// mirrored recency — preferring the completion-time mirror
+    /// (`last_updated_ms`) and falling back to the insertion time
+    /// (`updated_at`) for never-completed mutations (audit #112). Then **one**
+    /// `entity.read` on the winner to confirm `!is_loading()` (guards #109
+    /// against a stale mirror) before removal. Mirrors
+    /// [`QueryBucket::evict_oldest`](super::QueryBucket::evict_oldest).
     ///
     /// **Audit fix #2**.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
-        let target = self
-            .resources
-            .iter()
-            .filter_map(|(id, entry)| {
-                let entity = entry.entity.upgrade()?;
-                let resource = entity.read(cx);
-                if resource.is_loading() {
-                    return None;
-                }
-                Some((*id, entry.updated_at))
-            })
-            .min_by_key(|&(_, updated_at)| updated_at);
+        loop {
+            let target = self
+                .resources
+                .iter()
+                .filter_map(|(id, entry)| {
+                    if entry.loading {
+                        return None;
+                    }
+                    if entry.entity.upgrade().is_none() {
+                        return None;
+                    }
+                    // Prefer completion-time mirror; fall back to insertion
+                    // time for never-completed mutations (audit #112).
+                    let age = entry.last_updated_ms.unwrap_or(entry.updated_at);
+                    Some((*id, age))
+                })
+                .min_by_key(|&(_, age)| age);
 
-        if let Some((id, _)) = target {
-            self.resources.remove(&id);
+            let Some((id, _)) = target else {
+                return;
+            };
+
+            let still_loading = self
+                .resources
+                .get(&id)
+                .and_then(|e| e.entity.upgrade())
+                .map(|entity| entity.read(cx).is_loading());
+
+            match still_loading {
+                Some(true) => {
+                    // Stale mirror: a mutation began after the last refresh.
+                    // Mark and re-pick so #109 is honored.
+                    if let Some(entry) = self.resources.get_mut(&id) {
+                        entry.loading = true;
+                    }
+                    continue;
+                }
+                _ => {
+                    self.resources.remove(&id);
+                    return;
+                }
+            }
         }
     }
 
-    /// Insert a mutation entity, recording the current time as `updated_at`.
+    /// Insert a mutation entity, recording `now_ms` as `updated_at`.
     ///
     /// Returns the generated numeric id for the entry.
     ///
     /// When the bucket is at capacity, the oldest non-loading entry is evicted
     /// first (#2). **Audit fix #114**: the `cx` param (previously unused
     /// `_cx`) is now passed to `evict_oldest`.
+    ///
+    /// **M6**: `now_ms` is threaded in from the caller (which already cached
+    /// it for `maybe_opportunistic_gc`) instead of re-syscalling
+    /// `current_time_ms()` here.
     ///
     /// **Audit fix #3**: Uses `checked_add` on `next_id` to prevent wraparound
     /// after `u64::MAX` insertions. If the counter overflows, the method
@@ -142,6 +183,7 @@ impl<
     pub(crate) fn insert(
         &mut self,
         entity: &gpui::Entity<MutationResource<V, T, E>>,
+        now_ms: u64,
         cx: &App,
     ) -> u64 {
         if self.resources.len() >= self.max_entries {
@@ -164,7 +206,8 @@ impl<
             id,
             MutationEntry {
                 entity: entity.downgrade(),
-                updated_at: current_time_ms(),
+                updated_at: now_ms,
+                last_updated_ms: None,
                 loading: false,
             },
         );
@@ -238,16 +281,19 @@ impl<
     ///    status (`Idle`/`Failure`/`Success`), and the age exceeds the
     ///    threshold for that status (`gc_threshold` for Idle/Failure,
     ///    `SUCCESS_GC_MULTIPLIER * gc_threshold` for Success).
-    fn gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &App) {
+    fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_time_ms = gc_time_ms.max(MIN_GC_TIME_MS);
-        let gc_threshold = gc_time_ms as u128;
-        let success_threshold = gc_threshold * (SUCCESS_GC_MULTIPLIER as u128);
+        let gc_threshold = gc_time_ms;
+        let success_threshold = gc_threshold * (SUCCESS_GC_MULTIPLIER as u64);
 
         self.resources.retain(|_id, entry| {
-            // Audit fix (finding 2): Never evict entries flagged as loading.
-            // A dead entry with loading=true means the mutation is in-flight
-            // but the weak ref couldn't upgrade — keep it for one more GC
-            // cycle as a safety measure.
+            // M2: refresh the eviction mirror from this read (gc walks every
+            // entry anyway, so this is the canonical refresh point). The
+            // mirror's `loading` is now authoritative, so the separate
+            // dead-entry `loading` safety guard below stays as a cheap
+            // pre-check that avoids an `upgrade` when the mirror already says
+            // loading (a dead entry with loading=true means a mutation is
+            // in-flight but the weak ref couldn't upgrade — keep it one cycle).
             if entry.loading {
                 return true;
             }
@@ -257,6 +303,8 @@ impl<
             let Some(entity) = entry.entity.upgrade() else { return false };
 
             let resource = entity.read(cx);
+            entry.last_updated_ms = resource.last_updated_at_ms();
+            entry.loading = resource.is_loading();
 
             // Audit fix (finding 4): Never evict resources that are actively
             // loading, even if the entry flag disagrees.

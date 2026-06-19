@@ -415,7 +415,7 @@ fn test_persist_and_restore_cycle(cx: &mut TestAppContext) {
             client.persist(&persister, cx);
 
             // Restore
-            let loaded = client.restore(&persister);
+            let loaded = QueryClient::restore(&persister);
             assert_eq!(loaded.len(), 1, "should have one persisted entry");
             assert_eq!(loaded[0].key, "persist_me");
         });

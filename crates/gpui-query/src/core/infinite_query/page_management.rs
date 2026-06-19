@@ -96,9 +96,10 @@ impl<T, E> InfiniteQueryResource<T, E> {
                 // that survive are the first `max` (indices `0..max`), so drain
                 // from `max..`. The previous `start = len - max` formula drained
                 // `max` pages from the middle/back and left too few behind.
-                let mut evicted: Vec<Arc<T>> = self.pages.drain(max..).collect();
-                evicted.reverse();
-                return evicted;
+                // Drain in reverse so the returned vector preserves the original
+                // back-to-front eviction order (most-recently-prepended page
+                // first) without a separate reverse() pass (N26).
+                return self.pages.drain(max..).rev().collect();
             }
         Vec::new()
     }

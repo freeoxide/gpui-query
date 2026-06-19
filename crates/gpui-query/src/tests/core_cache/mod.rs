@@ -6,7 +6,7 @@
 //! - NoCache: always stale/expired, no short-circuit
 //! - Cache invalidation
 //! - Cache reset
-//! - Data retention: placeholder_data, previous_data, display_data, rollback
+//! - Data retention: previous_data and rollback
 //! - Cache interactions with different request policies
 
 mod cache_policy;
@@ -25,7 +25,7 @@ use crate::tests::test_support::*;
 // magic numbers.
 
 /// The `stored_at` timestamp used by every seeded cache entry (ms).
-pub(crate) const STORED_AT_MS: u128 = 1_000;
+pub(crate) const STORED_AT_MS: u64 = 1_000;
 
 /// TTL duration shared by both the default TTL resource and the SWR resource.
 pub(crate) const TTL_MS: u64 = 1_000;
@@ -37,10 +37,10 @@ pub(crate) const STALE_MS: u64 = 2_000;
 pub(crate) const SWR_TOTAL_MS: u64 = TTL_MS + STALE_MS; // 3_000
 
 // Derived boundary offsets from STORED_AT_MS:
-pub(crate) const AT_TTL_BOUNDARY: u128 = STORED_AT_MS + TTL_MS as u128; // 2_000 — exactly at TTL edge
-pub(crate) const ONE_MS_PAST_TTL: u128 = AT_TTL_BOUNDARY + 1; // 2_001 — just past TTL
-pub(crate) const AT_SWR_BOUNDARY: u128 = STORED_AT_MS + SWR_TOTAL_MS as u128; // 4_000 — exactly at total edge
-pub(crate) const ONE_MS_PAST_SWR: u128 = AT_SWR_BOUNDARY + 1; // 4_001 — fully expired
+pub(crate) const AT_TTL_BOUNDARY: u64 = STORED_AT_MS + TTL_MS as u64; // 2_000 — exactly at TTL edge
+pub(crate) const ONE_MS_PAST_TTL: u64 = AT_TTL_BOUNDARY + 1; // 2_001 — just past TTL
+pub(crate) const AT_SWR_BOUNDARY: u64 = STORED_AT_MS + SWR_TOTAL_MS as u64; // 4_000 — exactly at total edge
+pub(crate) const ONE_MS_PAST_SWR: u64 = AT_SWR_BOUNDARY + 1; // 4_001 — fully expired
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -66,6 +66,6 @@ pub(crate) fn nocache_test_resource() -> QueryResource<&'static str> {
     nocache_resource("nocache-test")
 }
 
-pub(crate) fn seed_data(resource: &mut QueryResource<&'static str>, data: &'static str, stored_at_ms: u128) {
+pub(crate) fn seed_data(resource: &mut QueryResource<&'static str>, data: &'static str, stored_at_ms: u64) {
     resource.apply_success(data, stored_at_ms);
 }

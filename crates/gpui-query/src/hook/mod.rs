@@ -161,11 +161,12 @@ pub use mutation_hooks::{
 /// collection; no panic or error is propagated. This mirrors the silent-clamp
 /// behavior of the `current_time_ms` in `client::erased` so both clock
 /// sources stay consistent.
-pub fn current_time_ms() -> u128 {
+#[inline]
+pub fn current_time_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis()
+        .as_millis() as u64
 }
 
 // ── Impl for MutationOptions integration ────────────────────────────────

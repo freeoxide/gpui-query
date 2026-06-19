@@ -118,9 +118,9 @@ impl CachePolicy {
     /// Whether the data is fresh (within the TTL window).
     ///
     /// Returns `false` if the policy has no TTL or the data age exceeds TTL.
-    pub fn is_fresh(self, age_ms: u128) -> bool {
+    pub fn is_fresh(self, age_ms: u64) -> bool {
         self.ttl_ms()
-            .map(|ttl| age_ms <= ttl as u128)
+            .map(|ttl| age_ms <= ttl)
             .unwrap_or(false)
     }
 
@@ -129,11 +129,11 @@ impl CachePolicy {
     /// Data is "stale-but-serveable" when:
     /// - The policy is `StaleWhileRevalidate`
     /// - Data age is past TTL but within `ttl_ms + stale_ms`
-    pub fn is_stale_but_serveable(self, age_ms: u128) -> bool {
+    pub fn is_stale_but_serveable(self, age_ms: u64) -> bool {
         match self {
             Self::StaleWhileRevalidate { ttl_ms, stale_ms } => {
-                let total = (ttl_ms as u128) + (stale_ms as u128);
-                age_ms > (ttl_ms as u128) && age_ms <= total
+                let total = ttl_ms.saturating_add(stale_ms);
+                age_ms > ttl_ms && age_ms <= total
             }
             _ => false,
         }
@@ -142,9 +142,9 @@ impl CachePolicy {
     /// Whether the data is expired (past the total valid window).
     ///
     /// Returns `true` if the data age exceeds the total valid window for this policy.
-    pub fn is_expired(self, age_ms: u128) -> bool {
+    pub fn is_expired(self, age_ms: u64) -> bool {
         self.total_valid_ms()
-            .map(|total| age_ms > total as u128)
+            .map(|total| age_ms > total)
             .unwrap_or(true) // NoCache always considers data expired
     }
 }

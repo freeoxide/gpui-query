@@ -12,16 +12,16 @@ fn pages_returns_vecdeque_in_order() {
     let pages = r.pages();
 
     assert_eq!(pages.len(), 3);
-    assert_eq!(pages[0].as_ref(), &vec!["page0".to_string()]);
-    assert_eq!(pages[1].as_ref(), &vec!["page1".to_string()]);
-    assert_eq!(pages[2].as_ref(), &vec!["page2".to_string()]);
+    assert_eq!(pages[0].as_ref(), &vec!["page0"]);
+    assert_eq!(pages[1].as_ref(), &vec!["page1"]);
+    assert_eq!(pages[2].as_ref(), &vec!["page2"]);
 }
 
 #[test]
 fn first_and_last_page_on_single_page() {
     let r = load_n_pages(1);
-    assert_eq!(r.first_page(), Some(&vec!["page0".to_string()]));
-    assert_eq!(r.last_page(), Some(&vec!["page0".to_string()]));
+    assert_eq!(r.first_page(), Some(&vec!["page0"]));
+    assert_eq!(r.last_page(), Some(&vec!["page0"]));
     assert!(r.has_data());
 }
 
@@ -80,8 +80,8 @@ fn reset_preserves_direction() {
 #[test]
 fn reset_clears_diagnostics() {
     let mut r = load_n_pages(2);
-    r.increment_retry_count();
-    r.increment_retry_count();
+    r.increment_retry();
+    r.increment_retry();
 
     r.reset();
 
@@ -124,7 +124,7 @@ fn is_page_data_valid_true_when_failure_with_existing_pages() {
 
 #[test]
 fn is_page_data_valid_false_when_failure_no_pages() {
-    let mut r: InfiniteQueryResource<Vec<String>, String> = InfiniteQueryResource::new(
+    let mut r: InfiniteQueryResource<Vec<&'static str>, &'static str> = InfiniteQueryResource::new(
         QueryKey::from("items"),
         CachePolicy::NoCache,
         RequestPolicy::LatestWins,
@@ -132,7 +132,7 @@ fn is_page_data_valid_false_when_failure_no_pages() {
     let mut seq = RequestSequencer::new();
 
     let id = r.begin_fetch_next(&mut seq, 1_000).unwrap();
-    r.complete_page_failure(id, "network error".to_string());
+    r.complete_page_failure(id, "network error");
 
     assert!(!r.is_page_data_valid());
 }
@@ -154,8 +154,8 @@ fn page_failure_preserves_existing_pages() {
 
     // Pages remain intact
     assert_eq!(r.page_count(), 2);
-    assert_eq!(r.first_page(), Some(&vec!["page0".to_string()]));
-    assert_eq!(r.last_page(), Some(&vec!["page1".to_string()]));
+    assert_eq!(r.first_page(), Some(&vec!["page0"]));
+    assert_eq!(r.last_page(), Some(&vec!["page1"]));
     assert_eq!(r.status(), QueryStatus::Failure);
 }
 
@@ -179,6 +179,8 @@ fn serde_roundtrip_preserves_state() {
     let r = load_n_pages(3);
 
     let json = serde_json::to_string(&r).unwrap();
+    // Deserialize into an owned page type: serde cannot synthesize `&'static str`
+    // from parsed JSON, so the roundtrip target uses `Vec<String>`.
     let back: InfiniteQueryResource<Vec<String>> = serde_json::from_str(&json).unwrap();
 
     assert_eq!(back.page_count(), 3);

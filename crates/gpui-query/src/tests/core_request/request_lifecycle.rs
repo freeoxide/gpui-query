@@ -9,6 +9,7 @@ use crate::core::{
     CachePolicy, QueryBeginResult, QueryFetchMode, QueryResource, QueryStatus, RequestId,
     RequestPolicy,
 };
+use std::num::NonZero;
 use crate::tests::test_support::{
     assert_status, begin_request_id, test_resource_with_policies, test_sequencer, TEST_NOW_MS,
 };
@@ -155,7 +156,7 @@ fn complete_convenience_method_rejects_stale_id() {
 fn begin_request_with_id_uses_provided_id() {
     let mut resource: QueryResource<&str> =
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
-    let custom_id = RequestId::scoped(99, 7);
+    let custom_id = RequestId::scoped(NonZero::new(99).unwrap(), 7);
 
     let result =
         resource.begin_request_with_id(Some(custom_id), TEST_NOW_MS, QueryFetchMode::Normal);
@@ -177,6 +178,6 @@ fn begin_request_with_id_none_falls_back_to_transient_sequencer() {
         other => panic!("expected Started, got {:?}", other),
     };
     // Transient sequencer starts at scope 1, seq 1
-    assert_eq!(rid.scope_id(), 1);
+    assert_eq!(rid.scope_id(), NonZero::new(1).unwrap());
     assert_eq!(rid.value(), 1);
 }

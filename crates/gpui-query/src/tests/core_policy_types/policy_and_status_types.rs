@@ -2,28 +2,11 @@
 //! CachePolicy, RequestPolicy, and QueryFetchMode.
 
 use crate::core::*;
+use crate::tests::test_support::assert_serde_roundtrip;
+use std::num::NonZero;
 
-// ── Serde roundtrip helper (audit fix #55) ──────────────────────────────────
-//
-// The four enum roundtrip tests below (QueryStatus, MutationStatus, CachePolicy,
-// RequestPolicy) previously each inlined the same `serde_json::to_string` →
-// `from_str` → `assert_eq` triplet. This generic table-driven helper collapses
-// that pattern: each test now passes a slice of variants and asserts the
-// roundtrip in one call. Proof-of-consolidation; the other serde-roundtrip
-// files are left untouched.
-
-/// Assert that every value in `cases` survives a JSON serialize → deserialize
-/// roundtrip unchanged.
-fn assert_serde_roundtrip<T>(cases: &[T])
-where
-    T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug,
-{
-    for value in cases {
-        let json = serde_json::to_string(value).expect("serialize");
-        let back: T = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(&back, value, "serde roundtrip changed value (json={})", json);
-    }
-}
+// The serde-roundtrip helper is now shared from `test_support` (extends audit
+// #129 / T10); the four enum roundtrip tests below call it directly.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // QueryStatus
@@ -88,8 +71,8 @@ fn query_timestamp_from_millis() {
 }
 
 #[test]
-fn query_timestamp_from_u128() {
-    let ts: QueryTimestamp = 5_000u128.into();
+fn query_timestamp_from_u64() {
+    let ts: QueryTimestamp = 5_000u64.into();
     assert_eq!(ts.as_millis(), 5_000);
 }
 
@@ -101,8 +84,8 @@ fn query_timestamp_zero() {
 
 #[test]
 fn query_timestamp_large_value() {
-    let ts = QueryTimestamp::from_millis(u128::MAX);
-    assert_eq!(ts.as_millis(), u128::MAX);
+    let ts = QueryTimestamp::from_millis(u64::MAX);
+    assert_eq!(ts.as_millis(), u64::MAX);
 }
 
 #[test]
@@ -131,9 +114,9 @@ fn query_timestamp_equality() {
 #[test]
 fn request_id_hash_consistency() {
     use std::collections::HashSet;
-    let a = RequestId::scoped(1, 10);
-    let b = RequestId::scoped(1, 10);
-    let c = RequestId::scoped(2, 10);
+    let a = RequestId::scoped(NonZero::new(1).unwrap(), 10);
+    let b = RequestId::scoped(NonZero::new(1).unwrap(), 10);
+    let c = RequestId::scoped(NonZero::new(2).unwrap(), 10);
     let mut set = HashSet::new();
     set.insert(a);
     assert!(set.contains(&b), "equal ids should have equal hashes");
@@ -142,14 +125,14 @@ fn request_id_hash_consistency() {
 
 #[test]
 fn request_id_copy_semantics() {
-    let a = RequestId::scoped(5, 10);
+    let a = RequestId::scoped(NonZero::new(5).unwrap(), 10);
     let b = a; // Copy
     assert_eq!(a, b);
 }
 
 #[test]
 fn request_id_serde_roundtrip() {
-    let id = RequestId::scoped(42, 99);
+    let id = RequestId::scoped(NonZero::new(42).unwrap(), 99);
     let json = serde_json::to_string(&id).unwrap();
     let back: RequestId = serde_json::from_str(&json).unwrap();
     assert_eq!(back, id);

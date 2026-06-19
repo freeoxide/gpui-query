@@ -7,6 +7,7 @@
 
 use crate::core::*;
 use crate::tests::test_support::*;
+use std::num::NonZero;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GAP-03: begin_request_with_id + SWR + IgnoreWhileLoading + active request
@@ -34,7 +35,7 @@ fn begin_request_with_id_swr_ignore_while_loading_with_active_request() {
     // Now call begin_request_with_id when data is stale and a request is active.
     // Should get StaleCacheHit with the EXISTING active_request_id (no new request started).
     let result = r.begin_request_with_id(
-        Some(RequestId::scoped(99, 1)),
+        Some(RequestId::scoped(NonZero::new(99).unwrap(), 1)),
         1_500,
         QueryFetchMode::Normal,
     );
@@ -53,7 +54,7 @@ fn begin_request_with_id_swr_ignore_while_loading_with_active_request() {
             // request_id should be the existing active request, not the one we passed
             assert_ne!(
                 request_id,
-                RequestId::scoped(99, 1),
+                RequestId::scoped(NonZero::new(99).unwrap(), 1),
                 "should use existing active request id"
             );
         }
@@ -259,7 +260,7 @@ fn serde_deserialize_single_string() {
     let json = "\"users\"";
     let key: QueryKey = serde_json::from_str(json).unwrap();
     assert_eq!(key.parts().len(), 1);
-    assert_eq!(key.as_str(), "users");
+    assert_eq!(key.first_segment(), "users");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

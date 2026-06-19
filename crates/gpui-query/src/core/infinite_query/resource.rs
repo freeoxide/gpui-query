@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::{
     CachePolicy, QueryError, QueryKey, QuerySignal, QueryStatus, QueryTimestamp, RequestId,
-    RequestPolicy, RetryPolicy,
+    RequestPolicy, RequestSequencer, RetryPolicy,
 };
 
 /// Default maximum number of pages to retain.
@@ -45,7 +45,7 @@ pub enum FetchDirection {
 /// Pages are stored internally as `Arc<T>` so that [`last_page_arc`](Self::last_page_arc)
 /// and [`first_page_arc`](Self::first_page_arc) can hand the fetcher a cheap
 /// `Arc::clone` instead of cloning the full page data.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound(serialize = "T: serde::Serialize, E: serde::Serialize"))]
 #[serde(bound(deserialize = "T: serde::de::DeserializeOwned, E: serde::de::DeserializeOwned"))]
 pub struct InfiniteQueryResource<T, E = QueryError> {
@@ -65,11 +65,23 @@ pub struct InfiniteQueryResource<T, E = QueryError> {
     pub(super) retry_count: u32,
     pub(super) has_next_page: bool,
     pub(super) has_previous_page: bool,
-    pub(super) is_fetching_next_page: bool,
-    pub(super) is_fetching_previous_page: bool,
+    /// Which direction (if any) is currently being fetched.
+    ///
+    /// Collapses the previous `is_fetching_next_page` / `is_fetching_previous_page`
+    /// pair into a single `Option<PageDirection>`, making the mutual-exclusion
+    /// invariant unbreakable at the type level (N18). The two boolean getters
+    /// are retained for backwards compatibility.
+    pub(super) fetching_direction: Option<super::lifecycle::PageDirection>,
     pub(super) max_pages: Option<usize>,
     pub(super) direction: FetchDirection,
     pub(super) retry_policy: RetryPolicy,
+    /// Per-resource sequencer used by [`begin_fetch`](Self::begin_fetch_next)
+    /// when no external id is supplied, so transient callers without a
+    /// `QueryClient` still get monotonic, collision-free ids instead of every
+    /// call colliding at `RequestId(1,1)` (N3). `#[serde(skip)]` — runtime
+    /// state, not persisted.
+    #[serde(skip)]
+    pub(super) transient_sequencer: RequestSequencer,
     #[serde(skip)]
     pub(super) signal: Option<QuerySignal>,
     #[cfg(feature = "client")]
@@ -171,11 +183,11 @@ impl<T, E> InfiniteQueryResource<T, E> {
             retry_count: 0,
             has_next_page: has_next,
             has_previous_page: has_prev,
-            is_fetching_next_page: false,
-            is_fetching_previous_page: false,
+            fetching_direction: None,
             max_pages: Some(DEFAULT_MAX_PAGES),
             direction,
             retry_policy: RetryPolicy::default(),
+            transient_sequencer: RequestSequencer::new(),
             signal: None,
             #[cfg(feature = "client")]
             current_task: crate::core::current_task::CurrentTask::default(),

@@ -66,8 +66,13 @@ impl QueryKey {
     }
 
     /// Returns the first segment as a string slice.
+    ///
+    /// This yields only the **first** segment of the key, not the full key.
+    /// For a joined representation of the entire key, use [`QueryKey::to_path`];
+    /// for the single segment when the key has exactly one part, use
+    /// [`QueryKey::as_single`].
     #[must_use]
-    pub fn as_str(&self) -> &str {
+    pub fn first_segment(&self) -> &str {
         match self.0.first() {
             Some(s) => s.as_ref(),
             None => "",
@@ -189,7 +194,7 @@ mod tests {
     fn single_part_key_from_str() {
         let key = QueryKey::from("users");
         assert_eq!(key.parts().len(), 1);
-        assert_eq!(key.as_str(), "users");
+        assert_eq!(key.first_segment(), "users");
         assert_eq!(key.as_single(), Some("users"));
     }
 

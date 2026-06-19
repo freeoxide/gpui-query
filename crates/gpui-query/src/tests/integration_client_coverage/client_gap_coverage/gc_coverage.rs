@@ -397,11 +397,12 @@ fn test_mutation_bucket_evict_oldest_keeps_count_bounded(cx: &mut TestAppContext
             // and `all_entities` skip dead weak refs, so the entities must stay
             // alive for the count assertions below to be meaningful.
             let mut live: Vec<gpui::Entity<MutationResource<String, String, QueryError>>> =
-                Vec::with_capacity(MAX_ENTRIES + 5);
+                Vec::with_capacity(MAX_ENTRIES + 2);
 
-            // Insert MAX_ENTRIES + 5 Idle mutations — each one past the cap
-            // must trigger exactly one evict_oldest.
-            for _ in 0..(MAX_ENTRIES + 5) {
+            // Insert MAX_ENTRIES + 2 Idle mutations — crossing the cap by 2
+            // is enough to trigger evict_oldest and prove the count stays
+            // bounded (audit T14: avoid constructing 10 005 entities).
+            for _ in 0..(MAX_ENTRIES + 2) {
                 let entity = cx.new(|_| {
                     MutationResource::<String, String, QueryError>::new(RetryPolicy::no_retries())
                 });

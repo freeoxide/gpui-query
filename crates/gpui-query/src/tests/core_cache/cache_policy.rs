@@ -51,7 +51,7 @@ fn ttl_renewal_resets_freshness() {
     let mut r = ttl_resource();
     seed_data(&mut r, "v1", STORED_AT_MS);
     assert!(!r.is_cache_fresh(STORED_AT_MS + 1_500));
-    let renewed_at: u128 = AT_TTL_BOUNDARY;
+    let renewed_at: u64 = AT_TTL_BOUNDARY;
     seed_data(&mut r, "v2", renewed_at);
     assert!(r.is_cache_fresh(renewed_at + 500));
     assert_eq!(r.data(), Some(&"v2"));

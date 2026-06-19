@@ -109,7 +109,7 @@ fn reset_preserves_policies_and_key() {
     );
     seed_data(&mut r, "data", STORED_AT_MS);
     r.reset();
-    assert_eq!(r.key().as_str(), "my-key");
+    assert_eq!(r.key().first_segment(), "my-key");
     assert_eq!(r.cache_policy(), CachePolicy::Ttl { ttl_ms: 5_000 });
     assert_eq!(r.request_policy(), RequestPolicy::IgnoreWhileLoading);
 }

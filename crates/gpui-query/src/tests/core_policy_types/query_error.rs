@@ -1,6 +1,7 @@
 //! Tests for QueryError and QueryErrorKind edge cases.
 
 use crate::core::*;
+use crate::tests::test_support::assert_serde_roundtrip;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // QueryError
@@ -63,11 +64,13 @@ fn query_error_as_ref_str() {
 
 #[test]
 fn query_error_serde_roundtrip() {
-    let err = QueryError::transport("connection refused");
-    let json = serde_json::to_string(&err).unwrap();
-    let back: QueryError = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.kind(), err.kind());
-    assert_eq!(back.message(), err.message());
+    // T10: shared roundtrip helper.
+    assert_serde_roundtrip(&[
+        QueryError::transport("connection refused"),
+        QueryError::cancelled("aborted"),
+        QueryError::response("not found"),
+        QueryError::unknown("mystery"),
+    ]);
 }
 
 #[test]
