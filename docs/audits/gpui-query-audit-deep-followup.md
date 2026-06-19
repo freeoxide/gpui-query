@@ -3,7 +3,7 @@
 **Date:** 2026-06-20
 **Scope:** Whole crate (`src/core`, `src/client`, `src/hook`, `src/tests`, `src/lib.rs`) — looking **beyond** the existing 144-finding audit (`gpui-query-audit.md`) and its implementation status (`gpui-query-audit-implementation-status.md`).
 **Method:** Four parallel explore subagents (core / client / hook / tests+lib) read every file in their area, cross-checked against the indexed finding numbers, and only reported items that don't overlap with the existing 144 findings or the implementation-status notes. Criticals were then hand-verified against the live source.
-**Verification:** A second pass with four parallel verification subagents checked every cited file:line, cross-reference, and proposed fix against the live source. See [`gpui-query-audit-deep-followup-verification.md`](./gpui-query-audit-deep-followup-verification.md) for the full meta-audit. **Result: 44/51 fully CONFIRMED, 7 PARTIALLY ACCURATE (corrected inline below), 0 INACCURATE.** The most significant corrections: the #112 drift claim had a fabricated quote (now fixed), M7's fix justification was wrong about GPUI notify semantics (now refined), and T8/T9 allocation counts were off (now corrected).
+**Verification:** A second pass with four parallel verification subagents checked every cited file:line, cross-reference, and proposed fix against the live source. **Result: 44/51 fully CONFIRMED, 7 PARTIALLY ACCURATE (corrected inline below), 0 INACCURATE.** No line-number drift. No finding entirely wrong. No proposed fix would break load-bearing code (one fix — M7 — had an incorrect justification about GPUI notify semantics; refined below). The most significant corrections: the #112 drift claim had a fabricated quote (now fixed to cite the real doc text), M7's fix justification was wrong about `entity.update` always notifying (now refined), and T8/T9 allocation counts were off (now corrected: 40 not 86, 54 not 29).
 
 **Total NEW findings: 51** (2 HIGH, 19 MED, 30 LOW) — grouped by area below.
 
@@ -452,3 +452,29 @@ Files: `lib.rs`, `tests/mod.rs`, `test_support.rs`, `integration_client/`, `cove
 - Criticals (M2, H1, N7/N8, M1) hand-verified against the live source by reading the cited lines plus supporting core types.
 - All file:line citations resolved against the current tree (post-implementation-pass state).
 - "Definitely real" vs "speculative" distinguished inline where the impact estimate depends on workload (e.g., M2's severity depends on whether the app keeps inserting new unique keys into a full bucket).
+
+### Verification pass results
+
+A second pass with four parallel verification subagents (core / client / hook / tests+lib) checked every cited file:line, cross-reference, and proposed fix against the live source.
+
+**Final tally: 44/51 fully CONFIRMED, 7 PARTIALLY ACCURATE, 0 INACCURATE.**
+
+| Area | Findings | Confirmed | Partially accurate |
+|------|---------:|----------:|-------------------:|
+| Core (N1–N30) | 30 | 30 | 0 |
+| Client (M1–M7, L1–L15) | 22 | 17 | 5 (M7, L8, L9, L13, L14) |
+| Hook (H1–H18) | 18 | 18 | 0 |
+| Tests/Lib (T1–T14) | 14 | 10 | 4 (T3, T8, T9, T13) |
+
+The 7 partially-accurate findings are still real issues — the errors were in specific claims (counts, quotes, wording) rather than in the existence or significance of the findings. All corrections have been applied inline above. Summary of what was corrected:
+
+1. **#112 drift claim**: Replaced a fabricated quote with the actual doc text; noted the doc is internally contradictory (top section says done, detailed tables say not done).
+2. **M7**: Refined the fix — `entity.update` **always notifies** observers regardless of mutation, so the original "no extra notify" claim was wrong; the current 2-lock pattern is intentional to avoid spurious notifications.
+3. **M2**: Corrected "all three byte-identical" — only `QueryBucket`/`InfiniteQueryBucket` are byte-identical; `MutationBucket::evict_oldest` differs (reads `entry.updated_at` directly, uses `*id`).
+4. **T3**: Corrected — `gc_query_operations.rs:44` says `update_status_snapshot`, not `update_query_snapshot()`.
+5. **T8**: Corrected count from 86 to 40.
+6. **T9**: Corrected count from 29 to 54.
+7. **L8**: Changed "byte-identical" to "structurally identical" (observer types differ in status type, not just entity type).
+8. **L9/L13/L14**: Added notes that these overlap existing audit findings #10/#94/#9 respectively but offer more-targeted fixes.
+9. **H11**: Added note that H13's fix is strictly better and makes H11 moot.
+10. **N7/N8**: Corrected the source of the "✅ Verified" quote (main audit `:379`, not impl-status doc `:193`).
