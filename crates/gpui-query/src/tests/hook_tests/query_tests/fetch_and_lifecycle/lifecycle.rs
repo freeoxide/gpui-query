@@ -68,7 +68,7 @@ fn test_multiple_observations_same_entity(cx: &mut TestAppContext) {
             cx,
         );
         // Create a second observation on the same entity.
-        let mut observer2 =
+        let observer2 =
             crate::client::QueryObserver::new(&entity);
         let sub2 = observer2
             .observe(cx)

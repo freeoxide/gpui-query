@@ -44,6 +44,12 @@ pub struct MutationResource<V, T, E = QueryError> {
     retry_count: u32,
     cancelled_count: u64,
     retry_policy: RetryPolicy,
+    /// Wall-clock ms of the most recent terminal completion (success/failure);
+    /// `None` until the mutation first completes. Read by `MutationBucket`'s GC
+    /// so recency is measured from completion time, not insertion time
+    /// (audit #112). `#[serde(skip)]` — runtime state, not persisted.
+    #[serde(skip)]
+    last_updated_at_ms: Option<u128>,
     #[serde(skip)]
     signal: Option<QuerySignal>,
     /// In-flight background mutation task (audit #6). Stored so that a
@@ -53,6 +59,16 @@ pub struct MutationResource<V, T, E = QueryError> {
     #[cfg(feature = "client")]
     #[serde(skip)]
     pub(crate) current_task: crate::core::current_task::CurrentTask,
+}
+
+/// Current wall-clock ms since the Unix epoch, clamped to 0 if the system
+/// clock is before the epoch (mirrors the client/hook `current_time_ms`). Used
+/// to stamp `MutationResource::last_updated_at_ms` on terminal completion.
+fn completion_now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default()
 }
 
 impl<V, T, E> MutationResource<V, T, E> {
@@ -67,6 +83,7 @@ impl<V, T, E> MutationResource<V, T, E> {
             retry_count: 0,
             cancelled_count: 0,
             retry_policy,
+            last_updated_at_ms: None,
             signal: None,
             #[cfg(feature = "client")]
             current_task: crate::core::current_task::CurrentTask::default(),
@@ -76,6 +93,13 @@ impl<V, T, E> MutationResource<V, T, E> {
     /// Current status.
     pub fn status(&self) -> MutationStatus {
         self.status
+    }
+
+    /// Wall-clock ms of the most recent terminal completion, or `None` if the
+    /// mutation has never completed. Used by `MutationBucket` GC to measure
+    /// recency from completion time rather than insertion time (audit #112).
+    pub(crate) fn last_updated_at_ms(&self) -> Option<u128> {
+        self.last_updated_at_ms
     }
 
     /// Most recent successful data.
@@ -154,6 +178,7 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.variables = Some(variables);
         self.error = None;
         self.retry_count = 0;
+        self.last_updated_at_ms = None;
         self.signal = Some(QuerySignal::new());
     }
 
@@ -162,6 +187,7 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.status = MutationStatus::Success;
         self.data = Some(data);
         self.error = None;
+        self.last_updated_at_ms = Some(completion_now_ms());
         self.signal = None;
     }
 
@@ -175,6 +201,7 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.data = None;
         self.error = Some(error);
         self.retry_count = self.retry_count.saturating_add(1);
+        self.last_updated_at_ms = Some(completion_now_ms());
         self.signal = None;
     }
 
@@ -280,11 +307,6 @@ impl<V, T, E> MutationResource<V, T, E> {
     /// mutation or entity drop aborts the prior in-flight task.
     pub(crate) fn set_current_task(&mut self, task: gpui::Task<()>) {
         self.current_task.set(task);
-    }
-
-    /// Abort the stored background mutation task, if any (audit #6).
-    pub(crate) fn abort_current_task(&mut self) {
-        self.current_task.abort();
     }
 }
 

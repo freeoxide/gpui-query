@@ -10,7 +10,8 @@ use crate::tests::test_support::*;
 
 #[gpui::test]
 fn test_mutation_with_key_registration(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    // Audit fix #46: prefer the shorter `setup_test` alias.
+    setup_test(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let entity = cx.new(|_| {
@@ -29,7 +30,8 @@ fn test_mutation_with_key_registration(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_all_mutations_empty_for_unregistered_type(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    // Audit fix #46: prefer the shorter `setup_test` alias.
+    setup_test(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             // Register one type
@@ -49,7 +51,8 @@ fn test_all_mutations_empty_for_unregistered_type(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_multiple_mutations_same_type(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    // Audit fix #46: prefer the shorter `setup_test` alias.
+    setup_test(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let m1 = cx.new(|_| {
@@ -227,9 +230,9 @@ fn test_query_observer_observe_succeeds_for_live_entity(cx: &mut TestAppContext)
             let entity = client.resource::<String, QueryError>("live_obs", cx);
             let mut observer = QueryObserver::new(&entity);
 
-            struct DummyView;
-            let view = cx.new(|_| DummyView);
-            let result = view.update(cx, |_view, cx| observer.observe(cx));
+            // Audit fix #52: adopt the shared `observe_with_dummy_view` helper
+            // instead of a local `struct DummyView;` + manual view dance.
+            let result = observe_with_dummy_view::<String, QueryError>(cx, &mut observer);
             assert!(
                 result.is_some(),
                 "observe should return Some(Subscription) for a live entity"
@@ -245,7 +248,7 @@ fn test_mutation_observer_observe_returns_subscription(cx: &mut TestAppContext) 
         let entity = cx.new(|_| {
             MutationResource::<String, User, QueryError>::new(RetryPolicy::no_retries())
         });
-        let mut observer = MutationObserver::<String, User, QueryError>::new(&entity);
+        let observer = MutationObserver::<String, User, QueryError>::new(&entity);
 
         struct DummyView;
         let view = cx.new(|_| DummyView);
@@ -261,7 +264,7 @@ fn test_mutation_observer_weak_entity_pattern(cx: &mut TestAppContext) {
         let entity = cx.new(|_| {
             MutationResource::<String, User, QueryError>::new(RetryPolicy::no_retries())
         });
-        let mut observer = MutationObserver::<String, User, QueryError>::new(&entity);
+        let observer = MutationObserver::<String, User, QueryError>::new(&entity);
 
         struct DummyView;
         let view = cx.new(|_| DummyView);
@@ -281,7 +284,7 @@ fn test_query_observer_with_config_always_notify(cx: &mut TestAppContext) {
             let config = ObserverConfig {
                 notify_on_status_change_only: false,
             };
-            let mut observer = QueryObserver::new(&entity).with_config(config);
+            let observer = QueryObserver::new(&entity).with_config(config);
 
             struct DummyView;
             let view = cx.new(|_| DummyView);

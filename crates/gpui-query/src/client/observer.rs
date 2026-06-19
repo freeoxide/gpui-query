@@ -53,7 +53,11 @@ impl<T: 'static, E: 'static> QueryObserver<T, E> {
     /// Start observing the entity. Returns `None` if the entity was already dropped.
     ///
     /// **v2 fix**: Returns `Option<Subscription>` instead of panicking.
-    pub fn observe<W: 'static>(&mut self, cx: &mut Context<W>) -> Option<Subscription> {
+    ///
+    /// **Audit #71**: takes `&self` (was `&mut self`) — the body only reads the
+    /// weak entity handle and the `Copy` config flag, so no interior mutation
+    /// is required. `&mut` callers coerce to `&` with no ripple.
+    pub fn observe<W: 'static>(&self, cx: &mut Context<W>) -> Option<Subscription> {
         let upgraded = self.entity.upgrade()?;
         let notify_on_change = self.config.notify_on_status_change_only;
         let last_status: Cell<Option<QueryStatus>> = Cell::new(None);
@@ -100,7 +104,9 @@ impl<T: 'static, E: 'static> InfiniteQueryObserver<T, E> {
     }
 
     /// Start observing the entity. Returns `None` if the entity was already dropped.
-    pub fn observe<W: 'static>(&mut self, cx: &mut Context<W>) -> Option<Subscription> {
+    ///
+    /// **Audit #71**: takes `&self` (was `&mut self`) — see [`QueryObserver::observe`].
+    pub fn observe<W: 'static>(&self, cx: &mut Context<W>) -> Option<Subscription> {
         let upgraded = self.entity.upgrade()?;
         let notify_on_change = self.config.notify_on_status_change_only;
         let last_status: Cell<Option<QueryStatus>> = Cell::new(None);
@@ -156,7 +162,9 @@ impl<V: 'static, T: 'static, E: 'static> MutationObserver<V, T, E> {
     }
 
     /// Start observing the entity. Returns `None` if the entity was already dropped.
-    pub fn observe<W: 'static>(&mut self, cx: &mut Context<W>) -> Option<Subscription> {
+    ///
+    /// **Audit #71**: takes `&self` (was `&mut self`) — see [`QueryObserver::observe`].
+    pub fn observe<W: 'static>(&self, cx: &mut Context<W>) -> Option<Subscription> {
         let upgraded = self.entity.upgrade()?;
         let notify_on_change = self.config.notify_on_status_change_only;
         let last_status: Cell<Option<MutationStatus>> = Cell::new(None);

@@ -77,18 +77,14 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                 let data_for_callback =
                     if callbacks.is_some() { Some(data.clone()) } else { None };
 
-                let entity = match weak.upgrade() {
-                    Some(e) => e,
+                let Some(entity) = weak.upgrade() else {
                     // Audit fix #9: Entity dropped during mutation. Fire
                     // on_settled with None for both to indicate discard.
-                    None => {
-                        if let Some(ref cb) = callbacks {
-                            if let Some(ref f) = cb.on_settled {
-                                f(None, None);
-                            }
+                    if let Some(ref cb) = callbacks
+                        && let Some(ref f) = cb.on_settled {
+                            f(None, None);
                         }
-                        return;
-                    }
+                    return;
                 };
                 let _ = entity.update(cx, |resource, cx| {
                     resource.complete_success(data);
@@ -98,11 +94,10 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                 // Fire success/settled callbacks outside entity borrow so
                 // they can safely call entity.update().
                 if let Some(ref cb) = callbacks {
-                    if let Some(ref d) = data_for_callback {
-                        if let Some(ref f) = cb.on_success {
+                    if let Some(ref d) = data_for_callback
+                        && let Some(ref f) = cb.on_success {
                             f(d);
                         }
-                    }
                     if let Some(ref f) = cb.on_settled {
                         f(data_for_callback.as_ref(), None);
                     }
@@ -122,22 +117,18 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                     // flash for observers.
                     let delay_ms = retry_policy.delay_for_attempt(attempt);
 
-                    let entity = match weak.upgrade() {
-                        Some(e) => e,
+                    let Some(entity) = weak.upgrade() else {
                         // Audit fix #9: Entity dropped between mutator failure and retry.
-                        None => {
-                            if let Some(ref cb) = callbacks {
-                                if let Some(ref ec) = error_for_callback {
-                                    if let Some(ref f) = cb.on_error {
-                                        f(ec);
-                                    }
+                        if let Some(ref cb) = callbacks {
+                            if let Some(ref ec) = error_for_callback
+                                && let Some(ref f) = cb.on_error {
+                                    f(ec);
                                 }
-                                if let Some(ref f) = cb.on_settled {
-                                    f(None, error_for_callback.as_ref());
-                                }
+                            if let Some(ref f) = cb.on_settled {
+                                f(None, error_for_callback.as_ref());
                             }
-                            return;
                         }
+                        return;
                     };
                     let _ = entity.update(cx, |resource, _cx| {
                         resource.increment_retry();
@@ -154,32 +145,27 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                     // Audit fix #9: After the retry delay, check whether the
                     // mutation is still in Loading state. If it was cancelled
                     // or reset, stop retrying immediately.
-                    let entity = match weak.upgrade() {
-                        Some(e) => e,
+                    let Some(entity) = weak.upgrade() else {
                         // Audit fix #9/#10: Entity dropped during retry delay.
-                        None => {
-                            if let Some(ref cb) = callbacks {
-                                if let Some(ref ec) = error_for_callback {
-                                    if let Some(ref f) = cb.on_error {
-                                        f(ec);
-                                    }
+                        if let Some(ref cb) = callbacks {
+                            if let Some(ref ec) = error_for_callback
+                                && let Some(ref f) = cb.on_error {
+                                    f(ec);
                                 }
-                                if let Some(ref f) = cb.on_settled {
-                                    f(None, error_for_callback.as_ref());
-                                }
+                            if let Some(ref f) = cb.on_settled {
+                                f(None, error_for_callback.as_ref());
                             }
-                            return;
                         }
+                        return;
                     };
                     if !read_entity(&entity, cx, |r, _| r.is_loading()).unwrap_or(false) {
                         // Mutation was cancelled or reset during the delay.
                         // Fire error callbacks so callers get a terminal notification.
                         if let Some(ref cb) = callbacks {
-                            if let Some(ref ec) = error_for_callback {
-                                if let Some(ref f) = cb.on_error {
+                            if let Some(ref ec) = error_for_callback
+                                && let Some(ref f) = cb.on_error {
                                     f(ec);
                                 }
-                            }
                             if let Some(ref f) = cb.on_settled {
                                 f(None, error_for_callback.as_ref());
                             }
@@ -218,11 +204,10 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                     // These fire regardless of whether entity is still alive
                     // (Audit fix #9/#10).
                     if let Some(ref cb) = callbacks {
-                        if let Some(ref ec) = error_for_callback {
-                            if let Some(ref f) = cb.on_error {
+                        if let Some(ref ec) = error_for_callback
+                            && let Some(ref f) = cb.on_error {
                                 f(ec);
                             }
-                        }
 
                         if let Some(ref f) = cb.on_settled {
                             f(None, error_for_callback.as_ref());

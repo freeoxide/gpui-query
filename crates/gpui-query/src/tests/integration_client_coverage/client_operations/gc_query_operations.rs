@@ -223,7 +223,7 @@ fn test_infinite_query_observer_creation_and_observe(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let entity = client.infinite_resource::<String, QueryError>("inf_obs", cx);
-            let mut observer = InfiniteQueryObserver::new(&entity);
+            let observer = InfiniteQueryObserver::new(&entity);
 
             struct DummyView;
             let view = cx.new(|_| DummyView);
@@ -239,7 +239,7 @@ fn test_infinite_query_observer_weak_entity_pattern(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let entity = client.infinite_resource::<String, QueryError>("inf_obs_weak", cx);
-            let mut observer = InfiniteQueryObserver::new(&entity);
+            let observer = InfiniteQueryObserver::new(&entity);
 
             struct DummyView;
             let view = cx.new(|_| DummyView);

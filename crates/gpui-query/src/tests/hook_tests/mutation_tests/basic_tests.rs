@@ -12,16 +12,13 @@ use crate::tests::test_support::*;
 fn test_use_mutation_creates_idle_entity(cx: &mut TestAppContext) {
     setup_query_client(cx);
 
-    struct H {
-        entity: Entity<MutationResource<String, String, QueryError>>,
-    }
-
+    // Audit fix #47: use the shared `HookHarness` instead of a one-off `struct H`.
     let harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>((), cx);
         let resource = entity.read(cx);
         assert_eq!(resource.status(), MutationStatus::Idle);
         assert!(resource.data().is_none());
-        H { entity }
+        HookHarness::new(entity)
     });
 
     cx.update(|cx| {
@@ -36,10 +33,7 @@ fn test_use_mutation_creates_idle_entity(cx: &mut TestAppContext) {
 fn test_mutate_triggers_execution_and_completes(cx: &mut TestAppContext) {
     setup_query_client(cx);
 
-    struct H {
-        mutation: Entity<MutationResource<String, String, QueryError>>,
-    }
-
+    // Audit fix #47: use the shared `HookHarness` instead of a one-off `struct H`.
     let harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>((), cx);
         mutate(
@@ -49,16 +43,19 @@ fn test_mutate_triggers_execution_and_completes(cx: &mut TestAppContext) {
             cx,
         );
         assert!(entity.read(cx).is_loading(), "should be Loading immediately");
-        H { mutation: entity }
+        HookHarness::new(entity)
     });
 
     cx.run_until_parked();
 
-    cx.update(|cx| {
-        let resource = harness.read(cx).mutation.read(cx);
-        assert!(resource.is_success());
-        assert_eq!(resource.data(), Some(&"result-input-vars".to_string()));
+    // Audit fix #48: adopt the shared `run_until_parked_and_read` helper instead
+    // of `cx.run_until_parked()` + a manual `cx.update` read.
+    let data = run_until_parked_and_read(cx, &harness, |h, cx| {
+        let resource = h.entity.read(cx);
+        (resource.is_success(), resource.data().cloned())
     });
+    assert!(data.0, "mutation should be successful");
+    assert_eq!(data.1, Some("result-input-vars".to_string()));
 }
 
 #[gpui::test]

@@ -46,11 +46,25 @@
 //! }
 //! ```
 
+use std::sync::Arc;
+
 use gpui::{AppContext as _, Context, Entity, Subscription};
 
 use crate::core::{MappedQueryResource, QueryResource, SelectTransform};
 
 use super::{use_query, QueryOptions};
+
+/// The result of [`use_query_select`]: the projected view entity, the
+/// underlying query entity, and the pair of subscriptions that keep both
+/// observations alive.
+///
+/// Introduced as a type alias (audit #96) to satisfy `clippy::type_complexity`
+/// on the public hook signature and to give callers a name to reference.
+pub type QuerySelectResult<T, U, E> = (
+    Entity<MappedQueryResource<T, U, E>>,
+    Entity<QueryResource<T, E>>,
+    (Subscription, Subscription),
+);
 
 /// Subscribe to a query and project its data through a [`SelectTransform`].
 ///
@@ -92,11 +106,7 @@ pub fn use_query_select<T, U, E, C, F, Fut>(
     transform: SelectTransform<T, U>,
     fetcher: F,
     cx: &mut Context<C>,
-) -> (
-    Entity<MappedQueryResource<T, U, E>>,
-    Entity<QueryResource<T, E>>,
-    (Subscription, Subscription),
-)
+) -> QuerySelectResult<T, U, E>
 where
     T: Clone + PartialEq + Send + Sync + 'static,
     U: 'static,
@@ -109,16 +119,31 @@ where
     let (query_entity, query_subscription) = use_query(options, fetcher, cx);
 
     // Step 2: Seed the mapped resource with whatever data the query has now.
-    let initial_data: Option<T> =
-        query_entity.read_with(cx, |r, _| r.data().cloned());
+    // The source `QueryResource` owns `T` by value and only lends `&T`, so the
+    // initial seed clones `T` once into an `Arc<T>` (audit #20). Subsequent
+    // updates (Step 3) only re-clone `T` when the content has actually changed.
+    let initial_data: Option<Arc<T>> =
+        query_entity.read_with(cx, |r, _| r.data().map(|d| Arc::new(d.clone())));
     let mapped = MappedQueryResource::new(initial_data, transform);
     let mapped_entity = cx.new(|_| mapped);
 
     // Step 3: Observe the query entity so the mapped resource stays in sync.
     // Every time the query entity is updated (fetch completes, refetch, cache
-    // invalidation, etc.), we compare the new data against the cached source
-    // data by reference before cloning. This avoids cloning the entire source
-    // data T on every observer notification when nothing has changed.
+    // invalidation, etc.), we read the fresh source data once, compare it
+    // against the cached source, and only notify + re-store when it changed.
+    //
+    // Audit fix #4 / #20: source data is now stored as `Option<Arc<T>>`. The
+    // source `QueryResource` owns `T` by value and only lends `&T`, so to
+    // obtain an `Arc<T>` we must clone `T` once per fresh read (this matches
+    // the previous behavior, which also cloned `T` on every notification — no
+    // observable change). The win from #20 is downstream: `MappedQueryResource`
+    // clones (derived views, entity cloning) are now cheap `Arc::clone`s
+    // instead of full copies of `T`, and storage is shared. A true
+    // skip-the-clone comparison would require either an `Arc<T>` accessor on
+    // `QueryResource` (not owned here) or holding the `entity.read(cx)` borrow
+    // across `mapped.read_with`, which would regress the #115 nested-borrow
+    // fix — so we preserve #115 and keep the single clone, comparing content
+    // via `PartialEq` on `&T` to decide whether to notify.
     let mapped_weak = mapped_entity.downgrade();
     let mapped_subscription = cx.observe(&query_entity, move |_, entity, cx| {
         if let Some(mapped) = mapped_weak.upgrade() {
@@ -126,9 +151,11 @@ where
             // the mapped entity, so we never hold a borrow on `mapped` while
             // reading `entity`. Previously a nested entity read happened inside
             // `mapped.read_with`; that was shared-borrow-safe today but fragile.
-            // Capturing `fresh` by move keeps the comparison logic identical.
-            let fresh: Option<T> = entity.read(cx).data().cloned();
-            let changed = mapped.read_with(cx, |m, _| match (m.source_data(), fresh.as_ref()) {
+            // Clone into an owned `Arc<T>` up front so the `entity.read(cx)`
+            // borrow ends here, before the `mapped.read_with` call below.
+            let fresh: Option<Arc<T>> =
+                entity.read(cx).data().map(|d| Arc::new(d.clone()));
+            let changed = mapped.read_with(cx, |m, _| match (m.source_data(), fresh.as_deref()) {
                 (Some(cached), Some(fresh_ref)) => cached != fresh_ref,
                 (None, None) => false,
                 _ => true,

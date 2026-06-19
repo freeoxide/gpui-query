@@ -114,7 +114,7 @@ fn test_gc_evicts_completed_mutation_after_gc_time(cx: &mut TestAppContext) {
             // Success mutations are NOT in the evictable set (Idle | Failure only),
             // so they survive GC regardless of age.
             assert!(
-                mutations.len() >= 1,
+                !mutations.is_empty(),
                 "Success mutation should survive GC — only Idle/Failure are evictable"
             );
         });
@@ -331,11 +331,9 @@ fn test_query_observer_observe_returns_some_for_live_entity(cx: &mut TestAppCont
             // Create an observer and verify it can observe a live entity
             let mut observer = QueryObserver::new(&entity);
 
-            struct DummyView;
-            let view = cx.new(|_| DummyView);
-
-            // observe() should return Some(Subscription) for a live entity
-            let sub = view.update(cx, |_view, cx| observer.observe(cx));
+            // Audit fix #52: adopt the shared `observe_with_dummy_view` helper
+            // instead of defining a local `struct DummyView;` + manual view dance.
+            let sub = observe_with_dummy_view::<String, QueryError>(cx, &mut observer);
             assert!(
                 sub.is_some(),
                 "observe should return Some(Subscription) for a live entity"
@@ -369,4 +367,66 @@ fn test_observer_status_dedup_default_config_is_status_change_only(_cx: &mut Tes
         !always_notify.notify_on_status_change_only,
         "explicit always-notify config should be false"
     );
+}
+
+// -- #134: MutationBucket evict_oldest triggers past DEFAULT_MAX_ENTRIES ------
+//
+// Audit #134: verify that the MutationBucket `max_entries` cap actually binds
+// growth. `evict_oldest` (audit #2) is called from `insert` when the bucket is
+// at capacity, evicting the oldest non-loading entry. We insert more than
+// `DEFAULT_MAX_ENTRIES` (10_000) Idle mutations and assert the live entry count
+// stays bounded at exactly the cap — proving eviction fired on every subsequent
+// insert rather than growing without limit.
+//
+// `DEFAULT_MAX_ENTRIES` lives in the private `client::bucket::types` module and
+// isn't nameable from here; we mirror its documented value (10_000) as the
+// expected bound. If the constant changes, this test's expected value must be
+// updated to match.
+
+#[gpui::test]
+fn test_mutation_bucket_evict_oldest_keeps_count_bounded(cx: &mut TestAppContext) {
+    // Mirrors `crate::client::bucket::types::DEFAULT_MAX_ENTRIES` (pub(crate),
+    // not nameable from the tests module).
+    const MAX_ENTRIES: usize = 10_000;
+
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            // Hold strong refs to every created entity for the duration of the
+            // test. The bucket stores only WeakEntity handles; `evict_oldest`
+            // and `all_entities` skip dead weak refs, so the entities must stay
+            // alive for the count assertions below to be meaningful.
+            let mut live: Vec<gpui::Entity<MutationResource<String, String, QueryError>>> =
+                Vec::with_capacity(MAX_ENTRIES + 5);
+
+            // Insert MAX_ENTRIES + 5 Idle mutations — each one past the cap
+            // must trigger exactly one evict_oldest.
+            for _ in 0..(MAX_ENTRIES + 5) {
+                let entity = cx.new(|_| {
+                    MutationResource::<String, String, QueryError>::new(RetryPolicy::no_retries())
+                });
+                client.register_mutation::<String, String, QueryError>(&entity, cx);
+                live.push(entity);
+            }
+
+            let mutations = client.all_mutations::<String, String, QueryError>();
+            assert_eq!(
+                mutations.len(),
+                MAX_ENTRIES,
+                "MutationBucket entry count must stay bounded at DEFAULT_MAX_ENTRIES \
+                 ({}); evict_oldest should have triggered on every insert past the \
+                 cap (#134)", MAX_ENTRIES
+            );
+
+            // Diagnostics should agree with the bounded bucket size.
+            let diag = client.diagnostics(cx);
+            assert_eq!(
+                diag.mutation_count, MAX_ENTRIES,
+                "diagnostics.mutation_count must match the bounded bucket size"
+            );
+
+            // Hold `live` to the end so the strong refs outlive the assertions.
+            drop(live);
+        });
+    });
 }

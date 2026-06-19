@@ -55,7 +55,10 @@ fn query_error_from_string_ref() {
 #[test]
 fn query_error_as_ref_str() {
     let err = QueryError::response("detail");
-    assert_eq!(err.as_ref(), "detail");
+    // Disambiguate: QueryError impls both AsRef<str> and AsRef<Arc<str>>,
+    // so a bare `err.as_ref()` is ambiguous (E0283).
+    let s: &str = err.as_ref();
+    assert_eq!(s, "detail");
 }
 
 #[test]

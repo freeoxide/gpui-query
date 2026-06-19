@@ -3,6 +3,28 @@
 
 use crate::core::*;
 
+// ── Serde roundtrip helper (audit fix #55) ──────────────────────────────────
+//
+// The four enum roundtrip tests below (QueryStatus, MutationStatus, CachePolicy,
+// RequestPolicy) previously each inlined the same `serde_json::to_string` →
+// `from_str` → `assert_eq` triplet. This generic table-driven helper collapses
+// that pattern: each test now passes a slice of variants and asserts the
+// roundtrip in one call. Proof-of-consolidation; the other serde-roundtrip
+// files are left untouched.
+
+/// Assert that every value in `cases` survives a JSON serialize → deserialize
+/// roundtrip unchanged.
+fn assert_serde_roundtrip<T>(cases: &[T])
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug,
+{
+    for value in cases {
+        let json = serde_json::to_string(value).expect("serialize");
+        let back: T = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(&back, value, "serde roundtrip changed value (json={})", json);
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // QueryStatus
 // ═══════════════════════════════════════════════════════════════════════════
@@ -44,18 +66,15 @@ fn query_status_is_pending() {
 
 #[test]
 fn query_status_serde_roundtrip() {
-    for status in [
+    // Audit fix #55: table-driven via the shared roundtrip helper.
+    assert_serde_roundtrip(&[
         QueryStatus::Idle,
         QueryStatus::LoadingEmpty,
         QueryStatus::LoadingWithData,
         QueryStatus::Success,
         QueryStatus::Failure,
         QueryStatus::Cancelled,
-    ] {
-        let json = serde_json::to_string(&status).unwrap();
-        let back: QueryStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, status);
-    }
+    ]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -155,16 +174,13 @@ fn mutation_status_labels() {
 
 #[test]
 fn mutation_status_serde_roundtrip() {
-    for status in [
+    // Audit fix #55: table-driven via the shared roundtrip helper.
+    assert_serde_roundtrip(&[
         MutationStatus::Idle,
         MutationStatus::Loading,
         MutationStatus::Success,
         MutationStatus::Failure,
-    ] {
-        let json = serde_json::to_string(&status).unwrap();
-        let back: MutationStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, status);
-    }
+    ]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -231,15 +247,12 @@ fn cache_policy_ttl_is_expired_past_ttl() {
 
 #[test]
 fn cache_policy_serde_roundtrip() {
-    for policy in [
+    // Audit fix #55: table-driven via the shared roundtrip helper.
+    assert_serde_roundtrip(&[
         CachePolicy::NoCache,
         CachePolicy::Ttl { ttl_ms: 5_000 },
         CachePolicy::StaleWhileRevalidate { ttl_ms: 1_000, stale_ms: 2_000 },
-    ] {
-        let json = serde_json::to_string(&policy).unwrap();
-        let back: CachePolicy = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, policy);
-    }
+    ]);
 }
 
 #[test]
@@ -273,11 +286,8 @@ fn request_policy_labels() {
 
 #[test]
 fn request_policy_serde_roundtrip() {
-    for policy in [RequestPolicy::LatestWins, RequestPolicy::IgnoreWhileLoading] {
-        let json = serde_json::to_string(&policy).unwrap();
-        let back: RequestPolicy = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, policy);
-    }
+    // Audit fix #55: table-driven via the shared roundtrip helper.
+    assert_serde_roundtrip(&[RequestPolicy::LatestWins, RequestPolicy::IgnoreWhileLoading]);
 }
 
 #[test]

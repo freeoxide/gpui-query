@@ -183,7 +183,7 @@ mod tests {
         let id = r.begin_fetch_next(&mut seq, 1_000).unwrap();
         let guard = r.accept_current_request(id).unwrap();
 
-        r.complete_success_with_guard(&guard, vec!["page1".to_string()], true, true, 2_000);
+        r.complete_success_with_guard(guard, vec!["page1".to_string()], true, true, 2_000);
         assert_eq!(r.page_count(), 1);
         assert_eq!(r.status(), QueryStatus::Success);
         assert!(!r.is_fetching_next_page());
@@ -202,7 +202,7 @@ mod tests {
         // Attempt next page but fail — using two-phase protocol
         let id2 = r.begin_fetch_next(&mut seq, 3_000).unwrap();
         let guard = r.accept_current_request(id2).unwrap();
-        r.complete_failure_with_guard(&guard, "network error".into());
+        r.complete_failure_with_guard(guard, "network error".into());
 
         assert_eq!(r.status(), QueryStatus::Failure);
         assert_eq!(r.page_count(), 1); // pages preserved

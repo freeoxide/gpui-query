@@ -171,27 +171,24 @@ where
 
     // #fix #7/#11: Use InfiniteQueryObserver for status deduplication instead
     // of a raw cx.observe that fires on every entity mutation.
-    let mut observer = InfiniteQueryObserver::new(&entity);
+    let observer = InfiniteQueryObserver::new(&entity);
 
     // #fix #5: Use match-based fallback instead of expect() to avoid production
     // panics. Mirrors the pattern used in use_query_manual.
-    let subscription = match observer.observe(cx) {
-        Some(sub) => sub,
-        None => {
-            #[cfg(debug_assertions)]
-            panic!(
-                "InfiniteQueryObserver::observe failed: entity was just created and \
-                 cannot be dropped. This indicates a GPUI internal regression."
+    let Some(subscription) = observer.observe(cx) else {
+        #[cfg(debug_assertions)]
+        panic!(
+            "InfiniteQueryObserver::observe failed: entity was just created and \
+             cannot be dropped. This indicates a GPUI internal regression."
+        );
+        #[cfg(not(debug_assertions))]
+        {
+            eprintln!(
+                "WARNING: InfiniteQueryObserver::observe returned None. \
+                 Entity may have been dropped unexpectedly. \
+                 Falling back to a no-op subscription."
             );
-            #[cfg(not(debug_assertions))]
-            {
-                eprintln!(
-                    "WARNING: InfiniteQueryObserver::observe returned None. \
-                     Entity may have been dropped unexpectedly. \
-                     Falling back to a no-op subscription."
-                );
-                return (entity, Subscription::new(|| {}));
-            }
+            return (entity, Subscription::new(|| {}));
         }
     };
 
@@ -235,7 +232,7 @@ where
             });
             // Audit fix #6: store the task so a replacement fetch (or entity
             // drop on unmount) aborts the prior in-flight initial fetch.
-            let _ = entity.update(cx, |r, _| r.set_current_task(task));
+            entity.update(cx, |r, _| r.set_current_task(task));
         }
     }
 

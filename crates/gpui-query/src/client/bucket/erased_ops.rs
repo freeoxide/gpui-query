@@ -8,7 +8,7 @@ use gpui::App;
 
 use crate::client::devtools::QueryDiagnostic;
 use crate::client::erased::ErasedBucket;
-use crate::core::{QueryKey, QueryKeyFilter};
+use crate::core::{QueryKey, QueryKeyFilter, QueryStatus};
 
 use super::ops::QueryBucket;
 
@@ -60,13 +60,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
             .collect();
 
         for key in keys {
-            if let Some(entry) = self.entries.get(&key) {
-                if let Some(entity) = entry.entity.upgrade() {
+            if let Some(entry) = self.entries.get(&key)
+                && let Some(entity) = entry.entity.upgrade() {
                     entity.update(cx, |resource, _| {
                         resource.invalidate();
                     });
                 }
-            }
         }
     }
 
@@ -79,13 +78,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
             .collect();
 
         for key in keys {
-            if let Some(entry) = self.entries.get(&key) {
-                if let Some(entity) = entry.entity.upgrade() {
+            if let Some(entry) = self.entries.get(&key)
+                && let Some(entity) = entry.entity.upgrade() {
                     entity.update(cx, |resource, _| {
                         resource.reset();
                     });
                 }
-            }
         }
     }
 
@@ -107,8 +105,8 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
             .collect();
 
         for key in keys {
-            if let Some(entry) = self.entries.get(&key) {
-                if let Some(entity) = entry.entity.upgrade() {
+            if let Some(entry) = self.entries.get(&key)
+                && let Some(entity) = entry.entity.upgrade() {
                     let is_loading = entity.read_with(cx, |r, _| r.is_loading());
                     if is_loading {
                         entity.update(cx, |resource, _| {
@@ -119,7 +117,6 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
                         });
                     }
                 }
-            }
         }
     }
 
@@ -138,6 +135,20 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
                     cache_hits: resource.cache_hits(),
                     retry_count: resource.retry_count(),
                 })
+            })
+            .collect()
+    }
+
+    /// Lightweight key/status pairs (#9). Avoids the `String` allocations of
+    /// `cache_policy`/`retry_count` and the `now_ms` syscall for callers that
+    /// only need the key and status (e.g. `dehydrate`).
+    fn collect_key_status(&self, cx: &App) -> Vec<(String, QueryStatus)> {
+        self.entries
+            .iter()
+            .filter_map(|(key, entry)| {
+                let entity = entry.entity.upgrade()?;
+                let resource = entity.read(cx);
+                Some((key.to_path(), resource.status()))
             })
             .collect()
     }

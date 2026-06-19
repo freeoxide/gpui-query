@@ -189,9 +189,4 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub(crate) fn set_current_task(&mut self, task: gpui::Task<()>) {
         self.current_task.set(task);
     }
-
-    /// Abort the stored background task, if any.
-    pub(crate) fn abort_current_task(&mut self) {
-        self.current_task.abort();
-    }
 }

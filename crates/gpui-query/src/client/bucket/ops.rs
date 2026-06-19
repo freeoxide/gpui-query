@@ -8,7 +8,6 @@ use crate::core::{
     CachePolicy, QueryKey, QueryResource, QueryStatus, RequestPolicy, RequestSequencer,
 };
 
-use super::shared::should_run_opportunistic_gc;
 use super::types::{BucketEntry, DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS};
 
 /// Type-partitioned storage for query resources of a specific `(T, E)` type pair.
@@ -17,9 +16,6 @@ pub struct QueryBucket<T, E> {
     /// Maximum number of entries allowed in this bucket.
     /// When exceeded, the oldest entry (by `last_updated_ms`) is evicted.
     pub(crate) max_entries: usize,
-    /// Timestamp (ms since UNIX epoch) of the last GC sweep on this bucket.
-    /// Used by the opportunistic GC trigger to debounce sweeps (CL1/#105).
-    pub(crate) last_gc_ms: u128,
 }
 
 impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBucket<T, E> {
@@ -28,7 +24,6 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         Self {
             entries: AHashMap::new(),
             max_entries: DEFAULT_MAX_ENTRIES,
-            last_gc_ms: 0,
         }
     }
 
@@ -40,6 +35,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
     /// (#109) so in-flight requests are never evicted. The chosen key is
     /// cloned once (#59) rather than on every iteration.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
+        // Audit fix #59: find the winning key by reference first (no clone in
+        // the filter), then clone exactly once for the `remove`. Previously
+        // every candidate cloned its `QueryKey` just to feed `min_by_key`.
         let target = self
             .entries
             .iter()
@@ -50,11 +48,15 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
                     return None;
                 }
                 let age = resource.last_updated_at_ms().unwrap_or(0);
-                Some((key.clone(), age))
+                Some((key, age))
             })
             .min_by_key(|&(_, age)| age);
 
+        // Clone the winning key out of the immutable borrow so `remove` can
+        // take `&mut self.entries` (E0502: the iterator above still holds the
+        // shared borrow through `key`). One clone total — same as audit fix #59.
         if let Some((key, _)) = target {
+            let key = key.clone();
             self.entries.remove(&key);
         }
     }
@@ -78,6 +80,13 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         request_policy: RequestPolicy,
         cx: &mut App,
     ) -> gpui::Entity<QueryResource<T, E>> {
+        // Audit fix #58: previously the dead-ref path hashed the key up to 3x
+        // (get → remove → insert). We collapse it to 2x: one probe to resolve
+        // the hit/dead/miss outcome, then a single `insert` for the create
+        // path. `entry()` cannot span the eviction (its borrow of
+        // `self.entries` conflicts with `self.evict_oldest`'s borrow of `self`),
+        // so the dead/miss path re-probes via `insert` — best-effort, noted in
+        // the audit. The common alive-hit path is still a single hash.
         if let Some(entry) = self.entries.get(&key) {
             if let Some(entity) = entry.entity.upgrade() {
                 let needs_update = entity.read_with(cx, |resource, _| {
@@ -92,10 +101,10 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
                 }
                 return entity;
             }
-            self.entries.remove(&key);
-        }
-
-        if self.entries.len() >= self.max_entries {
+            // Dead occupant: fall through to the insert path, which overwrites
+            // the stale entry in place. Length is unchanged so no eviction.
+        } else if self.entries.len() >= self.max_entries {
+            // Vacant and at capacity: evict before creating.
             self.evict_oldest(cx);
         }
 
@@ -110,15 +119,10 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         entity
     }
 
-    /// Opportunistic GC — run GC every `GC_INTERVAL` insertions if enough time
-    /// has elapsed since the last sweep (CL1/#105). This makes GC actually
-    /// fire in production without requiring hooks to call `gc()` explicitly.
-    pub(crate) fn maybe_gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &App) {
-        if !should_run_opportunistic_gc(self.entries.len(), gc_time_ms, self.last_gc_ms, now_ms) {
-            return;
-        }
-        self.gc(now_ms, gc_time_ms, cx);
-    }
+    // (Audit cleanup: `maybe_gc` was dead code — never called from production.
+    // The real opportunistic trigger is `QueryClient::maybe_opportunistic_gc`,
+    // which drives `gc` directly every `GC_INTERVAL` ops. Removed alongside
+    // `should_run_opportunistic_gc` and the now-write-only `last_gc_ms` field.)
 
     /// Get an existing entity by key.
     ///
@@ -152,16 +156,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
     /// than trusting a cached snapshot. The snapshot machinery was never
     /// refreshed from production hooks, so it was always stale.
     pub(crate) fn gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &App) {
-        self.last_gc_ms = now_ms;
         let gc_time_ms = gc_time_ms.max(MIN_GC_TIME_MS);
         let gc_threshold = gc_time_ms as u128;
         let success_threshold = gc_threshold * (super::types::SUCCESS_GC_MULTIPLIER as u128);
 
         self.entries.retain(|_key, entry| {
-            let entity = match entry.entity.upgrade() {
-                Some(e) => e,
-                None => return false,
-            };
+            let Some(entity) = entry.entity.upgrade() else { return false };
             let resource = entity.read(cx);
 
             if resource.is_loading() {

@@ -50,16 +50,20 @@ pub struct QueryOptions {
     pub retry_policy: RetryPolicy,
     /// GC time in milliseconds. Default: 300_000 (5 minutes).
     ///
-    /// **Note**: Per-query GC time is not yet wired into the client/bucket layer.
-    /// The global GC time set via [`QueryClient::with_gc_time`] is used instead.
-    /// This field is stored for forward compatibility and will be implemented in
-    /// a future release.
+    /// **Reserved / forward-compat** (audit fix #80): settable via the
+    /// `.gc_time(ms)` builder, but **not yet consumed** by `use_query`,
+    /// `fetch_query`, or the bucket layer. Garbage collection currently runs
+    /// off the global GC time set via [`QueryClient::with_gc_time`]; this
+    /// per-query value is stored only so a future release can honor it without
+    /// a breaking API change. Setting it has no effect today.
     pub gc_time_ms: u64,
     /// Whether to keep previous data when the key changes.
     ///
-    /// **Note**: This field is not yet consumed by `use_query` or
-    /// `use_query_manual`. It is stored for forward compatibility and will be
-    /// implemented in a future release.
+    /// **Reserved / forward-compat** (audit fix #80): settable via the
+    /// `.keep_previous()` builder, but **not yet consumed** by `use_query` or
+    /// `use_query_manual`. The `placeholderData`/`keepPreviousData` behavior is
+    /// not yet implemented; the field is stored so a future release can honor
+    /// it without a breaking API change. Setting it has no effect today.
     pub keep_previous_data: bool,
     /// Whether to force a fetch (ignore cache).
     ///
@@ -69,27 +73,41 @@ pub struct QueryOptions {
     pub force_fetch: bool,
     /// Refetch on mount trigger.
     ///
-    /// **Note**: This field is not yet consumed. The event system integration
-    /// for automatic refetching on component mount is not yet implemented.
-    /// It is stored for forward compatibility.
+    /// **Reserved / forward-compat** (audit fix #80): settable on the struct,
+    /// but **not yet consumed**. The GPUI event-system integration for
+    /// automatic refetching on component mount is not yet implemented; the
+    /// field is stored so a future release can honor it without a breaking API
+    /// change. Setting it has no effect today.
     pub refetch_on_mount: RefetchTrigger,
     /// Refetch on window focus trigger.
     ///
-    /// **Note**: This field is not yet consumed. The event system integration
-    /// for automatic refetching on window focus is not yet implemented.
-    /// It is stored for forward compatibility.
+    /// **Reserved / forward-compat** (audit fix #80): settable on the struct,
+    /// but **not yet consumed**. The GPUI event-system integration for
+    /// automatic refetching on window focus is not yet implemented; the field
+    /// is stored so a future release can honor it without a breaking API
+    /// change. Setting it has no effect today.
     pub refetch_on_window_focus: RefetchTrigger,
     /// Refetch on reconnect trigger.
     ///
-    /// **Note**: This field is not yet consumed. The event system integration
-    /// for automatic refetching on reconnect is not yet implemented.
-    /// It is stored for forward compatibility.
+    /// **Reserved / forward-compat** (audit fix #80): settable on the struct,
+    /// but **not yet consumed**. The GPUI event-system integration for
+    /// automatic refetching on reconnect is not yet implemented; the field is
+    /// stored so a future release can honor it without a breaking API change.
+    /// Setting it has no effect today.
     pub refetch_on_reconnect: RefetchTrigger,
 }
 
 impl Default for QueryOptions {
     fn default() -> Self {
         Self {
+            // #77: The default key cannot be a `const` because `QueryKey`
+            // wraps an `Arc<[Arc<str>]>` and `Arc::from` is not const-stable,
+            // so `QueryKey` itself is not const-constructable. This is a
+            // single allocation per `QueryOptions::default()` call and is not
+            // on a hot path (`Default` is only invoked when a caller opts out
+            // of supplying a key, e.g. `use_mutation((), cx)`), so the runtime
+            // cost is acceptable. The `Arc` also means cloning the resulting
+            // default key is a single refcount bump.
             key: crate::core::QueryKey::from("default"),
             cache_policy: CachePolicy::default(),
             request_policy: RequestPolicy::default(),
@@ -158,14 +176,15 @@ impl QueryOptions {
         self
     }
 
-    /// Keep previous data when the key changes.
+/// Keep previous data when the key changes.
     ///
-    /// Audit fix #80: When `keep_previous_data` is `true`, `use_query` preserves
-    /// the prior `data`/`previous_data` slot across a key change so the
-    /// component continues to render the last successful result while the new
-    /// fetch is in flight, instead of flashing to `LoadingEmpty`. The
-    /// `refetch_on_*` triggers are stored for forward compatibility and are
-    /// not yet wired to GPUI window-focus / reconnect events.
+    /// **Reserved / forward-compat** (audit fix #80): sets the
+    /// `keep_previous_data` field, which is **not yet consumed** by `use_query`
+    /// or `use_query_manual`. The `keepPreviousData` behavior is intended for a
+    /// future release (preserve the prior `data`/`previous_data` slot across a
+    /// key change so the component keeps rendering the last successful result
+    /// while the new fetch is in flight). The builder is provided now so callers
+    /// can opt in without a future API change; calling it has no effect today.
     pub fn keep_previous(mut self) -> Self {
         self.keep_previous_data = true;
         self
@@ -189,6 +208,24 @@ impl From<String> for QueryOptions {
 impl From<crate::core::QueryKey> for QueryOptions {
     fn from(key: crate::core::QueryKey) -> Self {
         Self::new(key)
+    }
+}
+
+/// Build [`QueryOptions`] from a raw `(key, cache_policy, request_policy)`
+/// triple.
+///
+/// Audit fix #79: this lets `use_query_manual_opts` /
+/// `use_query_unsignalled_opts` accept callers that already hold the legacy
+/// raw-parameter triple without forcing them to spell out `QueryOptions::new`.
+/// Non-breaking: the existing constructors and `From` impls are untouched.
+impl From<(crate::core::QueryKey, CachePolicy, RequestPolicy)> for QueryOptions {
+    fn from((key, cache_policy, request_policy): (crate::core::QueryKey, CachePolicy, RequestPolicy)) -> Self {
+        Self {
+            key,
+            cache_policy,
+            request_policy,
+            ..Default::default()
+        }
     }
 }
 

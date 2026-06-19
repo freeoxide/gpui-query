@@ -88,7 +88,7 @@ where
     // of raw cx.observe. The observer only calls cx.notify() when MutationStatus
     // actually changes, preventing excessive re-renders from increment_retry()
     // and prepare_retry() calls that don't change status (stays Loading).
-    let mut m_observer = MutationObserver::new(&entity);
+    let m_observer = MutationObserver::new(&entity);
     // Audit fix #29: debug_assert + safe fallback instead of .expect() so a
     // GPUI internal regression does not panic production builds.
     let subscription = match m_observer.observe(cx) {
@@ -108,7 +108,7 @@ where
     // that use_mutation_state returns it, GC is triggered, and gc_time_ms
     // is respected.
     if cx.has_global::<QueryClient>() {
-        let _ = cx.update_global::<QueryClient, _>(|client, cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
             client.register_mutation(&entity, cx);
         });
     }
@@ -127,6 +127,10 @@ where
     since = "0.2.0",
     note = "Use `use_mutation(options, cx)` instead — it now accepts MutationOptions via Into"
 )]
+// Intentionally retained (exercised by `test_deprecated_use_mutation_with_options_still_works`)
+// but NOT re-exported from the crate root (audit #22). Flagged dead in the
+// lib-only build because no non-test caller reaches it.
+#[allow(dead_code)]
 pub fn use_mutation_with_options<V, T, E, C>(
     options: &MutationOptions,
     cx: &mut Context<C>,
@@ -387,7 +391,7 @@ fn begin_and_spawn<V, T, E, C, F, Fut>(
         }
     });
     // Audit fix #6: store the task so it is aborted on replacement / drop.
-    let _ = entity.update(cx, |r, cx| {
+    entity.update(cx, |r, cx| {
         r.set_current_task(task);
         cx.notify();
     });
@@ -447,7 +451,7 @@ fn begin_and_spawn_by_ref<V, T, E, C, F, Fut>(
         }
     });
     // Audit fix #6: store the task so it is aborted on replacement / drop.
-    let _ = entity.update(cx, |r, cx| {
+    entity.update(cx, |r, cx| {
         r.set_current_task(task);
         cx.notify();
     });

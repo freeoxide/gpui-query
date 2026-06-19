@@ -37,6 +37,7 @@ use crate::client::erased::current_time_ms;
 /// // prepared.complete_success(data, cx) or prepared.complete_failure(e, cx).
 /// # }
 /// ```
+#[must_use = "the prepared fetch holds the request ID and cancellation signal; dropping it without calling complete_success/complete_failure abandons the in-flight request"]
 pub struct PreparedFetch<T, E> {
     /// The query resource entity.
     pub entity: Entity<QueryResource<T, E>>,

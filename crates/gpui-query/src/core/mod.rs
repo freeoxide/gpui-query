@@ -97,9 +97,5 @@ mod current_task {
         pub(crate) fn set(&mut self, task: Task<()>) {
             self.0 = Some(task);
         }
-
-        pub(crate) fn abort(&mut self) {
-            self.0 = None;
-        }
     }
 }

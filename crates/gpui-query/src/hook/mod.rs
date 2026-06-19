@@ -115,7 +115,8 @@ pub use options::{InfiniteQueryOptions, MutationCallbacks, MutationOptions, Quer
 // ── Re-exports from query_hooks ─────────────────────────────────────────
 
 pub use query_hooks::{
-    fetch_query, fetch_query_with_signal, use_query, use_query_manual, use_query_unsignalled,
+    fetch_query, fetch_query_with_signal, use_query, use_query_manual, use_query_manual_opts,
+    use_query_unsignalled, use_query_unsignalled_opts,
 };
 
 // ── Re-exports from use_infinite_query ───────────────────────────────────
@@ -148,6 +149,18 @@ pub use mutation_hooks::{
 /// Audit fix #20: This is the canonical implementation used across the hook
 /// layer. The private duplicate in `mutation_bucket.rs` (`now_ms`) should
 /// ideally be consolidated here or into a shared utility module.
+///
+/// # Clock-before-epoch fallback
+///
+/// `duration_since(UNIX_EPOCH)` errors if the system clock reports a time
+/// *before* the Unix epoch (e.g. a misconfigured RTC or a clock skewed
+/// backwards on cold boot). The `.unwrap_or_default()` silently clamps that
+/// case to a `Duration::ZERO`, so this function returns `0`. Callers treat
+/// `0` as "ancient", which makes the only observable effect under a broken
+/// clock be that stale entries become immediately eligible for garbage
+/// collection; no panic or error is propagated. This mirrors the silent-clamp
+/// behavior of the `current_time_ms` in `client::erased` so both clock
+/// sources stay consistent.
 pub fn current_time_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

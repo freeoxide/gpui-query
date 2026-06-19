@@ -126,13 +126,10 @@ async fn run_query_retry_loop<T, E, F, Fut>(
         match result {
             Ok(data) => {
                 let now_ms = current_time_ms();
-                let e = match entity.upgrade() {
-                    Some(e) => e,
-                    None => {
-                        // Documented behavior -- if the owning component
-                        // was unmounted, the result is silently discarded.
-                        return;
-                    }
+                let Some(e) = entity.upgrade() else {
+                    // Documented behavior -- if the owning component
+                    // was unmounted, the result is silently discarded.
+                    return;
                 };
                 let _ = e.update(cx, |resource, cx| {
                     resource.reset_retry_count();
@@ -153,10 +150,7 @@ async fn run_query_retry_loop<T, E, F, Fut>(
             Err(error) => {
                 if retry_policy.should_retry(attempt) {
                     let delay_ms = retry_policy.delay_for_attempt(attempt);
-                    let e = match entity.upgrade() {
-                        Some(e) => e,
-                        None => return,
-                    };
+                    let Some(e) = entity.upgrade() else { return };
                     let _ = e.update(cx, |resource, _cx| {
                         resource.increment_retry();
                         // No cx.notify() here -- increment_retry does not change
@@ -175,10 +169,7 @@ async fn run_query_retry_loop<T, E, F, Fut>(
                     // Audit fix #6: After the retry delay, check whether the
                     // request has been cancelled (e.g., by a newer begin_request
                     // under LatestWins). If so, stop retrying immediately.
-                    let e = match entity.upgrade() {
-                        Some(e) => e,
-                        None => return,
-                    };
+                    let Some(e) = entity.upgrade() else { return };
                     let request_still_active =
                         read_entity(&e, cx, |r, _| r.is_current_request(request_id)).unwrap_or(false);
                     if !request_still_active {
@@ -204,10 +195,7 @@ async fn run_query_retry_loop<T, E, F, Fut>(
                     // Loop to retry
                 } else {
                     // No more retries -- complete with failure
-                    let e = match entity.upgrade() {
-                        Some(e) => e,
-                        None => return,
-                    };
+                    let Some(e) = entity.upgrade() else { return };
                     let failure_now_ms = current_time_ms();
                     let _ = e.update(cx, |resource, cx| {
                         if let Some(guard) = resource.accept_current_request(request_id) {
@@ -281,6 +269,6 @@ pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
     F: Fn(QuerySignal) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    let wrapper = move |sig: Option<QuerySignal>| fetcher(sig.unwrap_or_else(QuerySignal::new));
+    let wrapper = move |sig: Option<QuerySignal>| fetcher(sig.unwrap_or_default());
     run_query_retry_loop(wrapper, request_id, retry_policy, entity, cx, Some(initial_signal)).await;
 }

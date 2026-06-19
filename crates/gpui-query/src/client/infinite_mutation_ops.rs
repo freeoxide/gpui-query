@@ -64,12 +64,23 @@ impl QueryClient {
             );
             *bucket = Box::new(InfiniteQueryBucket::<T, E>::new());
         }
-        let typed = bucket
-            .as_any_mut()
-            .downcast_mut::<InfiniteQueryBucket<T, E>>()
-            .expect("TypeId-verified InfiniteQueryBucket must downcast correctly");
-
-        let entity = typed.get_or_create(key.into(), cache_policy, request_policy, cx);
+        // Audit fix #29: replace `.expect()` with a safe match. The `None`
+        // branch constructs a fresh typed bucket, runs the op on it, then
+        // stores it back — no production panic.
+        let typed = bucket.as_any_mut().downcast_mut::<InfiniteQueryBucket<T, E>>();
+        let entity = match typed {
+            Some(typed) => typed.get_or_create(key.into(), cache_policy, request_policy, cx),
+            None => {
+                debug_assert!(
+                    false,
+                    "InfiniteQueryBucket downcast failed after TypeId verification"
+                );
+                let mut fresh = InfiniteQueryBucket::<T, E>::new();
+                let entity = fresh.get_or_create(key.into(), cache_policy, request_policy, cx);
+                *bucket = Box::new(fresh);
+                entity
+            }
+        };
         // Audit fix CL1/#105: opportunistically run GC on this op.
         self.maybe_opportunistic_gc(cx);
         entity
@@ -117,11 +128,18 @@ impl QueryClient {
             );
             *bucket = Box::new(InfiniteQueryBucket::<T, E>::new());
         }
-        let typed = bucket
-            .as_any_mut()
-            .downcast_mut::<InfiniteQueryBucket<T, E>>()
-            .expect("TypeId-verified InfiniteQueryBucket must downcast correctly");
-        typed.sequencer_mut(key).map(|seq| seq.next_request())
+        // Audit fix #29: replace `.expect()` with a safe match returning `None`
+        // if (impossibly) the downcast fails after TypeId verification.
+        match bucket.as_any_mut().downcast_mut::<InfiniteQueryBucket<T, E>>() {
+            Some(typed) => typed.sequencer_mut(key).map(|seq| seq.next_request()),
+            None => {
+                debug_assert!(
+                    false,
+                    "InfiniteQueryBucket downcast failed after TypeId verification"
+                );
+                None
+            }
+        }
     }
 
     /// Get all infinite query entities of a given type pair.
@@ -168,15 +186,24 @@ impl QueryClient {
             );
             *bucket = Box::new(MutationBucket::<V, T, E>::new());
         }
-        let typed = bucket
-            .as_any_mut()
-            .downcast_mut::<MutationBucket<V, T, E>>()
-            .expect("TypeId-verified MutationBucket must downcast correctly");
-
-        typed.insert(entity, cx);
-        // Audit fix CL1/#105: opportunistically run GC on this op so completed
-        // mutations are eventually evicted without manual gc() calls.
-        self.maybe_opportunistic_gc(cx);
+        // Audit fix #29: replace `.expect()` with a safe match. On the
+        // (impossible) `None` branch, log and bail — no panic.
+        let typed = bucket.as_any_mut().downcast_mut::<MutationBucket<V, T, E>>();
+        match typed {
+            Some(typed) => {
+                typed.insert(entity, cx);
+                // Audit fix CL1/#105: opportunistically run GC on this op so
+                // completed mutations are eventually evicted without manual
+                // gc() calls.
+                self.maybe_opportunistic_gc(cx);
+            }
+            None => {
+                debug_assert!(
+                    false,
+                    "MutationBucket downcast failed after TypeId verification"
+                );
+            }
+        }
     }
 
     /// Get all mutation entities of a given type triple.

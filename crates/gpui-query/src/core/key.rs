@@ -44,16 +44,19 @@ impl QueryKey {
     }
 
     /// Create a single-segment key from a string.
+    #[must_use]
     pub fn from_single(value: impl AsRef<str>) -> Self {
         Self(Arc::from([Arc::from(value.as_ref())]))
     }
 
     /// The key segments.
+    #[must_use]
     pub fn parts(&self) -> &[Arc<str>] {
         &self.0
     }
 
     /// Returns the single segment if this key has exactly one part, else `None`.
+    #[must_use]
     pub fn as_single(&self) -> Option<&str> {
         if self.0.len() == 1 {
             Some(&self.0[0])
@@ -63,6 +66,7 @@ impl QueryKey {
     }
 
     /// Returns the first segment as a string slice.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self.0.first() {
             Some(s) => s.as_ref(),

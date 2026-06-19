@@ -16,6 +16,12 @@ impl AsRef<str> for QueryError {
     }
 }
 
+impl AsRef<std::sync::Arc<str>> for QueryError {
+    fn as_ref(&self) -> &std::sync::Arc<str> {
+        &self.message
+    }
+}
+
 impl From<String> for QueryError {
     /// Creates a [`QueryError`] with kind [`QueryErrorKind::Unknown`](super::QueryErrorKind::Unknown).
     ///

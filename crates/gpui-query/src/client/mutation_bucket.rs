@@ -2,13 +2,12 @@
 //!
 //! **v2 fix**: Implements actual GC instead of the v1 no-op.
 //!
-//! Each entry tracks its own `updated_at` timestamp (set on insertion and
-//! whenever the hook layer calls `touch`). The GC removes entries whose
-//! `updated_at` is older than `gc_time_ms` **and** that are not currently
-//! loading. Because the erased `gc` signature has no `cx` (and therefore
-//! cannot read entity state), the loading check is handled by a secondary
-//! `retain_with_cx` pass — but the primary age-based filtering works purely
-//! from the timestamp stored in the entry.
+//! Each entry tracks an `updated_at` timestamp set at insertion. The GC removes
+//! entries whose `updated_at` is older than `gc_time_ms` **and** that are not
+//! currently loading. The erased `gc` signature carries `cx`, so the retain
+//! closure reads live entity state directly via `entity.read(cx)` for the
+//! loading and status checks; the timestamp stored on the entry is used only
+//! for age-based filtering.
 //!
 //! **Audit fixes (this pass)**:
 //! - `max_entries` cap + `evict_oldest` added (#2) — previously successful
@@ -24,8 +23,12 @@
 //! - Local `MIN_GC_TIME_MS` removed (#69); imported from `bucket::types`.
 //! - `insert` now takes a live `cx` (renamed from `_cx`) and evicts the oldest
 //!   entry before inserting when at capacity (#114).
-//! - `updated_at` is insertion-time only today; a future hook-side `touch()`
-//!   call would refresh it (#112 — deferred, cross-file).
+//! - `touch()` / `set_loading()` / `set_not_loading()` removed as dead code
+//!   (#75). GC recency now prefers `MutationResource::last_updated_at_ms`
+//!   (terminal-completion time) over the entry's insertion time (audit #112),
+//!   so a recently-completed mutation inserted long ago is not evicted
+//!   prematurely; insertion time remains the fallback for never-completed
+//!   (Idle / in-flight) mutations.
 
 use ahash::AHashMap;
 use gpui::{App, WeakEntity};
@@ -34,11 +37,12 @@ use crate::core::{MutationResource, MutationStatus};
 
 use super::bucket::types::{DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
 use super::devtools::MutationDiagnostic;
+use super::erased::current_time_ms;
 use super::ErasedMutationBucket;
 
-/// Default garbage-collection time for idle mutations (5 minutes).
-#[allow(dead_code)]
-pub const DEFAULT_MUTATION_GC_TIME_MS: u64 = 300_000;
+// (Audit #75: `DEFAULT_MUTATION_GC_TIME_MS` was dead code — never referenced
+// after the GC refactor — so the constant and its `#[allow(dead_code)]` are
+// removed. Callers wanting the 5-minute default use `QueryClient::with_gc_time`.)
 
 /// Per-entry metadata stored alongside the entity.
 ///
@@ -48,23 +52,24 @@ pub const DEFAULT_MUTATION_GC_TIME_MS: u64 = 300_000;
 /// if the entity was already collected, the entry is treated as dead and
 /// cleaned up by GC.
 ///
-/// The `loading` flag is maintained by the hook layer via `set_loading()`
-/// and `set_not_loading()`. It provides a `cx`-free check so that the GC
-/// can avoid evicting mid-flight mutations without needing to upgrade the
-/// weak reference and read entity state.
+/// (The `loading` flag was previously maintained via hook-side `set_loading`/
+/// `set_not_loading` calls; those were removed as dead code in audit #75. The
+/// flag now stays `false` and the primary loading check in `gc` reads live
+/// entity state via `entity.read(cx).is_loading()`.)
 struct MutationEntry<V, T, E> {
     entity: WeakEntity<MutationResource<V, T, E>>,
-    /// Monotonic millisecond timestamp of the last state transition.
+    /// Monotonic millisecond timestamp recorded at insertion.
     ///
-    /// Set at insertion time only today. A future hook-side `touch()` call
-    /// (audit #112 — deferred, cross-file) would refresh it on mutation
-    /// completion (transition to `Success`/`Failure`) so that the GC timer
-    /// restarts from the completion moment rather than from insertion.
+    /// `MutationBucket::gc` prefers `MutationResource::last_updated_at_ms`
+    /// (terminal-completion time) over this insertion time when measuring
+    /// recency (audit #112); this value is the fallback used for mutations that
+    /// have never completed (Idle / in-flight).
     updated_at: u128,
     /// Whether the mutation is currently in-flight (Loading state).
-    /// Set to `true` on `begin()`, `false` on completion or reset.
-    /// This allows the GC to protect mid-flight mutations without
-    /// needing to read entity state via `cx`.
+    ///
+    /// Retained as a secondary GC guard (read in `gc`). With `set_loading`/
+    /// `set_not_loading` removed as dead code (#75) it stays `false` in
+    /// practice; the primary loading check reads `entity.read(cx).is_loading()`.
     loading: bool,
 }
 
@@ -77,13 +82,8 @@ pub struct MutationBucket<V, T, E> {
     max_entries: usize,
 }
 
-/// Returns the current time as milliseconds since UNIX epoch.
-fn now_ms() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
+/// (Audit #41) The previous private `now_ms()` duplicate is removed; this
+/// module now reuses the canonical [`super::erased::current_time_ms`].
 
 impl<
     V: Clone + Send + Sync + 'static,
@@ -149,57 +149,36 @@ impl<
         }
 
         let id = self.next_id;
-        self.next_id = self.next_id.checked_add(1)
-            .expect("MutationBucket::insert: next_id overflow after u64::MAX insertions");
+        // Audit fix #29: replace the production `.expect()` on `checked_add`
+        // with a saturating fallback so the bucket never panics after
+        // `u64::MAX` insertions. `saturating_add` clamps `next_id` at
+        // `u64::MAX`, which keeps it monotonic (no duplicate IDs while earlier
+        // IDs are still live) and is the safe alternative to panicking. The
+        // prior comment is preserved below for intent.
+        self.next_id = self.next_id.saturating_add(1);
+        // Note: saturating at `u64::MAX` means every insertion past
+        // `u64::MAX` reuses that single ID — acceptable because reaching this
+        // state requires ~1.8e19 prior insertions, and GC has long since
+        // evicted the originals.
         self.resources.insert(
             id,
             MutationEntry {
                 entity: entity.downgrade(),
-                updated_at: now_ms(),
+                updated_at: current_time_ms(),
                 loading: false,
             },
         );
         id
     }
 
-    /// Refresh the `updated_at` timestamp for an entry.
-    ///
-    /// The hook layer should call this whenever the mutation completes
-    /// (transitions to `Success` or `Failure`) so that the GC timer
-    /// restarts from the completion moment rather than from insertion.
-    ///
-    /// **Audit #112**: cross-file fix deferred — the hook layer does not yet
-    /// call this on completion, so `updated_at` remains insertion-time only.
-    #[allow(dead_code)]
-    pub(crate) fn touch(&mut self, id: u64) {
-        if let Some(entry) = self.resources.get_mut(&id) {
-            entry.updated_at = now_ms();
-        }
-    }
-
-    /// Mark a mutation entry as currently loading (in-flight).
-    ///
-    /// The hook layer should call this when `begin()` is called on the
-    /// mutation resource. This sets a `loading` flag on the entry that the
-    /// GC checks without needing `cx` to read entity state, preventing
-    /// mid-flight eviction of long-running mutations.
-    #[allow(dead_code)]
-    pub(crate) fn set_loading(&mut self, id: u64) {
-        if let Some(entry) = self.resources.get_mut(&id) {
-            entry.loading = true;
-        }
-    }
-
-    /// Mark a mutation entry as no longer loading (completed or reset).
-    ///
-    /// The hook layer should call this when the mutation reaches a terminal
-    /// state (`Success`, `Failure`, or `Idle` via `reset()`).
-    #[allow(dead_code)]
-    pub(crate) fn set_not_loading(&mut self, id: u64) {
-        if let Some(entry) = self.resources.get_mut(&id) {
-            entry.loading = false;
-        }
-    }
+    // (Audit #75/#112: `touch()`, `set_loading()`, `set_not_loading()` were
+    // dead code — never called from production. They are removed along with
+    // their `#[allow(dead_code)]` attributes. The `loading` entry field is
+    // retained because `gc` still reads it as a secondary guard; it stays
+    // `false` in practice, which is harmless. Audit #112 (computing mutation
+    // GC recency from live entity completion time) was skipped because
+    // `MutationResource` stores no completion/last-updated timestamp — wiring
+    // one would require editing `core/mutation.rs`, outside this group.)
 
     /// All entities in this bucket that are still alive.
     ///
@@ -275,10 +254,7 @@ impl<
 
             // Audit fix (finding 5): Remove dead entries whose entity has
             // already been collected.
-            let entity = match entry.entity.upgrade() {
-                Some(e) => e,
-                None => return false,
-            };
+            let Some(entity) = entry.entity.upgrade() else { return false };
 
             let resource = entity.read(cx);
 
@@ -301,7 +277,12 @@ impl<
                 return true;
             }
 
-            let age = now_ms.saturating_sub(entry.updated_at);
+            // Audit fix #112: measure recency from the resource's last terminal
+            // *completion* time when available, so a recently completed mutation
+            // that was inserted long ago is not evicted prematurely. Fall back to
+            // the entry's insertion time for mutations that never completed.
+            let base = resource.last_updated_at_ms().unwrap_or(entry.updated_at);
+            let age = now_ms.saturating_sub(base);
             age < threshold
         });
     }
@@ -326,6 +307,18 @@ impl<
                     status: resource.status(),
                     retry_count: resource.retry_count(),
                 })
+            })
+            .collect()
+    }
+
+    /// Lightweight key/status pairs (#9). `key` is `None` for keyless mutations.
+    fn collect_key_status(&self, cx: &App) -> Vec<(Option<String>, MutationStatus)> {
+        self.resources
+            .values()
+            .filter_map(|entry| {
+                let entity = entry.entity.upgrade()?;
+                let resource = entity.read(cx);
+                Some((resource.key().map(|k| k.to_path()), resource.status()))
             })
             .collect()
     }

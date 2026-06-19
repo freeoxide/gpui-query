@@ -182,6 +182,23 @@ pub fn begin_request_id(
     }
 }
 
+/// Accept the current request by `request_id` and complete it with success.
+///
+/// Convenience wrapper around [`QueryResource::complete_current_success`]
+/// (audit fix #85). Mirrors [`begin_request_id`] so tests that just need to
+/// drive a request through to `Success` can do so in one call without
+/// repeating the `(request_id, data, now_ms)` triple inline.
+///
+/// Returns `true` if the request was the active one and was completed.
+pub fn complete_success_id<T, E>(
+    r: &mut QueryResource<T, E>,
+    request_id: RequestId,
+    data: T,
+    now_ms: u128,
+) -> bool {
+    r.complete_current_success(request_id, data, now_ms)
+}
+
 // ── Cache/mutation option factories ────────────────────────────────────
 
 /// Build [`QueryOptions`] for a key with [`CachePolicy::NoCache`].
@@ -257,6 +274,29 @@ where
 {
     let view: Entity<DummyView> = cx.new(|_| DummyView);
     view.update(cx, |_view, cx| observer.observe(cx))
+}
+
+/// A minimal generic test harness that owns a single entity handle.
+///
+/// Audit fix #47: many hook-layer tests define a one-off `struct H { entity:
+/// Entity<...> }` purely to host hook calls via `cx.new(|cx| ...)` and later
+/// inspect the entity. [`HookHarness`] replaces that boilerplate for the common
+/// single-entity case: tests construct `cx.new(|cx| HookHarness::new(entity))`
+/// and read back via `harness.read(cx).entity.read(cx)`.
+///
+/// This is intentionally narrow (one entity). Tests that need to hold several
+/// handles, observer subscriptions, or counters should keep their bespoke
+/// harness struct — full migration of every harness is explicitly optional.
+pub struct HookHarness<T> {
+    /// The hook-managed entity under test.
+    pub entity: Entity<T>,
+}
+
+impl<T> HookHarness<T> {
+    /// Wrap a single entity handle in a harness.
+    pub fn new(entity: Entity<T>) -> Self {
+        Self { entity }
+    }
 }
 
 /// Run the executor until parked, then read from `entity` inside a fresh

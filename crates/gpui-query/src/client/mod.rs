@@ -144,7 +144,7 @@ impl QueryClient {
             return;
         }
         self.op_count = self.op_count.wrapping_add(1);
-        if self.op_count % GC_INTERVAL as u64 != 0 {
+        if !self.op_count.is_multiple_of(GC_INTERVAL as u64) {
             return;
         }
         let now_ms = current_time_ms();
@@ -199,13 +199,25 @@ impl QueryClient {
             );
             *bucket = Box::new(QueryBucket::<T, E>::new());
         }
-        // The TypeId check above guarantees this downcast succeeds.
-        let typed = bucket
-            .as_any_mut()
-            .downcast_mut::<QueryBucket<T, E>>()
-            .expect("TypeId-verified QueryBucket must downcast correctly");
-
-        let entity = typed.get_or_create(key.into(), cache_policy, request_policy, cx);
+        // Audit fix #29: replace the production `.expect()` with a safe match.
+        // On the (impossible, since `TypeId` was just verified) `None` branch we
+        // construct a fresh *typed* `QueryBucket`, perform the operation on it,
+        // and then store it back as the erased entry — no second downcast and no
+        // production panic. The normal path is identical to the prior `.expect()`.
+        let typed = bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>();
+        let entity = match typed {
+            Some(typed) => typed.get_or_create(key.into(), cache_policy, request_policy, cx),
+            None => {
+                debug_assert!(
+                    false,
+                    "QueryBucket downcast failed after TypeId verification"
+                );
+                let mut fresh = QueryBucket::<T, E>::new();
+                let entity = fresh.get_or_create(key.into(), cache_policy, request_policy, cx);
+                *bucket = Box::new(fresh);
+                entity
+            }
+        };
         // Audit fix CL1/#105: opportunistically run GC on this op.
         self.maybe_opportunistic_gc(cx);
         entity
@@ -263,11 +275,18 @@ impl QueryClient {
             );
             *bucket = Box::new(QueryBucket::<T, E>::new());
         }
-        let typed = bucket
-            .as_any_mut()
-            .downcast_mut::<QueryBucket<T, E>>()
-            .expect("TypeId-verified QueryBucket must downcast correctly");
-        typed.sequencer_mut(key).map(|seq| seq.next_request())
+        // Audit fix #29: replace `.expect()` with a safe match. Returns `None`
+        // if (impossibly) the downcast fails after the TypeId verification.
+        match bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>() {
+            Some(typed) => typed.sequencer_mut(key).map(|seq| seq.next_request()),
+            None => {
+                debug_assert!(
+                    false,
+                    "QueryBucket downcast failed after TypeId verification"
+                );
+                None
+            }
+        }
     }
 
     // ── Data accessors (Audit 3, Finding 6) ─────────────────────────────

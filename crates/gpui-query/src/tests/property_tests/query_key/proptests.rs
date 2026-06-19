@@ -30,7 +30,7 @@ proptest! {
     fn key_equality_same_segments(segments in arb_key()) {
         let k1 = make_key(&segments);
         let k2 = make_key(&segments);
-        prop_assert!(&k1 == &k2);
+        prop_assert!(k1 == k2);
     }
 
     /// Different segment lists produce unequal keys.
@@ -39,7 +39,7 @@ proptest! {
         prop_assume!(a != b);
         let k1 = make_key(&a);
         let k2 = make_key(&b);
-        prop_assert!(&k1 != &k2);
+        prop_assert!(k1 != k2);
     }
 }
 
@@ -67,7 +67,7 @@ proptest! {
     fn key_clone_equality(segments in arb_key()) {
         let key = make_key(&segments);
         let cloned = key.clone();
-        prop_assert!(&key == &cloned);
+        prop_assert!(key == cloned);
         // Verify cheap cloning: both keys deref to the same slice pointer
         let key_ptr: *const [std::sync::Arc<str>] = &*key;
         let cloned_ptr: *const [std::sync::Arc<str>] = &*cloned;
@@ -86,7 +86,7 @@ proptest! {
         let key = make_key(&segments);
         let json = serde_json::to_string(&key).unwrap();
         let back: QueryKey = serde_json::from_str(&json).unwrap();
-        prop_assert!(&key == &back);
+        prop_assert!(key == back);
     }
 
     /// deserialize(serialize(key)) == key for single-string keys.
@@ -95,7 +95,7 @@ proptest! {
         let key = QueryKey::from_single(&s);
         let json = serde_json::to_string(&key).unwrap();
         let back: QueryKey = serde_json::from_str(&json).unwrap();
-        prop_assert!(&key == &back);
+        prop_assert!(key == back);
     }
 }
 
@@ -248,11 +248,11 @@ proptest! {
     ) {
         let key = make_key(&segments);
         let cloned = key.clone();
-        prop_assert!(&key == &cloned);
+        prop_assert!(key == cloned);
         prop_assert_eq!(hash_of(&key), hash_of(&cloned));
         let json = serde_json::to_string(&key).unwrap();
         let back: QueryKey = serde_json::from_str(&json).unwrap();
-        prop_assert!(&key == &back);
+        prop_assert!(key == back);
         prop_assert_eq!(key.to_path(), segments.join("::"));
     }
 
@@ -266,10 +266,10 @@ proptest! {
     ) {
         let key = make_key(&segments);
         let cloned = key.clone();
-        prop_assert!(&key == &cloned);
+        prop_assert!(key == cloned);
         prop_assert!(key.starts_with(&key));
         let json = serde_json::to_string(&key).unwrap();
         let back: QueryKey = serde_json::from_str(&json).unwrap();
-        prop_assert!(&key == &back);
+        prop_assert!(key == back);
     }
 }

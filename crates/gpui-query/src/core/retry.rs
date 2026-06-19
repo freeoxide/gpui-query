@@ -101,9 +101,6 @@ impl RetryPolicy {
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        Self::new(3)
-            .with_exponential_backoff()
-            .with_delay(1000)
-            .with_max_delay(30_000)
+        Self::new(3).with_exponential_backoff()
     }
 }

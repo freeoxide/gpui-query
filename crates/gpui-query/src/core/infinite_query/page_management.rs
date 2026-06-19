@@ -71,11 +71,10 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// **Audit 3**: Uses `VecDeque::drain` — O(k) where k is the number of
     /// evicted pages.
     pub(super) fn enforce_max_pages_remove_front(&mut self) -> Vec<Arc<T>> {
-        if let Some(max) = self.max_pages {
-            if max > 0 && self.pages.len() > max {
+        if let Some(max) = self.max_pages
+            && max > 0 && self.pages.len() > max {
                 return self.pages.drain(..self.pages.len() - max).collect();
             }
-        }
         Vec::new()
     }
 
@@ -85,17 +84,22 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// page is always retained. Returns evicted pages for caller inspection.
     ///
     /// **Audit 3**: Uses `VecDeque::pop_back` — O(1) per eviction.
+    ///
+    /// **Audit 36**: Uses `VecDeque::drain` (matching the front variant) instead
+    /// of a `while`/`pop_back` loop — O(k) where k is the number of evicted
+    /// pages. The drained range is reversed so the returned vector preserves the
+    /// original back-to-front eviction order (most-recently-prepended page first).
     pub(super) fn enforce_max_pages_remove_back(&mut self) -> Vec<Arc<T>> {
-        let mut evicted = Vec::new();
-        if let Some(max) = self.max_pages {
-            if max > 0 {
-                while self.pages.len() > max {
-                    if let Some(page) = self.pages.pop_back() {
-                        evicted.push(page);
-                    }
-                }
+        if let Some(max) = self.max_pages
+            && max > 0 && self.pages.len() > max {
+                // Evict the oldest `len - max` pages from the back. The pages
+                // that survive are the first `max` (indices `0..max`), so drain
+                // from `max..`. The previous `start = len - max` formula drained
+                // `max` pages from the middle/back and left too few behind.
+                let mut evicted: Vec<Arc<T>> = self.pages.drain(max..).collect();
+                evicted.reverse();
+                return evicted;
             }
-        }
-        evicted
+        Vec::new()
     }
 }

@@ -60,7 +60,10 @@ pub(crate) fn swr_resource() -> QueryResource<&'static str> {
 }
 
 pub(crate) fn nocache_test_resource() -> QueryResource<&'static str> {
-    QueryResource::new("nocache-test", CachePolicy::NoCache, RequestPolicy::LatestWins)
+    // Audit fix #122: delegate to the shared `nocache_resource` helper in
+    // test_support rather than rebuilding the resource inline, so there is a
+    // single source of truth for the NoCache + LatestWins test resource.
+    nocache_resource("nocache-test")
 }
 
 pub(crate) fn seed_data(resource: &mut QueryResource<&'static str>, data: &'static str, stored_at_ms: u128) {

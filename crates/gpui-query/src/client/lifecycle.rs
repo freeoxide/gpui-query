@@ -116,43 +116,47 @@ impl QueryClient {
     /// the metadata (keys, type IDs) needed for typed restoration.
     pub fn dehydrate(&self, cx: &App) -> DehydratedState {
         let mut entries = Vec::new();
-        // Audit fix #92: cache the timestamp once instead of calling
-        // `current_time_ms()` per bucket (avoids repeated syscalls).
-        let now_ms = current_time_ms();
+
+        // Audit fix #94: collapse the three near-duplicate loops into a single
+        // helper closure. Each loop previously iterated full `QueryDiagnostic`/
+        // `MutationDiagnostic` structs just to read `key` + `status`; the
+        // helper now drives the lightweight `collect_key_status` (#9), which
+        // skips the per-entry allocations (`cache_policy`, `cache_age_ms`,
+        // `cache_hits`, `retry_count`). The emitted `DehydratedState` JSON
+        // shape is byte-identical to the previous implementation.
+        //
+        // Audit fix #9: `collect_key_status` yields only `(key, status)` pairs,
+        // avoiding the `Vec<QueryDiagnostic>`/`Vec<MutationDiagnostic>`
+        // allocations that `collect_diagnostics` builds per bucket.
+        let mut push_status_queries = |type_id: std::any::TypeId,
+                                       pairs: Vec<(String, QueryStatus)>,
+                                       kind: &'static str| {
+            for (key, status) in pairs {
+                if status == QueryStatus::Success {
+                    entries.push(DehydratedEntry {
+                        key,
+                        type_id,
+                        kind,
+                        data_json: None,
+                    });
+                }
+            }
+        };
 
         for (type_id, bucket) in &self.buckets {
-            for diag in bucket.collect_diagnostics(now_ms, cx) {
-                if diag.status == QueryStatus::Success {
-                    entries.push(DehydratedEntry {
-                        key: diag.key,
-                        type_id: *type_id,
-                        kind: "query",
-                        data_json: None,
-                    });
-                }
-            }
+            push_status_queries(*type_id, bucket.collect_key_status(cx), "query");
         }
-
         for (type_id, bucket) in &self.infinite_buckets {
-            for diag in bucket.collect_diagnostics(now_ms, cx) {
-                if diag.status == QueryStatus::Success {
-                    entries.push(DehydratedEntry {
-                        key: diag.key,
-                        type_id: *type_id,
-                        kind: "infinite",
-                        data_json: None,
-                    });
-                }
-            }
+            push_status_queries(*type_id, bucket.collect_key_status(cx), "infinite");
         }
 
         // Audit fix #113: include successful mutations, which were previously
         // skipped entirely. Mutations without a key are skipped (a keyless
         // mutation can't be meaningfully addressed for typed restoration).
         for (type_id, bucket) in &self.mutation_buckets {
-            for diag in bucket.collect_diagnostics(cx) {
-                if diag.status == MutationStatus::Success {
-                    if let Some(key) = diag.key {
+            for (key, status) in bucket.collect_key_status(cx) {
+                if status == MutationStatus::Success
+                    && let Some(key) = key {
                         entries.push(DehydratedEntry {
                             key,
                             type_id: *type_id,
@@ -160,7 +164,6 @@ impl QueryClient {
                             data_json: None,
                         });
                     }
-                }
             }
         }
 
@@ -258,8 +261,13 @@ impl QueryClient {
         // Get or create a request ID via the bucket's sequencer
         let request_id = self.next_request_id_for_key::<T, E>(&key);
 
-        // Begin the request on the resource
-        entity.update(cx, |resource, _| {
+        // Begin the request on the resource. Audit fix #16: the previous code
+        // captured the `started` boolean from this closure but then discarded
+        // it via a no-op `.then(|| false).unwrap_or(false)` chain, so it always
+        // read `false`. We now capture `started` directly (mirroring
+        // `prepare_prefetch_query`) so callers can distinguish a started fetch
+        // from a cache-hit / ignored-while-loading result.
+        let started = entity.update(cx, |resource, _| {
             if let Some(rid) = request_id {
                 let result = resource.begin_request_with_id(
                     Some(rid),
@@ -275,9 +283,13 @@ impl QueryClient {
             } else {
                 false
             }
-        })
-        .then(|| false)
-        .unwrap_or(false);
+        });
+
+        // Suppress unused-warning while preserving the captured value for
+        // symmetry with `prepare_prefetch_query`. `prepare_fetch_query`
+        // (force mode) always returns a `PreparedFetch` regardless of `started`
+        // — the caller drives the fetch — so the value is informational here.
+        let _ = started;
 
         // Re-read to get the signal and request ID
         let (request_id, signal) = entity.read_with(cx, |resource, _| {

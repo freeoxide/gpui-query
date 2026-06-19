@@ -9,7 +9,9 @@ use crate::client::QueryClient;
 use crate::core::InfiniteQueryResource;
 
 use crate::hook::current_time_ms;
-use super::fetch_runners::{run_fetch_next_page_with_id, run_fetch_previous_page_with_id};
+use super::fetch_runners::{
+    run_fetch_next_page_with_id, run_fetch_previous_page_with_id, PageDirection,
+};
 
 // ── Public fetch helpers ─────────────────────────────────────────────────
 
@@ -53,41 +55,7 @@ pub fn fetch_next_page_infinite<T, E, C, FNext, Fut>(
     FNext: Fn(Option<&T>) -> Fut + 'static + Clone,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    let weak = entity.downgrade();
-
-    // #fix: Use the bucket's persistent sequencer via QueryClient for
-    // monotonic RequestIds. The pre-allocated ID is passed through to
-    // begin_fetch_next_with_id so the resource's active_request_id matches
-    // the bucket's counter. Falls back to None (transient sequencer) when
-    // no QueryClient is available.
-    let maybe_request_id = if cx.has_global::<QueryClient>() {
-        let key = entity.read_with(cx, |r, _| r.key().clone());
-        cx.update_global::<QueryClient, _>(|client, _| {
-            client.next_request_id_for_infinite_key::<T, E>(&key)
-        })
-    } else {
-        None
-    };
-
-    let request_id = entity.update(cx, |resource, _| {
-        let now_ms = current_time_ms();
-        resource.begin_fetch_next_with_id(maybe_request_id, now_ms)
-    });
-
-    // #fix #2: Removed unconditional cx.notify() here. The InfiniteQueryObserver
-    // observes status changes and will trigger re-renders when status transitions
-    // from Idle/Success to Loading.
-
-    if let Some(request_id) = request_id {
-        let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-        // Audit fix #6: store the spawned task on the resource so a replacement
-        // fetch (or entity drop on unmount) aborts the prior in-flight task
-        // instead of leaving it detached and running.
-        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-            run_fetch_next_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx).await;
-        });
-        let _ = entity.update(cx, |r, _| r.set_current_task(task));
-    }
+    fetch_page_infinite(entity, fetcher, cx, PageDirection::Next);
 }
 
 /// Initiate a fetch of the previous page on an existing infinite query entity.
@@ -112,11 +80,34 @@ pub fn fetch_previous_page_infinite<T, E, C, FPrev, Fut>(
     FPrev: Fn(Option<&T>) -> Fut + 'static + Clone,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
+    fetch_page_infinite(entity, fetcher, cx, PageDirection::Previous);
+}
+
+// ── Private shared implementation ────────────────────────────────────────
+
+/// Shared body of [`fetch_next_page_infinite`] / [`fetch_previous_page_infinite`].
+///
+/// The two public helpers are ~90% duplicated, differing only by `direction`:
+/// which `begin_fetch_*_with_id` is called and which runner is spawned. This
+/// private fn unifies them; behavior is identical to the previous inlined
+/// implementations.
+fn fetch_page_infinite<T, E, C, F, Fut>(
+    entity: &Entity<InfiniteQueryResource<T, E>>,
+    fetcher: F,
+    cx: &mut Context<C>,
+    direction: PageDirection,
+) where
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    C: 'static,
+    F: Fn(Option<&T>) -> Fut + 'static + Clone,
+    Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
+{
     let weak = entity.downgrade();
 
     // #fix: Use the bucket's persistent sequencer via QueryClient for
     // monotonic RequestIds. The pre-allocated ID is passed through to
-    // begin_fetch_previous_with_id so the resource's active_request_id matches
+    // begin_fetch_*_with_id so the resource's active_request_id matches
     // the bucket's counter. Falls back to None (transient sequencer) when
     // no QueryClient is available.
     let maybe_request_id = if cx.has_global::<QueryClient>() {
@@ -130,19 +121,41 @@ pub fn fetch_previous_page_infinite<T, E, C, FPrev, Fut>(
 
     let request_id = entity.update(cx, |resource, _| {
         let now_ms = current_time_ms();
-        resource.begin_fetch_previous_with_id(maybe_request_id, now_ms)
+        match direction {
+            PageDirection::Next => {
+                resource.begin_fetch_next_with_id(maybe_request_id, now_ms)
+            }
+            PageDirection::Previous => {
+                resource.begin_fetch_previous_with_id(maybe_request_id, now_ms)
+            }
+        }
     });
 
-    // #fix #2: Removed unconditional cx.notify() here. InfiniteQueryObserver
-    // handles re-rendering on status transitions.
+    // #fix #2: Removed unconditional cx.notify() here. The InfiniteQueryObserver
+    // observes status changes and will trigger re-renders when status transitions
+    // from Idle/Success to Loading.
 
     if let Some(request_id) = request_id {
         let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
         // Audit fix #6: store the spawned task on the resource so a replacement
-        // fetch (or entity drop on unmount) aborts the prior in-flight task.
+        // fetch (or entity drop on unmount) aborts the prior in-flight task
+        // instead of leaving it detached and running.
         let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-            run_fetch_previous_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx).await;
+            match direction {
+                PageDirection::Next => {
+                    run_fetch_next_page_with_id(
+                        &weak, &fetcher, request_id, &retry_policy, cx,
+                    )
+                    .await;
+                }
+                PageDirection::Previous => {
+                    run_fetch_previous_page_with_id(
+                        &weak, &fetcher, request_id, &retry_policy, cx,
+                    )
+                    .await;
+                }
+            }
         });
-        let _ = entity.update(cx, |r, _| r.set_current_task(task));
+        entity.update(cx, |r, _| r.set_current_task(task));
     }
 }

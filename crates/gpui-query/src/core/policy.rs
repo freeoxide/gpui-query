@@ -182,7 +182,7 @@ fn write_duration(f: &mut std::fmt::Formatter<'_>, ms: u64) -> std::fmt::Result 
     if ms >= 1_000 {
         write!(f, "{}s", ms / 1_000)
     } else {
-        write!(f, "{}ms", ms)
+        write!(f, "{ms}ms")
     }
 }
 
@@ -254,11 +254,17 @@ pub enum QueryBeginResult {
 /// Shows seconds for values >= 1000ms, milliseconds otherwise.
 /// This avoids the misleading "0s" label that integer division produces
 /// for sub-second values.
+/// Reference formatting impl. The `Display` impls below intentionally inline
+/// this logic (writing directly to the `Formatter`) to avoid the `String`
+/// allocation; this standalone version is retained as the documented reference
+/// and is exercised by the unit tests below. Allowed dead because the lib-only
+/// build has no non-test caller.
+#[allow(dead_code)]
 fn format_duration(ms: u64) -> String {
     if ms >= 1_000 {
         format!("{}s", ms / 1_000)
     } else {
-        format!("{}ms", ms)
+        format!("{ms}ms")
     }
 }
 

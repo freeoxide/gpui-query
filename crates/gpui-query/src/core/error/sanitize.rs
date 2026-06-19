@@ -112,7 +112,7 @@ fn redact_url_schemes(text: &str, schemes: &[&str], replacement: &str) -> String
     loop {
         let mut earliest: Option<usize> = None;
         for scheme in schemes {
-            let needle = format!("{}://", scheme);
+            let needle = format!("{scheme}://");
             if let Some(rel) = lower[offset..].find(&needle) {
                 let abs = offset + rel;
                 match earliest {

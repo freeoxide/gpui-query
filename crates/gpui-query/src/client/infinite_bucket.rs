@@ -19,7 +19,6 @@
 use ahash::AHashMap;
 use gpui::{App, AppContext as _, WeakEntity};
 
-use super::bucket::shared::should_run_opportunistic_gc;
 use super::bucket::types::{DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
 use crate::core::{
     CachePolicy, InfiniteQueryResource, QueryKey, QueryKeyFilter, QueryStatus, RequestPolicy,
@@ -37,8 +36,6 @@ pub struct InfiniteQueryBucket<T, E> {
     entries: AHashMap<QueryKey, InfiniteBucketEntry<T, E>>,
     /// Maximum number of entries allowed in this bucket (#1 fix).
     max_entries: usize,
-    /// Timestamp (ms since UNIX epoch) of the last GC sweep (CL1/#105).
-    last_gc_ms: u128,
 }
 
 impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> InfiniteQueryBucket<T, E> {
@@ -46,7 +43,6 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
         Self {
             entries: AHashMap::new(),
             max_entries: DEFAULT_MAX_ENTRIES,
-            last_gc_ms: 0,
         }
     }
 
@@ -63,6 +59,10 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
         request_policy: RequestPolicy,
         cx: &mut App,
     ) -> gpui::Entity<InfiniteQueryResource<T, E>> {
+        // Audit fix #58: collapse the dead-ref path from get → remove → insert
+        // (3 hashes) to get → insert-overwrite (2 hashes). `entry()` cannot
+        // span the eviction (borrow conflict with `self.evict_oldest`), so the
+        // create path re-probes via `insert` — best-effort per the audit.
         if let Some(entry) = self.entries.get(&key) {
             if let Some(entity) = entry.entity.upgrade() {
                 let needs_update = entity.read_with(cx, |resource, _| {
@@ -77,10 +77,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
                 }
                 return entity;
             }
-            self.entries.remove(&key);
-        }
-
-        if self.entries.len() >= self.max_entries {
+            // Dead occupant: fall through to the insert path, which overwrites
+            // the stale entry in place. Length unchanged, no eviction.
+        } else if self.entries.len() >= self.max_entries {
             self.evict_oldest(cx);
         }
 
@@ -100,6 +99,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
     /// Mirrors `QueryBucket::evict_oldest`: skips in-flight entries (#109),
     /// clones the chosen key once (#59).
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
+        // Audit fix #59: select by reference first, clone once for removal.
         let target = self
             .entries
             .iter()
@@ -110,22 +110,22 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
                     return None;
                 }
                 let age = resource.last_updated_at_ms().unwrap_or(0);
-                Some((key.clone(), age))
+                Some((key, age))
             })
             .min_by_key(|&(_, age)| age);
 
+        // Clone the winning key out of the immutable borrow so `remove` can
+        // take `&mut self.entries` (E0502: the iterator above still holds the
+        // shared borrow through `key`). One clone total — same as audit fix #59.
         if let Some((key, _)) = target {
+            let key = key.clone();
             self.entries.remove(&key);
         }
     }
 
-    /// Opportunistic GC trigger (CL1/#105). See `bucket::shared`.
-    pub(crate) fn maybe_gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &App) {
-        if !should_run_opportunistic_gc(self.entries.len(), gc_time_ms, self.last_gc_ms, now_ms) {
-            return;
-        }
-        self.gc(now_ms, gc_time_ms, cx);
-    }
+    // (Audit cleanup: `maybe_gc` was dead code — never called from production.
+    // The real trigger is `QueryClient::maybe_opportunistic_gc`. Removed with
+    // `should_run_opportunistic_gc` and the now-write-only `last_gc_ms` field.)
 
     /// Get an existing entity by key.
     pub(crate) fn get(&self, key: &QueryKey) -> Option<gpui::Entity<InfiniteQueryResource<T, E>>> {
@@ -154,16 +154,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
     /// `Idle`/`Failure`/`Cancelled` entries older than `gc_time_ms` and
     /// `Success` entries older than `SUCCESS_GC_MULTIPLIER * gc_time_ms` (#1).
     pub(crate) fn gc(&mut self, now_ms: u128, gc_time_ms: u64, cx: &App) {
-        self.last_gc_ms = now_ms;
         let gc_time_ms = gc_time_ms.max(MIN_GC_TIME_MS);
         let gc_threshold = gc_time_ms as u128;
         let success_threshold = gc_threshold * (SUCCESS_GC_MULTIPLIER as u128);
 
         self.entries.retain(|_key, entry| {
-            let entity = match entry.entity.upgrade() {
-                Some(e) => e,
-                None => return false,
-            };
+            let Some(entity) = entry.entity.upgrade() else { return false };
             let resource = entity.read(cx);
 
             if resource.is_loading() {
@@ -234,13 +230,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
             .collect();
 
         for key in keys {
-            if let Some(entry) = self.entries.get(&key) {
-                if let Some(entity) = entry.entity.upgrade() {
+            if let Some(entry) = self.entries.get(&key)
+                && let Some(entity) = entry.entity.upgrade() {
                     entity.update(cx, |resource, _| {
                         resource.invalidate();
                     });
                 }
-            }
         }
     }
 
@@ -253,13 +248,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
             .collect();
 
         for key in keys {
-            if let Some(entry) = self.entries.get(&key) {
-                if let Some(entity) = entry.entity.upgrade() {
+            if let Some(entry) = self.entries.get(&key)
+                && let Some(entity) = entry.entity.upgrade() {
                     entity.update(cx, |resource, _| {
                         resource.reset();
                     });
                 }
-            }
         }
     }
 
@@ -277,8 +271,8 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
             .collect();
 
         for key in keys {
-            if let Some(entry) = self.entries.get(&key) {
-                if let Some(entity) = entry.entity.upgrade() {
+            if let Some(entry) = self.entries.get(&key)
+                && let Some(entity) = entry.entity.upgrade() {
                     let is_loading = entity.read_with(cx, |r, _| r.status().is_loading());
                     if is_loading {
                         entity.update(cx, |resource, _| {
@@ -288,7 +282,6 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
                         });
                     }
                 }
-            }
         }
     }
 
@@ -310,6 +303,18 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
                     cache_hits: resource.cache_hits(),
                     retry_count: resource.retry_count(),
                 })
+            })
+            .collect()
+    }
+
+    /// Lightweight key/status pairs (#9).
+    fn collect_key_status(&self, cx: &App) -> Vec<(String, QueryStatus)> {
+        self.entries
+            .iter()
+            .filter_map(|(key, entry)| {
+                let entity = entry.entity.upgrade()?;
+                let resource = entity.read(cx);
+                Some((key.to_path(), resource.status()))
             })
             .collect()
     }
