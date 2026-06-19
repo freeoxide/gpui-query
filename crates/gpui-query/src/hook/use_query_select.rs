@@ -132,35 +132,50 @@ where
     // invalidation, etc.), we read the fresh source data once, compare it
     // against the cached source, and only notify + re-store when it changed.
     //
-    // Audit fix #4 / #20: source data is now stored as `Option<Arc<T>>`. The
-    // source `QueryResource` owns `T` by value and only lends `&T`, so to
-    // obtain an `Arc<T>` we must clone `T` once per fresh read (this matches
-    // the previous behavior, which also cloned `T` on every notification — no
-    // observable change). The win from #20 is downstream: `MappedQueryResource`
-    // clones (derived views, entity cloning) are now cheap `Arc::clone`s
-    // instead of full copies of `T`, and storage is shared. A true
-    // skip-the-clone comparison would require either an `Arc<T>` accessor on
-    // `QueryResource` (not owned here) or holding the `entity.read(cx)` borrow
-    // across `mapped.read_with`, which would regress the #115 nested-borrow
-    // fix — so we preserve #115 and keep the single clone, comparing content
-    // via `PartialEq` on `&T` to decide whether to notify.
+    // Audit H1: the previous version cloned `T` into a fresh `Arc<T>` on
+    // EVERY notification (even the common case where data was unchanged) just
+    // to drive the `PartialEq` comparison. This version avoids that O(|T|)
+    // clone on unchanged notifications:
+    //   1. Clone the cached `Arc<T>` out of the mapped resource first via
+    //      `source_arc()` — a cheap refcount bump, no `T` clone. The mapped
+    //      borrow ends with that call (audit #115 preserved: no nested borrow).
+    //   2. Read the fresh `&T` straight from the source entity and compare
+    //      `&T` vs `&T` without cloning `T`.
+    //   3. Only when the content actually changed do we clone `T` into an
+    //      `Arc<T>` to hand to `update_source`, exactly as before.
+    // Net: unchanged notifications (the common case) pay one cheap `Arc::clone`
+    // instead of a full `T` clone + allocation; changed notifications behave
+    // identically (same `update_source` + `notify`).
+    //
+    // Audit fix #4 / #20: source data is still stored as `Option<Arc<T>>`, so
+    // `MappedQueryResource` clones (derived views, entity cloning) remain cheap
+    // `Arc::clone`s and storage stays shared.
     let mapped_weak = mapped_entity.downgrade();
     let mapped_subscription = cx.observe(&query_entity, move |_, entity, cx| {
         if let Some(mapped) = mapped_weak.upgrade() {
-            // Audit fix #115: Read the fresh source data ONCE before borrowing
-            // the mapped entity, so we never hold a borrow on `mapped` while
-            // reading `entity`. Previously a nested entity read happened inside
-            // `mapped.read_with`; that was shared-borrow-safe today but fragile.
-            // Clone into an owned `Arc<T>` up front so the `entity.read(cx)`
-            // borrow ends here, before the `mapped.read_with` call below.
-            let fresh: Option<Arc<T>> =
-                entity.read(cx).data().map(|d| Arc::new(d.clone()));
-            let changed = mapped.read_with(cx, |m, _| match (m.source_data(), fresh.as_deref()) {
-                (Some(cached), Some(fresh_ref)) => cached != fresh_ref,
-                (None, None) => false,
-                _ => true,
-            });
+            // Audit fix #115 / H1 step 1: Read the cached source `Arc<T>` out
+            // of the mapped resource FIRST, as an owned value (cheap refcount
+            // bump via `source_arc`). The mapped borrow ends here, so the
+            // `entity.read(cx)` below does NOT nest inside it.
+            let cached: Option<Arc<T>> = mapped.read_with(cx, |m, _| m.source_arc());
+
+            // H1 step 2: Compare cached `&T` vs fresh `&T` WITHOUT cloning T.
+            // `cached` is owned, so no nested borrow is taken on `mapped`.
+            let changed =
+                entity.read_with(cx, |r, _| match (&cached, r.data()) {
+                    (Some(c), Some(fresh)) => c.as_ref() != fresh,
+                    (None, None) => false,
+                    _ => true,
+                });
+
             if changed {
+                // H1 step 3: Only now clone `T` into an `Arc<T>` for the
+                // update (the source `QueryResource` owns `T` by value and only
+                // lends `&T`, so this single clone is unavoidable on change).
+                let fresh: Option<Arc<T>> = entity
+                    .read(cx)
+                    .data()
+                    .map(|d| Arc::new(d.clone()));
                 // Audit fix #116: Notify after updating the mapped source so
                 // third-party observers of the mapped entity (not just the
                 // primary caller, which already re-renders via the query

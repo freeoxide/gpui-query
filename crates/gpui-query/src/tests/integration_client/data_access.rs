@@ -184,6 +184,34 @@ fn test_get_query_data_returns_none_for_missing_key(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn test_with_query_data_reads_without_clone(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>("len_key", "hello".to_string(), cx);
+
+            // L12: `with_query_data` lends `&T` to the closure with NO clone of
+            // `T` (unlike `get_query_data`, which returns an owned `T`). The
+            // closure computes the length, so we never own/clone the `String`.
+            let len = client.with_query_data::<String, QueryError, usize>(
+                &QueryKey::from("len_key"),
+                cx,
+                |s| s.len(),
+            );
+            assert_eq!(len, Some(5));
+
+            // Missing key -> `None`; the closure is never called.
+            let missing = client.with_query_data::<String, QueryError, usize>(
+                &QueryKey::from("absent"),
+                cx,
+                |s| s.len(),
+            );
+            assert!(missing.is_none());
+        });
+    });
+}
+
+#[gpui::test]
 fn test_rollback_query_data_via_resource(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {

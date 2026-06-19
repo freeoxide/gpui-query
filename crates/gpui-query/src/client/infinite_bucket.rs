@@ -232,6 +232,38 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
             age_ms < gc_threshold
         });
     }
+
+    /// **L9**: shared "collect matching keys -> upgrade weak ref -> per-entry
+    /// action" driver used by `invalidate_matching` / `reset_matching` /
+    /// `cancel_matching` (the erased-trait impl below). Mirrors
+    /// [`QueryBucket::for_each_matching_entry`](super::QueryBucket::for_each_matching_entry).
+    ///
+    /// `remove_matching` is *not* routed through here — it is just
+    /// `HashMap::retain`. The `action` closure receives the upgraded strong
+    /// entity and `cx` so each caller picks its own lock pattern
+    /// (unconditional `update` for invalidate/reset; `read_with`-then-`update`
+    /// only-if-loading for cancel — see M7). Byte-identical to the prior
+    /// inlined loops.
+    fn for_each_matching_entry(
+        &mut self,
+        filter: &QueryKeyFilter,
+        cx: &mut App,
+        mut action: impl FnMut(&gpui::Entity<InfiniteQueryResource<T, E>>, &mut App),
+    ) {
+        let keys: Vec<QueryKey> = self
+            .entries
+            .keys()
+            .filter(|key| filter.matches(key))
+            .cloned()
+            .collect();
+
+        for key in keys {
+            if let Some(entry) = self.entries.get(&key)
+                && let Some(entity) = entry.entity.upgrade() {
+                    action(&entity, cx);
+                }
+        }
+    }
 }
 
 // Implement the erased trait so InfiniteQueryBucket can live in QueryClient's
@@ -262,39 +294,15 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
     /// inside the loop (#18 fix) — avoids pinning strong `Entity` handles in
     /// a `Vec` while iterating the map.
     fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        let keys: Vec<QueryKey> = self
-            .entries
-            .keys()
-            .filter(|key| filter.matches(key))
-            .cloned()
-            .collect();
-
-        for key in keys {
-            if let Some(entry) = self.entries.get(&key)
-                && let Some(entity) = entry.entity.upgrade() {
-                    entity.update(cx, |resource, _| {
-                        resource.invalidate();
-                    });
-                }
-        }
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            entity.update(cx, |resource, _| resource.invalidate());
+        });
     }
 
     fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        let keys: Vec<QueryKey> = self
-            .entries
-            .keys()
-            .filter(|key| filter.matches(key))
-            .cloned()
-            .collect();
-
-        for key in keys {
-            if let Some(entry) = self.entries.get(&key)
-                && let Some(entity) = entry.entity.upgrade() {
-                    entity.update(cx, |resource, _| {
-                        resource.reset();
-                    });
-                }
-        }
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            entity.update(cx, |resource, _| resource.reset());
+        });
     }
 
     fn remove_matching(&mut self, filter: &QueryKeyFilter) {
@@ -310,61 +318,56 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
     /// **M5**: after `signal.cancel()`, calls `resource.mark_ignored_result()`
     /// so the infinite resource bumps `ignored_results` exactly like the regular
     /// query path (the core half of M5 added the accessor).
+    ///
+    /// **M7 (deliberate trade-off, documented)**: `read_with`-then-`update`
+    /// (two lock acquisitions) per match, matching `QueryBucket::cancel_matching`.
+    /// `entity.update` always notifies observers even on a no-op closure, so
+    /// updating every match would spam observers for non-loading entries. We
+    /// gate on the authoritative `entity.read_with` `is_loading()` (NOT the M2
+    /// entry `loading` mirror, which could be stale and skip an in-flight
+    /// cancel) and only `update` when we will actually mutate. Accepted form
+    /// of the audit's refined fix.
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        let keys: Vec<QueryKey> = self
-            .entries
-            .keys()
-            .filter(|key| filter.matches(key))
-            .cloned()
-            .collect();
-
-        for key in keys {
-            if let Some(entry) = self.entries.get(&key)
-                && let Some(entity) = entry.entity.upgrade() {
-                    let is_loading = entity.read_with(cx, |r, _| r.is_loading());
-                    if is_loading {
-                        entity.update(cx, |resource, _| {
-                            if let Some(signal) = resource.signal() {
-                                signal.cancel();
-                            }
-                            resource.mark_ignored_result();
-                        });
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            let is_loading = entity.read_with(cx, |r, _| r.is_loading());
+            if is_loading {
+                entity.update(cx, |resource, _| {
+                    if let Some(signal) = resource.signal() {
+                        signal.cancel();
                     }
-                }
+                    resource.mark_ignored_result();
+                });
+            }
+        });
+    }
+
+    /// Push each live entry's diagnostic into `out` instead of allocating a
+    /// fresh `Vec`.
+    fn collect_diagnostics_into(&self, now_ms: u64, cx: &App, out: &mut Vec<QueryDiagnostic>) {
+        for (key, entry) in self.entries.iter() {
+            let Some(entity) = entry.entity.upgrade() else { continue };
+            let resource = entity.read(cx);
+            // L6: use the accessor (checked_sub → None on clock skew) so
+            // the diagnostic matches QueryBucket's cache_age_ms behavior.
+            let age_ms = resource.cache_age_ms(now_ms);
+            out.push(QueryDiagnostic {
+                key: key.to_path(),
+                status: resource.status(),
+                cache_policy: resource.cache_policy().label(),
+                cache_age_ms: age_ms,
+                cache_hits: resource.cache_hits(),
+                retry_count: resource.retry_count(),
+            });
         }
     }
 
-    /// Collect per-resource diagnostic details for all live infinite query entries.
-    fn collect_diagnostics(&self, now_ms: u64, cx: &App) -> Vec<QueryDiagnostic> {
-        self.entries
-            .iter()
-            .filter_map(|(key, entry)| {
-                let entity = entry.entity.upgrade()?;
-                let resource = entity.read(cx);
-                // L6: use the accessor (checked_sub → None on clock skew) so
-                // the diagnostic matches QueryBucket's cache_age_ms behavior.
-                let age_ms = resource.cache_age_ms(now_ms);
-                Some(QueryDiagnostic {
-                    key: key.to_path(),
-                    status: resource.status(),
-                    cache_policy: resource.cache_policy().label(),
-                    cache_age_ms: age_ms,
-                    cache_hits: resource.cache_hits(),
-                    retry_count: resource.retry_count(),
-                })
-            })
-            .collect()
-    }
-
-    /// Lightweight key/status pairs (#9).
-    fn collect_key_status(&self, cx: &App) -> Vec<(String, QueryStatus)> {
-        self.entries
-            .iter()
-            .filter_map(|(key, entry)| {
-                let entity = entry.entity.upgrade()?;
-                let resource = entity.read(cx);
-                Some((key.to_path(), resource.status()))
-            })
-            .collect()
+    /// Lightweight key/status pairs (#9). Pushes each live entry's `(key,
+    /// status)` pair into `out`.
+    fn collect_key_status_into(&self, cx: &App, out: &mut Vec<(String, QueryStatus)>) {
+        for (key, entry) in self.entries.iter() {
+            let Some(entity) = entry.entity.upgrade() else { continue };
+            let resource = entity.read(cx);
+            out.push((key.to_path(), resource.status()));
+        }
     }
 }

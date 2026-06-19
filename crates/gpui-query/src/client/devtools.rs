@@ -59,11 +59,15 @@ pub struct ClientDiagnostic {
 /// A single entry in a dehydrated query cache snapshot.
 ///
 /// Each entry represents one cached query resource, identified by its key
-/// and the `TypeId` of its `(T, E)` type pair. The `data_json` field holds
-/// the serialized data (if the resource had data at dehydration time).
+/// and the `TypeId` of its `(T, E)` type pair.
 ///
-/// The `kind` field distinguishes regular queries from infinite queries,
-/// allowing consumers to deserialize appropriately.
+/// The `kind` field distinguishes regular queries, infinite queries, and
+/// mutations, allowing consumers to deserialize appropriately.
+///
+/// **Audit fix #L14**: the `data_json: Option<String>` field was removed —
+/// `dehydrate()` always populated it with `None`, so it was 24 bytes/entry of
+/// dead weight. Typed data serialization (when it lands) will be added as a
+/// real field, not a permanently-`None` placeholder.
 #[derive(Clone, Debug)]
 pub struct DehydratedEntry {
     /// Full key path (e.g., "users::42::posts").
@@ -71,17 +75,8 @@ pub struct DehydratedEntry {
     /// `TypeId` of the `(T, E)` (query) or `(T, E)` (infinite query) type pair.
     /// Used to match entries to concrete types during hydration.
     pub type_id: TypeId,
-    /// Whether this entry is a regular query or an infinite query.
+    /// Whether this entry is a regular query, an infinite query, or a mutation.
     pub kind: &'static str,
-    /// Serialized data as a JSON string, if the resource had data at
-    /// dehydration time. `None` if the resource was Idle, Loading, or
-    /// had no serializable data.
-    ///
-    /// Full serialization requires type-specific code. This field is a
-    /// placeholder for future typed serialization support. Callers can
-    /// use `get_query_data` to extract typed data and serialize it
-    /// externally if needed.
-    pub data_json: Option<String>,
 }
 
 /// A portable snapshot of all cached query state.
@@ -112,7 +107,6 @@ pub struct DehydratedEntry {
 ///     key: "users".to_string(),
 ///     type_id: TypeId::of::<(String, String)>(),
 ///     kind: "query",
-///     data_json: None,
 /// }];
 /// let state = DehydratedState { entries };
 /// assert_eq!(state.entries.len(), 1);

@@ -100,12 +100,14 @@ where
         // Audit fix #61: opts.key was cloned once above for use_query_manual
         // and is no longer needed after this call, so move it instead of
         // cloning again (removes a redundant second clone of the key).
-        if let Some(request_id) = begin_request_on_entity(&entity, cx, fetch_mode, Some(key))
+        if let (Some(request_id), signal) =
+            begin_request_on_entity(&entity, cx, fetch_mode, Some(key))
         {
-            // Read signal *after* begin_request creates it, not before.
-            let signal = entity.read_with(cx, |r, _| {
-                r.signal().cloned().unwrap_or_else(QuerySignal::new)
-            });
+            // Audit H3: `signal` comes straight from begin_request_on_entity
+            // (read in the same entity.update as the begin) instead of via a
+            // separate entity.read_with pass. unwrap_or_else covers the
+            // pathological case where begin created no signal.
+            let signal = signal.unwrap_or_else(QuerySignal::new);
             let weak = entity.downgrade();
             let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
             // Audit fix #6: store the spawned task on the resource so a
@@ -160,7 +162,7 @@ where
     if should_fetch {
         // Audit fix #3: Only spawn fetch if begin_request returns a real RequestId.
         // Audit fix #2: Thread the key through to avoid re-reading from entity.
-        if let Some(request_id) =
+        if let (Some(request_id), _signal) =
             begin_request_on_entity(&entity, cx, QueryFetchMode::Normal, Some(key))
         {
             let weak = entity.downgrade();
@@ -333,7 +335,8 @@ pub fn fetch_query<T, E, C, F, Fut>(
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
     // Audit fix #3: Only spawn fetch if begin_request returns a real RequestId.
-    let Some(request_id) = begin_request_on_entity(entity, cx, QueryFetchMode::Normal, None)
+    let (Some(request_id), _signal) =
+        begin_request_on_entity(entity, cx, QueryFetchMode::Normal, None)
     else {
         return;
     };
@@ -379,13 +382,14 @@ pub fn fetch_query_with_signal<T, E, C, F, Fut>(
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
     // Audit fix #3: Only spawn fetch if begin_request returns a real RequestId.
-    let Some(request_id) = begin_request_on_entity(entity, cx, QueryFetchMode::Normal, None)
+    let (Some(request_id), signal) =
+        begin_request_on_entity(entity, cx, QueryFetchMode::Normal, None)
     else {
         return;
     };
-    let signal = entity.read_with(cx, |r, _| {
-        r.signal().cloned().unwrap_or_else(QuerySignal::new)
-    });
+    // Audit H3: `signal` is the one begin_request just created, read in the
+    // same entity.update as the begin (no separate read pass).
+    let signal = signal.unwrap_or_else(QuerySignal::new);
     let weak = entity.downgrade();
 
     // FnOnce fetchers can only be called once, so retries are not possible.

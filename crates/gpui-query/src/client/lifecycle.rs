@@ -79,12 +79,11 @@ impl QueryClient {
     /// diagnostics via `collect_diagnostics` on each erased bucket.
     pub fn diagnostics(&self, cx: &App) -> ClientDiagnostic {
         let now_ms = current_time_ms();
-        // L1: pre-size the diagnostic Vecs from the bucket `count()` sums so
-        // `collect_diagnostics` (which allocates a Vec per bucket and then
-        // `extend`s) does not repeatedly reallocate the destination Vec as it
-        // grows. `count()` is `entries.len()` — exact for live entries, an
-        // upper bound for the diagnostics (dead entries are skipped), so this
-        // never under-allocates.
+        // L1: pre-size the diagnostic Vecs from the bucket `count()` sums so the
+        // per-bucket `collect_diagnostics_into` pushes (L3) don't repeatedly
+        // reallocate the destination Vec as it grows. `count()` is
+        // `entries.len()` — exact for live entries, an upper bound for the
+        // diagnostics (dead entries are skipped), so this never under-allocates.
         let mut query_count = 0;
         let mut mutation_count = 0;
         for bucket in self.buckets.values() {
@@ -99,14 +98,17 @@ impl QueryClient {
         let mut queries = Vec::with_capacity(query_count);
         let mut mutations = Vec::with_capacity(mutation_count);
 
+        // L3: push each bucket's diagnostics straight into the single pre-sized
+        // Vec via the sink variant — avoids the per-bucket `Vec` allocation +
+        // `extend` that the returning `collect_diagnostics` variant forces.
         for bucket in self.buckets.values() {
-            queries.extend(bucket.collect_diagnostics(now_ms, cx));
+            bucket.collect_diagnostics_into(now_ms, cx, &mut queries);
         }
         for bucket in self.infinite_buckets.values() {
-            queries.extend(bucket.collect_diagnostics(now_ms, cx));
+            bucket.collect_diagnostics_into(now_ms, cx, &mut queries);
         }
         for bucket in self.mutation_buckets.values() {
-            mutations.extend(bucket.collect_diagnostics(cx));
+            bucket.collect_diagnostics_into(cx, &mut mutations);
         }
 
         ClientDiagnostic {
@@ -143,54 +145,83 @@ impl QueryClient {
             + self.mutation_buckets.values().map(|b| b.count()).sum::<usize>();
         let mut entries = Vec::with_capacity(cap);
 
-        // Audit fix #94: collapse the three near-duplicate loops into a single
-        // helper closure. Each loop previously iterated full `QueryDiagnostic`/
-        // `MutationDiagnostic` structs just to read `key` + `status`; the
-        // helper now drives the lightweight `collect_key_status` (#9), which
-        // skips the per-entry allocations (`cache_policy`, `cache_age_ms`,
-        // `cache_hits`, `retry_count`). The emitted `DehydratedState` JSON
-        // shape is byte-identical to the previous implementation.
+        // Audit fix #L13: collapse all three loops (query / infinite / mutation)
+        // into a single helper. The previous shape used a `push_status_queries`
+        // closure that handled only the two query-shaped loops (both
+        // `Vec<(String, QueryStatus)>`) and left the mutation loop inlined
+        // separately — its items are `(Option<String>, MutationStatus)`, so it
+        // couldn't reuse the closure. `push_status` below is generic over the
+        // status type and the success sentinel, so all three kinds share one
+        // code path. The emitted `DehydratedState` JSON shape is byte-identical
+        // to the previous implementation (only entries whose real status equals
+        // the success sentinel are pushed).
         //
-        // Audit fix #9: `collect_key_status` yields only `(key, status)` pairs,
-        // avoiding the `Vec<QueryDiagnostic>`/`Vec<MutationDiagnostic>`
-        // allocations that `collect_diagnostics` builds per bucket.
-        let mut push_status_queries = |type_id: std::any::TypeId,
-                                       pairs: Vec<(String, QueryStatus)>,
-                                       kind: &'static str| {
+        // Audit fix #L14: the `data_json` field is gone (it was always `None`),
+        // so we no longer pass the dead initializer here.
+        //
+        // Audit fix #94 / #9: this still drives the lightweight `collect_key_status`
+        // (key + status only), skipping the per-entry allocations that
+        // `collect_diagnostics` builds (`cache_policy`, `cache_age_ms`,
+        // `cache_hits`, `retry_count`).
+        //
+        // Audit fix #113: mutations are included; keyless mutations are skipped
+        // (a keyless mutation can't be meaningfully addressed for typed
+        // restoration).
+        fn push_status<S>(
+            entries: &mut Vec<DehydratedEntry>,
+            type_id: std::any::TypeId,
+            pairs: impl IntoIterator<Item = (Option<String>, S)>,
+            success: S,
+            kind: &'static str,
+        ) where
+            S: PartialEq,
+        {
             for (key, status) in pairs {
-                if status == QueryStatus::Success {
-                    entries.push(DehydratedEntry {
-                        key,
-                        type_id,
-                        kind,
-                        data_json: None,
-                    });
+                if status == success
+                    && let Some(key) = key
+                {
+                    entries.push(DehydratedEntry { key, type_id, kind });
                 }
             }
-        };
+        }
+
+        // L3: reuse two buffers across all buckets instead of allocating a fresh
+        // `Vec` per bucket (the returning `collect_key_status` variant). Each
+        // bucket appends into the shared buffer via the sink; the buffer is
+        // drained per bucket so it never grows unbounded and the keys move
+        // (no clone) into `entries`.
+        let mut q_pairs: Vec<(String, QueryStatus)> = Vec::new();
+        let mut m_pairs: Vec<(Option<String>, MutationStatus)> = Vec::new();
 
         for (type_id, bucket) in &self.buckets {
-            push_status_queries(*type_id, bucket.collect_key_status(cx), "query");
+            bucket.collect_key_status_into(cx, &mut q_pairs);
+            push_status(
+                &mut entries,
+                *type_id,
+                q_pairs.drain(..).map(|(k, s)| (Some(k), s)),
+                QueryStatus::Success,
+                "query",
+            );
         }
         for (type_id, bucket) in &self.infinite_buckets {
-            push_status_queries(*type_id, bucket.collect_key_status(cx), "infinite");
+            bucket.collect_key_status_into(cx, &mut q_pairs);
+            push_status(
+                &mut entries,
+                *type_id,
+                q_pairs.drain(..).map(|(k, s)| (Some(k), s)),
+                QueryStatus::Success,
+                "infinite",
+            );
         }
-
-        // Audit fix #113: include successful mutations, which were previously
-        // skipped entirely. Mutations without a key are skipped (a keyless
-        // mutation can't be meaningfully addressed for typed restoration).
         for (type_id, bucket) in &self.mutation_buckets {
-            for (key, status) in bucket.collect_key_status(cx) {
-                if status == MutationStatus::Success
-                    && let Some(key) = key {
-                        entries.push(DehydratedEntry {
-                            key,
-                            type_id: *type_id,
-                            kind: "mutation",
-                            data_json: None,
-                        });
-                    }
-            }
+            bucket.collect_key_status_into(cx, &mut m_pairs);
+            push_status(
+                &mut entries,
+                *type_id,
+                m_pairs.drain(..),
+                MutationStatus::Success,
+                "mutation",
+            );
         }
 
         DehydratedState { entries }
