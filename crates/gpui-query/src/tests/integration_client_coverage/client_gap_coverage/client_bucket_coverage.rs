@@ -79,7 +79,7 @@ fn test_use_infinite_query_without_query_client(cx: &mut TestAppContext) {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.status(), QueryStatus::Success);
         assert_eq!(resource.pages().len(), 1);
-        assert_eq!(resource.pages()[0], vec![1]);
+        assert_eq!(resource.pages()[0].as_ref(), &vec![1]);
     });
 }
 

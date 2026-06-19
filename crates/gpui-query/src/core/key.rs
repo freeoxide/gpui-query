@@ -44,16 +44,19 @@ impl QueryKey {
     }
 
     /// Create a single-segment key from a string.
+    #[must_use]
     pub fn from_single(value: impl AsRef<str>) -> Self {
         Self(Arc::from([Arc::from(value.as_ref())]))
     }
 
     /// The key segments.
+    #[must_use]
     pub fn parts(&self) -> &[Arc<str>] {
         &self.0
     }
 
     /// Returns the single segment if this key has exactly one part, else `None`.
+    #[must_use]
     pub fn as_single(&self) -> Option<&str> {
         if self.0.len() == 1 {
             Some(&self.0[0])
@@ -63,7 +66,13 @@ impl QueryKey {
     }
 
     /// Returns the first segment as a string slice.
-    pub fn as_str(&self) -> &str {
+    ///
+    /// This yields only the **first** segment of the key, not the full key.
+    /// For a joined representation of the entire key, use [`QueryKey::to_path`];
+    /// for the single segment when the key has exactly one part, use
+    /// [`QueryKey::as_single`].
+    #[must_use]
+    pub fn first_segment(&self) -> &str {
         match self.0.first() {
             Some(s) => s.as_ref(),
             None => "",
@@ -92,13 +101,7 @@ impl QueryKey {
             // An empty prefix matches every valid (non-empty) key.
             return !self.0.is_empty();
         }
-        if prefix.0.len() > self.0.len() {
-            return false;
-        }
-        self.0[..prefix.0.len()]
-            .iter()
-            .zip(prefix.0.iter())
-            .all(|(a, b)| a == b)
+        self.0.starts_with(&prefix.0)
     }
 
     /// Create a new key by appending an extra segment.
@@ -191,7 +194,7 @@ mod tests {
     fn single_part_key_from_str() {
         let key = QueryKey::from("users");
         assert_eq!(key.parts().len(), 1);
-        assert_eq!(key.as_str(), "users");
+        assert_eq!(key.first_segment(), "users");
         assert_eq!(key.as_single(), Some("users"));
     }
 

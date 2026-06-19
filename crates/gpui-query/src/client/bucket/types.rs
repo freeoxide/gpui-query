@@ -2,7 +2,7 @@
 
 use gpui::WeakEntity;
 
-use crate::core::{CachePolicy, QueryResource, QueryStatus, RequestSequencer};
+use crate::core::{QueryResource, RequestSequencer};
 
 /// Minimum GC time in milliseconds.
 ///
@@ -22,69 +22,40 @@ pub(crate) const DEFAULT_MAX_ENTRIES: usize = 10_000;
 /// Multiplier applied to `gc_time_ms` to determine the maximum age for
 /// `Success` resources before they become eligible for eviction.
 ///
-/// A `Success` resource with zero observers whose data age exceeds
+/// A `Success` resource whose data age exceeds
 /// `SUCCESS_GC_MULTIPLIER * gc_time_ms` will be evicted even though it
 /// holds valuable data. This prevents memory leaks from queries that
 /// succeeded once but were never observed again.
 pub(crate) const SUCCESS_GC_MULTIPLIER: u32 = 2;
 
-/// Cached status snapshot for GC decisions, updated on each request completion.
-///
-/// This allows the GC to filter entries without acquiring entity read locks
-/// (finding 1 fix). The trade-off is a small per-update cost: when a request
-/// completes (success or failure), the hook layer calls
-/// `update_status_snapshot` to sync this cache.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StatusSnapshot {
-    /// The `QueryStatus` at the time of the last snapshot.
-    pub status: QueryStatus,
-    /// `last_updated_at` in milliseconds since UNIX epoch, or `None` if the
-    /// resource has never completed a fetch.
-    pub last_updated_ms: Option<u128>,
-    /// The `CachePolicy` at the time of the last snapshot.
-    pub cache_policy: CachePolicy,
-}
-
-impl Default for StatusSnapshot {
-    fn default() -> Self {
-        Self {
-            status: QueryStatus::Idle,
-            last_updated_ms: None,
-            cache_policy: CachePolicy::default(),
-        }
-    }
-}
-
-/// Entry co-locating weak entity reference, sequencer, observer tracking,
-/// and cached status for GC.
+/// Entry co-locating weak entity reference and sequencer.
 ///
 /// Uses `WeakEntity` instead of `Entity` so that the bucket does not prevent
 /// GPUI from garbage-collecting unused query resources. The weak reference is
 /// upgraded on access; if the entity was already collected, the entry is
 /// treated as missing and re-created on next `get_or_create`.
 ///
-/// The `observer_count` field tracks the number of active `QueryObserver`
-/// subscriptions held by mounted components. GC will refuse to evict entries
-/// with `observer_count > 0`, preserving cache deduplication for in-use
-/// resources regardless of their state (including `Success`).
+/// GC reads entity state directly via `entity.read(cx)` (CL2/#106 fix) rather
+/// than trusting a cached snapshot, so no status snapshot is stored here.
 ///
-/// The `status_snapshot` field caches the resource's status and
-/// `last_updated_at` so GC can make eviction decisions without acquiring
-/// entity read locks (finding 1 fix). It is updated via
-/// `update_status_snapshot` after each request completion.
+/// # M2 eviction mirror
+///
+/// `last_updated_ms` and `loading` are a *mirror* of the entity's live
+/// `last_updated_at_ms()` / `is_loading()` state, refreshed wherever the
+/// bucket already reads the entity (zero extra reads). `evict_oldest` scans
+/// these cheap fields + `WeakEntity::upgrade` liveness — with **one**
+/// `entity.read` on the winning entry to confirm `!is_loading()` (guards audit
+/// #109 against a stale mirror where a fetch began after the last refresh) and
+/// read the authoritative timestamp — turning the previous O(n) entity reads
+/// into O(1) typical.
 pub(crate) struct BucketEntry<T, E> {
     pub entity: WeakEntity<QueryResource<T, E>>,
     pub sequencer: RequestSequencer,
-    /// Number of active observer subscriptions for this resource.
-    /// Incremented when an observer is attached, decremented when dropped.
-    ///
-    /// **Note (finding 7)**: The hook layer (`use_query`, `use_query_manual`)
-    /// must call `bucket.retain()` after creating an observer and
-    /// `bucket.release()` when the subscription is dropped. Without these
-    /// calls, `observer_count` remains 0 and GC protection for observed
-    /// resources is ineffective.
-    pub observer_count: usize,
-    /// Cached status for GC decisions, updated on each request completion.
-    /// Allows GC to filter entries without acquiring entity read locks.
-    pub status_snapshot: StatusSnapshot,
+    /// Mirror of `QueryResource::last_updated_at_ms()`. `None` until first
+    /// refresh after a terminal completion (or for a freshly-created Idle
+    /// resource that has never completed).
+    pub(crate) last_updated_ms: Option<u64>,
+    /// Mirror of `QueryResource::is_loading()`. `false` until a fetch is
+    /// observed to start; refreshed on every bucket read of the entity.
+    pub(crate) loading: bool,
 }

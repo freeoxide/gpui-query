@@ -1,4 +1,4 @@
-//! Invalidate, initial data seeding, placeholder data, cancelled count,
+//! Invalidate, cancelled count,
 //! two-phase protocol, is_current_request, and full lifecycle tests (sections 23-29).
 
 use crate::core::*;
@@ -26,94 +26,6 @@ fn invalidate_clears_timestamp_but_retains_data_and_active_request() {
         "invalidate does not cancel active request"
     );
     assert_eq!(r.last_updated_at_ms(), None, "invalidate clears timestamp");
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 24. Initial data seeding
-// ═══════════════════════════════════════════════════════════════════════
-
-#[test]
-fn initial_data_seeds_idle_resource() {
-    let mut r = resource();
-
-    r.set_initial_data("seed", 100);
-
-    assert_eq!(r.data(), Some(&"seed"));
-    assert_eq!(r.initial_data(), Some(&"seed"));
-    assert_eq!(r.last_updated_at_ms(), Some(100));
-    assert_eq!(r.status(), QueryStatus::Idle);
-}
-
-#[test]
-fn initial_data_ignored_when_not_idle() {
-    let mut r = resource();
-    let mut s = seq();
-
-    let _ = begin(&mut r, &mut s, 100);
-
-    r.set_initial_data("seed", 150);
-
-    assert_eq!(r.data(), None, "should not seed data while loading");
-    assert_eq!(r.initial_data(), None);
-}
-
-#[test]
-fn initial_data_ignored_when_data_already_exists() {
-    let mut r = resource();
-    let mut s = seq();
-
-    let (rid, _) = begin(&mut r, &mut s, 100);
-    assert!(r.complete_current_success(rid, "existing", 200));
-
-    r.set_initial_data("seed", 250);
-
-    assert_eq!(
-        r.data(),
-        Some(&"existing"),
-        "existing data takes precedence"
-    );
-}
-
-#[test]
-fn reset_clears_initial_data() {
-    let mut r = resource();
-    r.set_initial_data("seed", 100);
-
-    r.reset();
-
-    assert!(r.initial_data().is_none());
-    assert_eq!(r.data(), None);
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 25. Placeholder data
-// ═══════════════════════════════════════════════════════════════════════
-
-#[test]
-fn placeholder_data_falls_back_in_display_data() {
-    let mut r = resource();
-    r.set_placeholder_data(Some("placeholder"));
-
-    assert_eq!(r.data(), None);
-    assert_eq!(r.placeholder_data(), Some(&"placeholder"));
-    assert_eq!(
-        r.display_data(),
-        Some(&"placeholder"),
-        "display_data falls back to placeholder"
-    );
-
-    r.set_placeholder_data(None);
-    assert_eq!(r.display_data(), None);
-}
-
-#[test]
-fn reset_clears_placeholder_data() {
-    let mut r = resource();
-    r.set_placeholder_data(Some("ph"));
-
-    r.reset();
-
-    assert!(r.placeholder_data().is_none());
 }
 
 // ═══════════════════════════════════════════════════════════════════════

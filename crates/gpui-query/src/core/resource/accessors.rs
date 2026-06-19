@@ -54,12 +54,12 @@ impl<T, E> QueryResource<T, E> {
     }
 
     /// When the current request started (ms since UNIX epoch).
-    pub fn started_at_ms(&self) -> Option<u128> {
+    pub fn started_at_ms(&self) -> Option<u64> {
         self.started_at.map(QueryTimestamp::as_millis)
     }
 
     /// When data was last updated (ms since UNIX epoch).
-    pub fn last_updated_at_ms(&self) -> Option<u128> {
+    pub fn last_updated_at_ms(&self) -> Option<u64> {
         self.last_updated_at.map(QueryTimestamp::as_millis)
     }
 
@@ -89,28 +89,17 @@ impl<T, E> QueryResource<T, E> {
     }
 
     /// Mutable reference to the cancellation signal.
-    pub fn signal_mut(&mut self) -> Option<&mut QuerySignal> {
+    ///
+    /// Currently only exercised by tests; gated accordingly to avoid
+    /// surfacing an unused public API (N23).
+    #[cfg(test)]
+    pub(crate) fn signal_mut(&mut self) -> Option<&mut QuerySignal> {
         self.signal.as_mut()
-    }
-
-    /// Placeholder data (shown while loading before first fetch).
-    pub fn placeholder_data(&self) -> Option<&T> {
-        self.placeholder_data.as_ref()
     }
 
     /// Previous data (saved during optimistic updates for rollback).
     pub fn previous_data(&self) -> Option<&T> {
         self.previous_data.as_ref()
-    }
-
-    /// Initial data (seeded before first fetch).
-    pub fn initial_data(&self) -> Option<&T> {
-        self.initial_data.as_ref()
-    }
-
-    /// Data for display, falling back to placeholder.
-    pub fn display_data(&self) -> Option<&T> {
-        self.data.as_ref().or(self.placeholder_data.as_ref())
     }
 
     /// Current retry count.
@@ -125,7 +114,7 @@ impl<T, E> QueryResource<T, E> {
 
     /// Increment the retry counter.
     pub fn increment_retry(&mut self) {
-        self.retry_count += 1;
+        self.retry_count = self.retry_count.saturating_add(1);
     }
 
     /// Set the retry policy.

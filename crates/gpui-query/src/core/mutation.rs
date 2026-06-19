@@ -28,13 +28,33 @@ impl MutationStatus {
             Self::Failure => "Failure",
         }
     }
+
+    /// Whether the mutation is currently loading.
+    pub fn is_loading(self) -> bool {
+        matches!(self, Self::Loading)
+    }
+
+    /// Whether the mutation is idle.
+    pub fn is_idle(self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
+    /// Whether the mutation succeeded.
+    pub fn is_success(self) -> bool {
+        matches!(self, Self::Success)
+    }
+
+    /// Whether the mutation failed.
+    pub fn is_failure(self) -> bool {
+        matches!(self, Self::Failure)
+    }
 }
 
 /// A mutation resource that tracks the state of a single mutation.
 ///
 /// `V` is the variables (input) type, `T` is the success output type,
 /// and `E` is the error type.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MutationResource<V, T, E = QueryError> {
     key: Option<QueryKey>,
     status: MutationStatus,
@@ -44,8 +64,31 @@ pub struct MutationResource<V, T, E = QueryError> {
     retry_count: u32,
     cancelled_count: u64,
     retry_policy: RetryPolicy,
+    /// Wall-clock ms of the most recent terminal completion (success/failure);
+    /// `None` until the mutation first completes. Read by `MutationBucket`'s GC
+    /// so recency is measured from completion time, not insertion time
+    /// (audit #112). `#[serde(skip)]` — runtime state, not persisted.
+    #[serde(skip)]
+    last_updated_at_ms: Option<u64>,
     #[serde(skip)]
     signal: Option<QuerySignal>,
+    /// In-flight background mutation task (audit #6). Stored so that a
+    /// replacement mutation or entity drop (component unmount) aborts the prior
+    /// in-flight task instead of leaving it detached. `#[cfg(feature = "client")]`
+    /// because `gpui::Task` is only available with the client feature.
+    #[cfg(feature = "client")]
+    #[serde(skip)]
+    pub(crate) current_task: crate::core::current_task::CurrentTask,
+}
+
+/// Current wall-clock ms since the Unix epoch, clamped to 0 if the system
+/// clock is before the epoch (mirrors the client/hook `current_time_ms`). Used
+/// to stamp `MutationResource::last_updated_at_ms` on terminal completion.
+fn completion_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
 }
 
 impl<V, T, E> MutationResource<V, T, E> {
@@ -60,13 +103,23 @@ impl<V, T, E> MutationResource<V, T, E> {
             retry_count: 0,
             cancelled_count: 0,
             retry_policy,
+            last_updated_at_ms: None,
             signal: None,
+            #[cfg(feature = "client")]
+            current_task: crate::core::current_task::CurrentTask::default(),
         }
     }
 
     /// Current status.
     pub fn status(&self) -> MutationStatus {
         self.status
+    }
+
+    /// Wall-clock ms of the most recent terminal completion, or `None` if the
+    /// mutation has never completed. Used by `MutationBucket` GC to measure
+    /// recency from completion time rather than insertion time (audit #112).
+    pub(crate) fn last_updated_at_ms(&self) -> Option<u64> {
+        self.last_updated_at_ms
     }
 
     /// Most recent successful data.
@@ -99,24 +152,32 @@ impl<V, T, E> MutationResource<V, T, E> {
         &self.retry_policy
     }
 
+    /// Set the retry policy.
+    ///
+    /// Mirrors `QueryResource::set_retry_policy` /
+    /// `InfiniteQueryResource::set_retry_policy` for API consistency.
+    pub fn set_retry_policy(&mut self, policy: RetryPolicy) {
+        self.retry_policy = policy;
+    }
+
     /// Whether the mutation is currently loading.
     pub fn is_loading(&self) -> bool {
-        self.status == MutationStatus::Loading
+        self.status.is_loading()
     }
 
     /// Whether the mutation is idle.
     pub fn is_idle(&self) -> bool {
-        self.status == MutationStatus::Idle
+        self.status.is_idle()
     }
 
     /// Whether the mutation succeeded.
     pub fn is_success(&self) -> bool {
-        self.status == MutationStatus::Success
+        self.status.is_success()
     }
 
     /// Whether the mutation failed.
     pub fn is_failure(&self) -> bool {
-        self.status == MutationStatus::Failure
+        self.status.is_failure()
     }
 
     /// Optional query key for this mutation.
@@ -125,6 +186,10 @@ impl<V, T, E> MutationResource<V, T, E> {
     }
 
     /// Associate a query key with this mutation.
+    ///
+    /// Forward-compatibility hook: the hook layer does not currently set a key
+    /// on mutations, so `key` remains `None` in production. Kept for callers
+    /// that want to tag a mutation with a key for diagnostics/invalidation.
     pub fn with_key(mut self, key: QueryKey) -> Self {
         self.key = Some(key);
         self
@@ -145,6 +210,7 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.variables = Some(variables);
         self.error = None;
         self.retry_count = 0;
+        self.last_updated_at_ms = None;
         self.signal = Some(QuerySignal::new());
     }
 
@@ -153,6 +219,7 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.status = MutationStatus::Success;
         self.data = Some(data);
         self.error = None;
+        self.last_updated_at_ms = Some(completion_now_ms());
         self.signal = None;
     }
 
@@ -166,6 +233,7 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.data = None;
         self.error = Some(error);
         self.retry_count = self.retry_count.saturating_add(1);
+        self.last_updated_at_ms = Some(completion_now_ms());
         self.signal = None;
     }
 
@@ -199,6 +267,10 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.variables = None;
         self.retry_count = 0;
         self.cancelled_count = 0;
+        // Clear the completion timestamp so MutationBucket GC does not measure
+        // recency from a stale pre-reset completion (mirrors QueryResource::reset
+        // and InfiniteQueryResource::reset clearing last_updated_at).
+        self.last_updated_at_ms = None;
         self.signal = None;
     }
 
@@ -218,10 +290,10 @@ impl<V, T, E> MutationResource<V, T, E> {
     /// Prepare for a retry by refreshing the signal without transitioning
     /// through `Failure`.
     ///
-    /// This is the fix for audit finding #19: avoids a transient `Failure`
-    /// status that would cause observers to see a brief Failure flash between
-    /// retry attempts. The mutation stays in `Loading` state, the old signal
-    /// is cancelled, and a fresh signal is created for the next attempt.
+    /// Avoids a transient `Failure` status that would cause observers to see a
+    /// brief Failure flash between retry attempts. The mutation stays in
+    /// `Loading` state, the old signal is cancelled, and a fresh signal is
+    /// created for the next attempt.
     pub fn prepare_retry(&mut self) {
         if self.status != MutationStatus::Loading {
             return;
@@ -237,7 +309,7 @@ impl<V, T, E> MutationResource<V, T, E> {
     /// Reset the retry counter to zero.
     ///
     /// Called on terminal failure so that `retry_count` is clean for the
-    /// next mutation invocation (audit finding #4).
+    /// next mutation invocation.
     pub fn reset_retry_count(&mut self) {
         self.retry_count = 0;
     }
@@ -254,13 +326,23 @@ impl<V, T, E> MutationResource<V, T, E> {
         if self.status != MutationStatus::Loading {
             return;
         }
-        self.cancelled_count += 1;
+        self.cancelled_count = self.cancelled_count.saturating_add(1);
         self.status = MutationStatus::Failure;
         self.error = Some(error);
         if let Some(signal) = self.signal.as_ref() {
             signal.cancel();
         }
         self.signal = None;
+    }
+}
+
+#[cfg(feature = "client")]
+impl<V, T, E> MutationResource<V, T, E> {
+    /// Store a new background mutation task, cancelling any previously stored
+    /// task (audit #6). Called from the hook spawn sites so a replacement
+    /// mutation or entity drop aborts the prior in-flight task.
+    pub(crate) fn set_current_task(&mut self, task: gpui::Task<()>) {
+        self.current_task.set(task);
     }
 }
 

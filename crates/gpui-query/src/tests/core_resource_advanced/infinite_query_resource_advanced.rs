@@ -16,7 +16,6 @@
 //! - InfiniteQueryResource active_request_id through lifecycle
 
 use crate::core::*;
-use crate::tests::test_support::*;
 
 // ── InfiniteQueryResource: cross-direction replacement ───────────────────
 
@@ -243,7 +242,7 @@ fn infinite_query_complete_success_with_guard_prepend() {
     r.set_has_previous_page(true);
     let id2 = r.begin_fetch_previous(&mut seq, 3_000).unwrap();
     let guard = r.accept_current_request(id2).unwrap();
-    r.complete_success_with_guard(&guard, vec!["page0".to_string()], false, false, 4_000);
+    r.complete_success_with_guard(guard, vec!["page0".to_string()], false, false, 4_000);
 
     assert_eq!(r.page_count(), 2);
     assert_eq!(r.first_page(), Some(&vec!["page0".to_string()]));
@@ -267,7 +266,7 @@ fn infinite_query_complete_failure_with_guard_clears_flags() {
     assert!(r.is_fetching_next_page());
 
     let guard = r.accept_current_request(id).unwrap();
-    r.complete_failure_with_guard(&guard, QueryError::response("fail"));
+    r.complete_failure_with_guard(guard, QueryError::response("fail"));
 
     assert!(!r.is_fetching_next_page());
     assert!(!r.is_fetching_previous_page());
@@ -367,6 +366,6 @@ fn infinite_query_active_request_id_lifecycle() {
     let guard = r.accept_current_request(id).unwrap();
     assert!(r.active_request_id().is_none());
 
-    r.complete_success_with_guard(&guard, vec!["page1".to_string()], false, true, 2_000);
+    r.complete_success_with_guard(guard, vec!["page1".to_string()], false, true, 2_000);
     assert!(r.active_request_id().is_none());
 }

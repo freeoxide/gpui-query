@@ -13,7 +13,7 @@ impl<T, E> QueryResource<T, E> {
         &mut self,
         request_id: RequestId,
         data: T,
-        now_ms: u128,
+        now_ms: u64,
     ) -> bool {
         let Some(guard) = self.accept_current_request(request_id) else {
             return false;
@@ -27,7 +27,7 @@ impl<T, E> QueryResource<T, E> {
         &mut self,
         request_id: RequestId,
         error: impl Into<E>,
-        now_ms: u128,
+        now_ms: u64,
     ) -> bool {
         let Some(guard) = self.accept_current_request(request_id) else {
             return false;
@@ -41,7 +41,7 @@ impl<T, E> QueryResource<T, E> {
         &mut self,
         request_id: RequestId,
         data: Option<T>,
-        now_ms: u128,
+        now_ms: u64,
     ) -> bool {
         let Some(guard) = self.accept_current_request(request_id) else {
             return false;
@@ -56,7 +56,7 @@ impl<T, E> QueryResource<T, E> {
         request_id: RequestId,
         data: T,
         error: impl Into<E>,
-        now_ms: u128,
+        now_ms: u64,
     ) -> bool {
         let Some(guard) = self.accept_current_request(request_id) else {
             return false;
@@ -69,7 +69,7 @@ impl<T, E> QueryResource<T, E> {
     ///
     /// The guard is moved, preventing double-completion at the type level.
     /// Validates that no new request was started after the guard was issued.
-    pub fn complete_success(&mut self, guard: RequestGuard, data: T, now_ms: u128) {
+    pub fn complete_success(&mut self, guard: RequestGuard, data: T, now_ms: u64) {
         self.validate_guard(&guard);
         self.apply_success(data, now_ms);
     }
@@ -78,7 +78,7 @@ impl<T, E> QueryResource<T, E> {
     ///
     /// The guard is moved, preventing double-completion at the type level.
     /// Validates that no new request was started after the guard was issued.
-    pub fn complete_failure(&mut self, guard: RequestGuard, error: impl Into<E>, now_ms: u128) {
+    pub fn complete_failure(&mut self, guard: RequestGuard, error: impl Into<E>, now_ms: u64) {
         self.validate_guard(&guard);
         self.apply_failure(error, now_ms);
     }
@@ -91,7 +91,7 @@ impl<T, E> QueryResource<T, E> {
         &mut self,
         guard: RequestGuard,
         data: Option<T>,
-        now_ms: u128,
+        now_ms: u64,
     ) {
         self.validate_guard(&guard);
         self.apply_success_optional(data, now_ms);
@@ -105,13 +105,13 @@ impl<T, E> QueryResource<T, E> {
         guard: RequestGuard,
         data: T,
         error: impl Into<E>,
-        now_ms: u128,
+        now_ms: u64,
     ) {
         self.validate_guard(&guard);
         self.apply_failure_with_data(data, error, now_ms);
     }
 
-    pub(crate) fn apply_success(&mut self, data: T, now_ms: u128) {
+    pub(crate) fn apply_success(&mut self, data: T, now_ms: u64) {
         self.previous_data = self.data.take();
         self.status = QueryStatus::Success;
         self.data = Some(data);
@@ -120,14 +120,14 @@ impl<T, E> QueryResource<T, E> {
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
     }
 
-    pub(crate) fn apply_failure(&mut self, error: impl Into<E>, now_ms: u128) {
+    pub(crate) fn apply_failure(&mut self, error: impl Into<E>, now_ms: u64) {
         self.status = QueryStatus::Failure;
         self.error = Some(error.into());
         self.active_request_id = None;
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
     }
 
-    pub(crate) fn apply_success_optional(&mut self, data: Option<T>, now_ms: u128) {
+    pub(crate) fn apply_success_optional(&mut self, data: Option<T>, now_ms: u64) {
         self.previous_data = self.data.take();
         // When data is None, use Idle instead of Success to maintain the
         // invariant that Success always implies data is available. Callers
@@ -147,7 +147,7 @@ impl<T, E> QueryResource<T, E> {
         &mut self,
         data: T,
         error: impl Into<E>,
-        now_ms: u128,
+        now_ms: u64,
     ) {
         self.status = QueryStatus::Failure;
         self.data = Some(data);

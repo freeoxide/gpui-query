@@ -3,6 +3,7 @@
 
 use crate::core::*;
 use crate::tests::test_support::*;
+use std::num::NonZero;
 
 // --- RetryPolicy: delay_for_attempt never exceeds ABSOLUTE_MAX_DELAY_MS --------
 
@@ -103,12 +104,13 @@ fn prop_cache_policy_fresh_and_expired_are_complementary_for_ttl() {
         assert_eq!(total, ttl);
 
         // Sample ages: 0, boundary-1, boundary, boundary+1, and large values.
-        let ages: &[u128] = &[0, ttl as u128 / 2, ttl as u128, ttl as u128 + 1, ttl as u128 * 2];
+        // Use saturating_add for boundary+1 so u64::MAX does not overflow.
+        let ages: &[u64] = &[0, ttl / 2, ttl, ttl.saturating_add(1), ttl.saturating_mul(2)];
         for &age in ages {
             let is_fresh = policy.is_fresh(age);
             let is_expired = policy.is_expired(age);
 
-            if age <= ttl as u128 {
+            if age <= ttl {
                 assert!(is_fresh, "age {} <= ttl {} should be fresh", age, ttl);
                 assert!(!is_expired, "fresh age {} should not be expired", age);
             } else {
@@ -128,17 +130,17 @@ fn prop_cache_policy_swr_three_way_partition() {
     ];
     for &(ttl, stale) in cases {
         let policy = CachePolicy::StaleWhileRevalidate { ttl_ms: ttl, stale_ms: stale };
-        let total = ttl as u128 + stale as u128;
+        let total = ttl.saturating_add(stale);
 
-        let ages: &[u128] = &[
+        let ages: &[u64] = &[
             0,
-            ttl as u128 / 2,
-            ttl as u128,        // boundary: still fresh
-            ttl as u128 + 1,    // just past TTL: stale
-            total / 2 + ttl as u128 / 2,  // mid-stale window
+            ttl / 2,
+            ttl,        // boundary: still fresh
+            ttl + 1,    // just past TTL: stale
+            total / 2 + ttl / 2,  // mid-stale window
             total,              // boundary: still stale-but-serveable
             total + 1,          // expired
-            total * 2,          // way expired
+            total.saturating_mul(2),          // way expired
         ];
         for &age in ages {
             let is_fresh = policy.is_fresh(age);
@@ -154,7 +156,7 @@ fn prop_cache_policy_swr_three_way_partition() {
                 age, is_fresh, is_stale, is_expired, ttl, stale
             );
 
-            if age <= ttl as u128 {
+            if age <= ttl {
                 assert!(is_fresh, "age {} <= ttl {} must be fresh", age, ttl);
             } else if age <= total {
                 assert!(is_stale, "age {} must be stale-but-serveable (ttl={}, total={})", age, ttl, total);
@@ -171,7 +173,7 @@ fn prop_cache_policy_nocache_always_expired_never_fresh() {
     assert_eq!(policy.total_valid_ms(), None);
     assert_eq!(policy.ttl_ms(), None);
 
-    for age in [0u128, 1, 100, 1_000, u128::MAX] {
+    for age in [0u64, 1, 100, 1_000, u64::MAX] {
         assert!(!policy.is_fresh(age), "NoCache should never be fresh at age {}", age);
         assert!(policy.is_expired(age), "NoCache should always be expired at age {}", age);
         assert!(!policy.is_stale_but_serveable(age), "NoCache should never be stale-but-serveable");
@@ -215,24 +217,21 @@ fn prop_cache_policy_total_valid_ms_consistency() {
 
 #[test]
 fn prop_serde_roundtrip_all_statuses() {
-    let statuses = [
+    // T10: shared roundtrip helper.
+    assert_serde_roundtrip(&[
         QueryStatus::Idle,
         QueryStatus::LoadingEmpty,
         QueryStatus::LoadingWithData,
         QueryStatus::Success,
         QueryStatus::Failure,
         QueryStatus::Cancelled,
-    ];
-    for status in statuses {
-        let json = serde_json::to_string(&status).unwrap();
-        let back: QueryStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, status, "serde roundtrip failed for {:?}", status);
-    }
+    ]);
 }
 
 #[test]
 fn prop_serde_roundtrip_all_cache_policies() {
-    let policies: Vec<CachePolicy> = vec![
+    // T10: shared roundtrip helper.
+    assert_serde_roundtrip(&[
         CachePolicy::NoCache,
         CachePolicy::Ttl { ttl_ms: 0 },
         CachePolicy::Ttl { ttl_ms: 1 },
@@ -241,56 +240,39 @@ fn prop_serde_roundtrip_all_cache_policies() {
         CachePolicy::StaleWhileRevalidate { ttl_ms: 0, stale_ms: 0 },
         CachePolicy::StaleWhileRevalidate { ttl_ms: 100, stale_ms: 200 },
         CachePolicy::StaleWhileRevalidate { ttl_ms: u64::MAX, stale_ms: u64::MAX },
-    ];
-    for policy in &policies {
-        let json = serde_json::to_string(policy).unwrap();
-        let back: CachePolicy = serde_json::from_str(&json).unwrap();
-        assert_eq!(&back, policy, "serde roundtrip failed for {:?}", policy);
-    }
+    ]);
 }
 
 #[test]
 fn prop_serde_roundtrip_all_request_policies() {
-    for policy in [RequestPolicy::LatestWins, RequestPolicy::IgnoreWhileLoading] {
-        let json = serde_json::to_string(&policy).unwrap();
-        let back: RequestPolicy = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, policy);
-    }
+    // T10: shared roundtrip helper.
+    assert_serde_roundtrip(&[RequestPolicy::LatestWins, RequestPolicy::IgnoreWhileLoading]);
 }
 
 #[test]
 fn prop_serde_roundtrip_retry_policies() {
-    let policies: Vec<RetryPolicy> = vec![
+    // T10: shared roundtrip helper.
+    assert_serde_roundtrip(&[
         RetryPolicy::no_retries(),
         RetryPolicy::default(),
         RetryPolicy::new(0),
         RetryPolicy::new(100),
         RetryPolicy::new(5).with_delay(0).with_exponential_backoff().with_max_delay(0),
         RetryPolicy::new(u32::MAX).with_delay(u64::MAX).with_exponential_backoff().with_max_delay(u64::MAX),
-    ];
-    for policy in &policies {
-        let json = serde_json::to_string(policy).unwrap();
-        let back: RetryPolicy = serde_json::from_str(&json).unwrap();
-        assert_eq!(&back, policy, "serde roundtrip failed for {:?}", policy);
-    }
+    ]);
 }
 
 #[test]
 fn prop_serde_roundtrip_query_error_all_kinds() {
-    let errors = [
+    // T10: shared roundtrip helper.
+    assert_serde_roundtrip(&[
         QueryError::cancelled("abort"),
         QueryError::response("not found"),
         QueryError::transport("timeout"),
         QueryError::unknown("mystery"),
         QueryError::new(QueryErrorKind::Cancelled, ""),
         QueryError::new(QueryErrorKind::Response, "a".repeat(1000)),
-    ];
-    for err in &errors {
-        let json = serde_json::to_string(err).unwrap();
-        let back: QueryError = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.kind(), err.kind());
-        assert_eq!(back.message(), err.message());
-    }
+    ]);
 }
 
 #[test]
@@ -315,7 +297,6 @@ fn prop_serde_roundtrip_query_resource_multiple_states() {
     assert_eq!(back.cache_policy(), CachePolicy::NoCache);
     assert_eq!(back.request_policy(), RequestPolicy::LatestWins);
     assert!(back.signal().is_none(), "signal is #[serde(skip)]");
-    assert!(back.initial_data().is_none(), "initial_data is #[serde(skip)]");
 
     // Test roundtrip in Failure state.
     let rid2 = begin_request_id(&mut r, &mut s, 300, QueryFetchMode::Normal);
@@ -349,7 +330,7 @@ fn prop_request_sequencer_scope_advance_preserves_monotonicity() {
     // Force the sequencer to the edge of overflow and verify monotonicity
     // across the scope transition.
     let mut seq = RequestSequencer {
-        scope_id: 1,
+        scope_id: NonZero::new(1).unwrap(),
         next_request_id: u64::MAX - 5,
     };
     let mut prev = seq.next_request();
@@ -363,7 +344,7 @@ fn prop_request_sequencer_scope_advance_preserves_monotonicity() {
         prev = curr;
     }
     // After wrapping through u64::MAX, the scope should have advanced.
-    assert!(seq.scope_id >= 2, "scope should have advanced past overflow");
+    assert!(seq.scope_id.get() >= 2, "scope should have advanced past overflow");
 }
 
 #[test]
@@ -399,7 +380,7 @@ fn prop_request_sequencer_two_sequencers_no_collision() {
     // If we create a sequencer that's been advanced, it should produce
     // distinct ids from a fresh one.
     let mut seq3 = RequestSequencer {
-        scope_id: 2,
+        scope_id: NonZero::new(2).unwrap(),
         next_request_id: 1,
     };
     let id3 = seq3.next_request(); // 2:1
@@ -411,11 +392,11 @@ fn prop_request_sequencer_double_overflow_wraps_correctly() {
     // Force scope_id to u64::MAX and next_request_id to u64::MAX
     // to trigger double overflow.
     let mut seq = RequestSequencer {
-        scope_id: u64::MAX,
+        scope_id: NonZero::new(u64::MAX).unwrap(),
         next_request_id: u64::MAX,
     };
     let id_before = seq.next_request(); // u64::MAX:u64::MAX
-    assert_eq!(id_before.scope_id(), u64::MAX);
+    assert_eq!(id_before.scope_id(), NonZero::new(u64::MAX).unwrap());
     assert_eq!(id_before.value(), u64::MAX);
 
     // The sequencer should have advanced scope. After u64::MAX scope,
@@ -424,7 +405,7 @@ fn prop_request_sequencer_double_overflow_wraps_correctly() {
     let id_after = seq.next_request();
     // Scope should have wrapped to 1 or been advanced.
     assert!(
-        id_after.scope_id() <= 2,
+        id_after.scope_id() <= NonZero::new(2).unwrap(),
         "scope should wrap after u64::MAX: got {}",
         id_after.scope_id()
     );

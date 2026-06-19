@@ -6,21 +6,21 @@
 
 use std::sync::{Arc, Mutex};
 
-use gpui::{AppContext as _, BorrowAppContext as _, Entity, TestAppContext};
+use gpui::{AppContext as _, Entity, TestAppContext};
 
-use crate::client::QueryClient;
 use crate::core::*;
-#[allow(deprecated)]
 use crate::hook::{
-    fetch_next_page_infinite, fetch_query, fetch_query_with_signal, mutate, mutate_with_callbacks,
-    use_infinite_query, use_mutation, use_mutation_with_options, use_query_manual,
+    fetch_next_page_infinite, fetch_query, fetch_query_with_signal, mutate_with_callbacks,
+    use_infinite_query, use_mutation, use_query_manual,
     use_query_select, MutationCallbacks, MutationOptions, InfiniteQueryOptions, QueryOptions,
 };
 use crate::tests::test_support::*;
 
-// -- Gap 9: deprecated use_mutation_with_options still works -----------------
+// -- Gap 9: use_mutation with MutationOptions still works --------------------
 //
-// Deprecated public API should have at least one test.
+// use_mutation now accepts MutationOptions via Into (the deprecated
+// use_mutation_with_options just delegated to it). Verify the default-options
+// path still registers and produces an Idle mutation.
 
 #[gpui::test]
 fn test_deprecated_use_mutation_with_options_still_works(cx: &mut TestAppContext) {
@@ -31,10 +31,9 @@ fn test_deprecated_use_mutation_with_options_still_works(cx: &mut TestAppContext
         mutation: Entity<MutationResource<String, String, QueryError>>,
     }
 
-    #[allow(deprecated)]
     let harness = cx.new(|cx| {
-        let (entity, _sub) = use_mutation_with_options::<String, String, QueryError, _>(
-            &MutationOptions::default(),
+        let (entity, _sub) = use_mutation::<String, String, QueryError, _>(
+            MutationOptions::default(),
             cx,
         );
         assert_eq!(entity.read(cx).status(), MutationStatus::Idle);
@@ -80,10 +79,7 @@ fn test_mutation_callbacks_fire_on_entity_drop_during_retry_delay(cx: &mut TestA
 
     let _harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>(
-            MutationOptions {
-                retry_policy: RetryPolicy::no_retries(),
-                gc_time_ms: 300_000,
-            },
+            no_retry_mutation_options(),
             cx,
         );
         mutate_with_callbacks(
@@ -117,11 +113,9 @@ fn test_mutation_callbacks_fire_on_entity_drop_during_retry_delay(cx: &mut TestA
 
 #[gpui::test]
 fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    setup_test(cx);
 
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let gate = Arc::new(AtomicBool::new(false));
+    let gate = Gate::new();
     let gate_clone = gate.clone();
     let executor = cx.background_executor.clone();
     let call_count = Arc::new(Mutex::new(0u32));
@@ -149,10 +143,9 @@ fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {
                     let mut n = cc.lock().unwrap();
                     *n += 1;
                 } // drop MutexGuard before await
-                // Wait for gate — this keeps the first fetch "in flight"
-                while !gate_clone.load(Ordering::Acquire) {
-                    executor.timer(std::time::Duration::from_millis(1)).await;
-                }
+                // Wait for gate via the shared helper — this keeps the first
+                // fetch "in flight" while the second is issued.
+                gate_clone.wait(&executor).await;
                 Err::<_, QueryError>(QueryError::response("fail"))
             }
         }, cx);
@@ -165,7 +158,7 @@ fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {
     });
 
     // Release the gate so the first fetch can return its error
-    gate.store(true, Ordering::Release);
+    gate.release();
 
     cx.run_until_parked();
 

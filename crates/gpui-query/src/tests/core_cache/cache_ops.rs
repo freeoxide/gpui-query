@@ -90,8 +90,8 @@ fn reset_clears_all_counters() {
     let mut r = ttl_resource();
     seed_data(&mut r, "data", STORED_AT_MS);
     let mut seq = test_sequencer();
-    r.begin_request(&mut seq, STORED_AT_MS + 500, QueryFetchMode::Force);
-    r.begin_request(&mut seq, STORED_AT_MS + 600, QueryFetchMode::Force);
+    let _ = r.begin_request(&mut seq, STORED_AT_MS + 500, QueryFetchMode::Force);
+    let _ = r.begin_request(&mut seq, STORED_AT_MS + 600, QueryFetchMode::Force);
     assert_eq!(r.cancelled_count(), 1);
     r.reset();
     assert_eq!(r.cache_hits(), 0);
@@ -109,7 +109,7 @@ fn reset_preserves_policies_and_key() {
     );
     seed_data(&mut r, "data", STORED_AT_MS);
     r.reset();
-    assert_eq!(r.key().as_str(), "my-key");
+    assert_eq!(r.key().first_segment(), "my-key");
     assert_eq!(r.cache_policy(), CachePolicy::Ttl { ttl_ms: 5_000 });
     assert_eq!(r.request_policy(), RequestPolicy::IgnoreWhileLoading);
 }

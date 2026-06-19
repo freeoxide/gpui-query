@@ -156,7 +156,7 @@ fn reset_preserves_key_and_policies() {
 
     r.reset();
 
-    assert_eq!(r.key().as_str(), "my-key");
+    assert_eq!(r.key().first_segment(), "my-key");
     assert_eq!(
         r.cache_policy(),
         CachePolicy::StaleWhileRevalidate {

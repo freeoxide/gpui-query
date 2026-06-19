@@ -40,11 +40,11 @@ fn test_gc_with_zero_time_clamped_evicts_idle(cx: &mut TestAppContext) {
 // -- 40. GC uses gc_with_time with deterministic time control ----------------
 //
 // Finding 2 fix: Assert concrete GC outcomes using the documented eviction
-// rules. The bucket's status snapshot is only updated when the hook layer
-// calls update_status_snapshot (not from direct resource mutations), so
-// resources created via client.resource() always appear as Idle with
-// last_updated_ms=None to GC. Idle resources with no timestamp are evicted
-// at any gc_with_time value (age defaults to gc_threshold).
+// rules. GC reads live entity state directly via `entity.read(cx)` (CL2/#106;
+// no cached snapshot), so resources created via client.resource() always
+// appear as Idle with last_updated_ms=None to GC. Idle resources with no
+// timestamp are evicted at any gc_with_time value (age defaults to
+// gc_threshold).
 
 #[gpui::test]
 fn test_gc_with_time_explicit_time_value(cx: &mut TestAppContext) {
@@ -223,7 +223,7 @@ fn test_infinite_query_observer_creation_and_observe(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let entity = client.infinite_resource::<String, QueryError>("inf_obs", cx);
-            let mut observer = InfiniteQueryObserver::new(&entity);
+            let observer = InfiniteQueryObserver::new(&entity);
 
             struct DummyView;
             let view = cx.new(|_| DummyView);
@@ -239,7 +239,7 @@ fn test_infinite_query_observer_weak_entity_pattern(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let entity = client.infinite_resource::<String, QueryError>("inf_obs_weak", cx);
-            let mut observer = InfiniteQueryObserver::new(&entity);
+            let observer = InfiniteQueryObserver::new(&entity);
 
             struct DummyView;
             let view = cx.new(|_| DummyView);
@@ -254,14 +254,16 @@ fn test_infinite_query_observer_weak_entity_pattern(cx: &mut TestAppContext) {
 #[gpui::test]
 fn test_current_time_ms_is_reasonable(_cx: &mut TestAppContext) {
     let now = crate::client::current_time_ms();
-    // Should be > 1_700_000_000_000 (after 2023) and < 2_000_000_000_000 (before 2033)
+    // Should be > 1_700_000_000_000 (after 2023). Upper bound widened to
+    // 4_000_000_000_000 (pre-2128) per audit #128 so the test doesn't fail
+    // once wall-clock crosses the old 2_000_000_000_000 (2033) threshold.
     assert!(
         now > 1_700_000_000_000,
         "current_time_ms should be post-2023"
     );
     assert!(
-        now < 2_000_000_000_000,
-        "current_time_ms should be pre-2033"
+        now < 4_000_000_000_000,
+        "current_time_ms should be pre-2128"
     );
 }
 

@@ -183,7 +183,7 @@ mod tests {
         let id = r.begin_fetch_next(&mut seq, 1_000).unwrap();
         let guard = r.accept_current_request(id).unwrap();
 
-        r.complete_success_with_guard(&guard, vec!["page1".to_string()], true, true, 2_000);
+        r.complete_success_with_guard(guard, vec!["page1".to_string()], true, true, 2_000);
         assert_eq!(r.page_count(), 1);
         assert_eq!(r.status(), QueryStatus::Success);
         assert!(!r.is_fetching_next_page());
@@ -202,7 +202,7 @@ mod tests {
         // Attempt next page but fail — using two-phase protocol
         let id2 = r.begin_fetch_next(&mut seq, 3_000).unwrap();
         let guard = r.accept_current_request(id2).unwrap();
-        r.complete_failure_with_guard(&guard, "network error".into());
+        r.complete_failure_with_guard(guard, "network error".into());
 
         assert_eq!(r.status(), QueryStatus::Failure);
         assert_eq!(r.page_count(), 1); // pages preserved
@@ -241,7 +241,7 @@ mod tests {
 
         // Pages are still valid despite failure
         assert!(r.is_page_data_valid());
-        assert_eq!(r.pages().front(), Some(&vec!["page1".to_string()]));
+        assert_eq!(r.first_page(), Some(&vec!["page1".to_string()]));
     }
 
     #[test]
@@ -291,7 +291,7 @@ mod tests {
 
         let evicted = r.set_max_pages(Some(2));
         assert_eq!(evicted.len(), 1);
-        assert_eq!(evicted[0], vec!["a".to_string()]);
+        assert_eq!(evicted[0].as_ref(), &vec!["a".to_string()]);
         assert_eq!(r.page_count(), 2);
     }
 
@@ -308,7 +308,7 @@ mod tests {
 
         let evicted3 = r.append_page(vec!["c".to_string()]);
         assert_eq!(evicted3.len(), 1);
-        assert_eq!(evicted3[0], vec!["a".to_string()]);
+        assert_eq!(evicted3[0].as_ref(), &vec!["a".to_string()]);
         assert_eq!(r.page_count(), 2);
     }
 
@@ -322,7 +322,7 @@ mod tests {
 
         let evicted = r.prepend_page(vec!["c".to_string()]);
         assert_eq!(evicted.len(), 1);
-        assert_eq!(evicted[0], vec!["a".to_string()]);
+        assert_eq!(evicted[0].as_ref(), &vec!["a".to_string()]);
         assert_eq!(r.page_count(), 2);
         // c, b are the remaining pages (c was prepended most recently)
         assert_eq!(r.first_page(), Some(&vec!["c".to_string()]));
@@ -364,8 +364,8 @@ mod tests {
     fn retry_count_accessors() {
         let mut r = make_resource();
         assert_eq!(r.retry_count(), 0);
-        r.increment_retry_count();
-        r.increment_retry_count();
+        r.increment_retry();
+        r.increment_retry();
         assert_eq!(r.retry_count(), 2);
         r.reset_retry_count();
         assert_eq!(r.retry_count(), 0);
@@ -380,8 +380,8 @@ mod tests {
         let id = r.begin_fetch_next(&mut seq, 1_000).unwrap();
         r.complete_page_success(id, vec!["page1".to_string()], true, true, 2_000);
         r.set_max_pages(Some(10));
-        r.increment_retry_count();
-        r.increment_retry_count();
+        r.increment_retry();
+        r.increment_retry();
 
         r.reset();
 

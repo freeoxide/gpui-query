@@ -7,7 +7,6 @@
 use gpui::{App, Entity};
 
 use crate::core::QueryResource;
-use crate::client::erased::current_time_ms;
 
 /// A prepared fetch returned by [`QueryClient::prepare_fetch_query`] or
 /// [`QueryClient::prepare_prefetch_query`].
@@ -37,6 +36,7 @@ use crate::client::erased::current_time_ms;
 /// // prepared.complete_success(data, cx) or prepared.complete_failure(e, cx).
 /// # }
 /// ```
+#[must_use = "the prepared fetch holds the request ID and cancellation signal; dropping it without calling complete_success/complete_failure abandons the in-flight request"]
 pub struct PreparedFetch<T, E> {
     /// The query resource entity.
     pub entity: Entity<QueryResource<T, E>>,
@@ -44,6 +44,11 @@ pub struct PreparedFetch<T, E> {
     pub request_id: crate::core::RequestId,
     /// The cooperative cancellation signal for the in-flight request.
     pub signal: crate::core::QuerySignal,
+    /// **M3**: the wall-clock ms captured at prepare time. Reused by
+    /// `complete_success` / `complete_failure` so they don't re-syscall
+    /// `current_time_ms()` (the fetch's logical completion time is the prepare
+    /// time, matching the request's `started_at`).
+    pub(crate) now_ms: u64,
 }
 
 impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> PreparedFetch<T, E> {
@@ -51,10 +56,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Prepare
     ///
     /// Calls `complete_current_success` on the resource entity. If the request
     /// ID is no longer active (replaced by a newer request), this is a no-op.
+    ///
+    /// **M3**: reuses the `now_ms` captured at prepare time instead of
+    /// re-syscalling `current_time_ms()`.
     pub fn complete_success(self, data: T, cx: &mut App) {
-        let now_ms = current_time_ms();
         self.entity.update(cx, |resource, _| {
-            resource.complete_current_success(self.request_id, data, now_ms);
+            resource.complete_current_success(self.request_id, data, self.now_ms);
         });
     }
 
@@ -62,10 +69,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Prepare
     ///
     /// Calls `complete_current_failure` on the resource entity. If the request
     /// ID is no longer active (replaced by a newer request), this is a no-op.
+    ///
+    /// **M3**: reuses the `now_ms` captured at prepare time instead of
+    /// re-syscalling `current_time_ms()`.
     pub fn complete_failure(self, error: E, cx: &mut App) {
-        let now_ms = current_time_ms();
         self.entity.update(cx, |resource, _| {
-            resource.complete_current_failure(self.request_id, error, now_ms);
+            resource.complete_current_failure(self.request_id, error, self.now_ms);
         });
     }
 }

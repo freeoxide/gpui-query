@@ -1,5 +1,5 @@
-//! Core operations for `QueryBucket`: construction, get-or-create, observers,
-//! sequencer access, and status snapshot updates.
+//! Core operations for `QueryBucket`: construction, get-or-create, and
+//! sequencer access.
 
 use ahash::AHashMap;
 use gpui::{App, AppContext as _};
@@ -8,9 +8,7 @@ use crate::core::{
     CachePolicy, QueryKey, QueryResource, QueryStatus, RequestPolicy, RequestSequencer,
 };
 
-use super::types::{
-    BucketEntry, DEFAULT_MAX_ENTRIES, StatusSnapshot,
-};
+use super::types::{BucketEntry, DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS};
 
 /// Type-partitioned storage for query resources of a specific `(T, E)` type pair.
 pub struct QueryBucket<T, E> {
@@ -29,43 +27,72 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         }
     }
 
-    /// Create a new bucket with a custom max entry limit.
-    #[allow(dead_code)]
-    pub(crate) fn with_max_entries(max_entries: usize) -> Self {
-        Self {
-            entries: AHashMap::new(),
-            max_entries: max_entries.max(1),
-        }
-    }
-
     /// Evict the oldest (least-recently-updated) entry to make room for a new one.
     ///
-    /// Called when `get_or_create` would exceed `max_entries`. Prefers evicting
-    /// entries with zero observers and the oldest `last_updated_ms`. If all
-    /// entries have observers, evicts the oldest observed entry as a last resort.
-    pub(crate) fn evict_oldest(&mut self) {
-        let mut oldest_key: Option<QueryKey> = None;
-        let mut oldest_age: u128 = u128::MAX;
-        let mut found_unobserved = false;
+    /// Called when `get_or_create` would exceed `max_entries`. Selects the
+    /// entry with the smallest mirrored `last_updated_ms`. Entries that are
+    /// mirrored as loading are skipped (#109) so in-flight requests are never
+    /// evicted.
+    ///
+    /// **M2 (O(n)→O(1) entity reads)**: the scan reads only the entry MIRRORS
+    /// (cheap field reads + `WeakEntity::upgrade` liveness, no `entity.read`),
+    /// then performs **one** `entity.read` on the single winner to confirm
+    /// `!is_loading()` (guards #109 against a stale mirror where a fetch began
+    /// after the last refresh) and read the authoritative
+    /// `last_updated_at_ms`. If the winner is actually loading, its mirror is
+    /// marked and we re-pick. Typical cost: 1 entity read.
+    ///
+    /// The chosen key is cloned once (#59) rather than on every iteration.
+    pub(crate) fn evict_oldest(&mut self, cx: &App) {
+        loop {
+            // Mirror scan: NO entity.read here. Pick min mirror-timestamp
+            // among entries whose mirror says !loading AND whose weak ref is
+            // still live (a dead entry is GC's job, not eviction's, but it
+            // also can't be the "oldest live" winner).
+            let target = self
+                .entries
+                .iter()
+                .filter_map(|(key, entry)| {
+                    if entry.loading {
+                        return None;
+                    }
+                    if entry.entity.upgrade().is_none() {
+                        return None;
+                    }
+                    Some((key, entry.last_updated_ms.unwrap_or(0)))
+                })
+                .min_by_key(|&(_, age)| age);
 
-        for (key, entry) in &self.entries {
-            let is_unobserved = entry.observer_count == 0;
+            let Some((key, _)) = target else {
+                // Every live entry is mirrored as loading: nothing safe to evict.
+                return;
+            };
 
-            // If we've already found an unobserved entry, skip observed ones.
-            if found_unobserved && !is_unobserved {
-                continue;
+            // Single confirm read on the winner. Cloned out of the shared
+            // borrow so `remove` can take `&mut self.entries` (E0502).
+            let key = key.clone();
+            let still_loading = self
+                .entries
+                .get(&key)
+                .and_then(|e| e.entity.upgrade())
+                .map(|entity| entity.read(cx).is_loading());
+
+            match still_loading {
+                Some(true) => {
+                    // Mirror was stale: a fetch began after the last refresh.
+                    // Mark it and re-pick so #109 is honored.
+                    if let Some(entry) = self.entries.get_mut(&key) {
+                        entry.loading = true;
+                    }
+                    continue;
+                }
+                _ => {
+                    // Confirmed not loading (or already dead/collected between
+                    // the scan and the confirm): evict.
+                    self.entries.remove(&key);
+                    return;
+                }
             }
-
-            let age = entry.status_snapshot.last_updated_ms.unwrap_or(0);
-            if age < oldest_age {
-                oldest_key = Some(key.clone());
-                oldest_age = age;
-                found_unobserved = found_unobserved || is_unobserved;
-            }
-        }
-
-        if let Some(key) = oldest_key {
-            self.entries.remove(&key);
         }
     }
 
@@ -88,32 +115,38 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         request_policy: RequestPolicy,
         cx: &mut App,
     ) -> gpui::Entity<QueryResource<T, E>> {
-        if let Some(entry) = self.entries.get(&key) {
+        // Audit fix #58: previously the dead-ref path hashed the key up to 3x
+        // (get → remove → insert). We collapse it to 2x: one probe to resolve
+        // the hit/dead/miss outcome, then a single `insert` for the create
+        // path. `entry()` cannot span the eviction (its borrow of
+        // `self.entries` conflicts with `self.evict_oldest`'s borrow of `self`),
+        // so the dead/miss path re-probes via `insert` — best-effort, noted in
+        // the audit. The common alive-hit path is still a single hash.
+        if let Some(entry) = self.entries.get_mut(&key) {
             if let Some(entity) = entry.entity.upgrade() {
-                // Audit fix (findings 2, 5): Update policies if they differ.
-                let needs_update = entity.read_with(cx, |resource, _| {
-                    resource.cache_policy() != cache_policy
-                        || resource.request_policy() != request_policy
-                });
+                // M2: refresh the mirror from the same read we already do for
+                // the policy check (zero extra reads).
+                let (needs_update, last_updated, loading) =
+                    entity.read_with(cx, |resource, _| {
+                        let needs_update = resource.cache_policy() != cache_policy
+                            || resource.request_policy() != request_policy;
+                        (needs_update, resource.last_updated_at_ms(), resource.is_loading())
+                    });
+                entry.last_updated_ms = last_updated;
+                entry.loading = loading;
                 if needs_update {
                     entity.update(cx, |resource, _| {
                         resource.set_cache_policy(cache_policy);
                         resource.set_request_policy(request_policy);
                     });
-                    // Update the cached cache_policy in the snapshot.
-                    if let Some(entry) = self.entries.get_mut(&key) {
-                        entry.status_snapshot.cache_policy = cache_policy;
-                    }
                 }
                 return entity;
             }
-            // Weak reference is dead — remove the stale entry so we can re-create.
-            self.entries.remove(&key);
-        }
-
-        // Enforce max entries limit (finding 4 fix).
-        if self.entries.len() >= self.max_entries {
-            self.evict_oldest();
+            // Dead occupant: fall through to the insert path, which overwrites
+            // the stale entry in place. Length is unchanged so no eviction.
+        } else if self.entries.len() >= self.max_entries {
+            // Vacant and at capacity: evict before creating.
+            self.evict_oldest(cx);
         }
 
         let entity = cx.new(|_| QueryResource::new(key.clone(), cache_policy, request_policy));
@@ -122,16 +155,18 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
             BucketEntry {
                 entity: entity.downgrade(),
                 sequencer: RequestSequencer::new(),
-                observer_count: 0,
-                status_snapshot: StatusSnapshot {
-                    status: QueryStatus::Idle,
-                    last_updated_ms: None,
-                    cache_policy,
-                },
+                // Fresh resource: never completed, not loading.
+                last_updated_ms: None,
+                loading: false,
             },
         );
         entity
     }
+
+    // (Audit cleanup: `maybe_gc` was dead code — never called from production.
+    // The real opportunistic trigger is `QueryClient::maybe_opportunistic_gc`,
+    // which drives `gc` directly every `GC_INTERVAL` ops. Removed alongside
+    // `should_run_opportunistic_gc` and the now-write-only `last_gc_ms` field.)
 
     /// Get an existing entity by key.
     ///
@@ -142,64 +177,14 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
     }
 
     /// All entities in this bucket that are still alive.
+    ///
+    /// Allocates a `Vec` per call — callers on hot render paths should cache
+    /// the result (#60).
     pub(crate) fn all_entities(&self) -> Vec<gpui::Entity<QueryResource<T, E>>> {
         self.entries
             .values()
             .filter_map(|e| e.entity.upgrade())
             .collect()
-    }
-
-    /// Update policies for an existing entry.
-    ///
-    /// Sets the cache and request policies on the resource if the key is found
-    /// and the entity is still alive. No-op if the key is not found or the
-    /// entity has been collected.
-    #[allow(dead_code)]
-    pub(crate) fn update_policies(
-        &mut self,
-        key: &QueryKey,
-        cache_policy: CachePolicy,
-        request_policy: RequestPolicy,
-        cx: &mut App,
-    ) {
-        if let Some(entry) = self.entries.get(key) {
-            if let Some(entity) = entry.entity.upgrade() {
-                entity.update(cx, |resource, _| {
-                    resource.set_cache_policy(cache_policy);
-                    resource.set_request_policy(request_policy);
-                });
-            }
-        }
-    }
-
-    /// Increment the observer count for an entry.
-    ///
-    /// Call this when a `QueryObserver` subscription is attached to the
-    /// resource. This prevents GC from evicting the entry while components
-    /// are actively observing it.
-    ///
-    /// **Wiring requirement (finding 7)**: The hook layer must call this
-    /// after creating an observer. Without it, `observer_count` is always 0.
-    #[allow(dead_code)]
-    pub(crate) fn retain(&mut self, key: &QueryKey) {
-        if let Some(entry) = self.entries.get_mut(key) {
-            entry.observer_count = entry.observer_count.saturating_add(1);
-        }
-    }
-
-    /// Decrement the observer count for an entry.
-    ///
-    /// Call this when a `QueryObserver` subscription is dropped (e.g., the
-    /// component unmounted).
-    ///
-    /// **Wiring requirement (finding 7)**: The hook layer must call this
-    /// when the subscription is dropped. Implement an `ObserverGuard` or
-    /// custom `Drop` guard that wraps the subscription and calls `release()`.
-    #[allow(dead_code)]
-    pub(crate) fn release(&mut self, key: &QueryKey) {
-        if let Some(entry) = self.entries.get_mut(key) {
-            entry.observer_count = entry.observer_count.saturating_sub(1);
-        }
     }
 
     /// Get a mutable reference to the sequencer for an entry.
@@ -209,25 +194,53 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         self.entries.get_mut(key).map(|e| &mut e.sequencer)
     }
 
-    /// Update the cached status snapshot for an entry.
+    /// Run garbage collection on this bucket.
     ///
-    /// Call this after each request completion (success or failure) so the
-    /// GC can make eviction decisions without acquiring entity read locks.
-    /// This is the fix for finding 1 (O(n * m) GC with entity read locks).
-    #[allow(dead_code)]
-    pub(crate) fn update_status_snapshot(
-        &mut self,
-        key: &QueryKey,
-        status: QueryStatus,
-        last_updated_ms: Option<u128>,
-        cache_policy: CachePolicy,
-    ) {
-        if let Some(entry) = self.entries.get_mut(key) {
-            entry.status_snapshot = StatusSnapshot {
+    /// Reads entity state directly via `entity.read(cx)` (CL2/#106) rather
+    /// than trusting a cached snapshot. The snapshot machinery was never
+    /// refreshed from production hooks, so it was always stale.
+    pub(crate) fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
+        let gc_time_ms = gc_time_ms.max(MIN_GC_TIME_MS);
+        let gc_threshold = gc_time_ms;
+        let success_threshold = gc_threshold * (super::types::SUCCESS_GC_MULTIPLIER as u64);
+
+        self.entries.retain(|_key, entry| {
+            let Some(entity) = entry.entity.upgrade() else { return false };
+            let resource = entity.read(cx);
+
+            // M2: refresh the eviction mirror from this read (gc walks every
+            // entry anyway, so this is the canonical refresh point).
+            entry.last_updated_ms = resource.last_updated_at_ms();
+            entry.loading = resource.is_loading();
+
+            if resource.is_loading() {
+                return true;
+            }
+
+            let status = resource.status();
+
+            let age_ms = resource
+                .last_updated_at_ms()
+                .map(|updated| now_ms.saturating_sub(updated))
+                .unwrap_or(gc_threshold);
+
+            if status == QueryStatus::Success {
+                let cache_policy = resource.cache_policy();
+                if cache_policy.can_serve_stale() && !cache_policy.is_expired(age_ms) {
+                    return true;
+                }
+                return age_ms < success_threshold;
+            }
+
+            let evictable = matches!(
                 status,
-                last_updated_ms,
-                cache_policy,
-            };
-        }
+                QueryStatus::Idle | QueryStatus::Failure | QueryStatus::Cancelled
+            );
+            if !evictable {
+                return true;
+            }
+
+            age_ms < gc_threshold
+        });
     }
 }

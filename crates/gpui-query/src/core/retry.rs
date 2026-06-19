@@ -32,7 +32,7 @@ pub struct RetryPolicy {
 
 impl RetryPolicy {
     /// Create a policy that never retries.
-    pub fn no_retries() -> Self {
+    pub const fn no_retries() -> Self {
         Self {
             max_retries: 0,
             retry_delay_ms: 0,
@@ -42,7 +42,7 @@ impl RetryPolicy {
     }
 
     /// Create a policy with the given maximum number of retries.
-    pub fn new(max_retries: u32) -> Self {
+    pub const fn new(max_retries: u32) -> Self {
         Self {
             max_retries,
             retry_delay_ms: 1000,
@@ -87,7 +87,7 @@ impl RetryPolicy {
         // Cap the shift so the factor stays well within u64 range.
         let shift = attempt.min(62);
         let factor = 1u64 << shift;
-        let delay = self.retry_delay_ms.checked_mul(factor).unwrap_or(u64::MAX);
+        let delay = self.retry_delay_ms.saturating_mul(factor);
         delay
             .min(self.max_retry_delay_ms)
             .min(Self::ABSOLUTE_MAX_DELAY_MS)
@@ -101,9 +101,6 @@ impl RetryPolicy {
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        Self::new(3)
-            .with_exponential_backoff()
-            .with_delay(1000)
-            .with_max_delay(30_000)
+        Self::new(3).with_exponential_backoff()
     }
 }

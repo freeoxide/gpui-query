@@ -19,7 +19,7 @@ fn fetch_next_page_appends_page_and_updates_status() {
 
     let accepted = r.complete_page_success(
         id,
-        vec!["a".to_string(), "b".to_string()],
+        vec!["a", "b"],
         true,
         true,
         2_000,
@@ -27,7 +27,7 @@ fn fetch_next_page_appends_page_and_updates_status() {
     assert!(accepted);
     assert_eq!(r.page_count(), 1);
     assert_eq!(r.status(), QueryStatus::Success);
-    assert_eq!(r.last_page(), Some(&vec!["a".to_string(), "b".to_string()]));
+    assert_eq!(r.last_page(), Some(&vec!["a", "b"]));
     assert_eq!(r.last_updated_at_ms(), Some(2_000));
     assert!(!r.is_fetching_next_page());
     assert!(r.signal().is_none());
@@ -38,8 +38,8 @@ fn fetch_next_page_accumulates_multiple_pages() {
     let r = load_n_pages(5);
 
     assert_eq!(r.page_count(), 5);
-    assert_eq!(r.first_page(), Some(&vec!["page0".to_string()]));
-    assert_eq!(r.last_page(), Some(&vec!["page4".to_string()]));
+    assert_eq!(r.first_page(), Some(&vec!["page0"]));
+    assert_eq!(r.last_page(), Some(&vec!["page4"]));
     // The last page was loaded with has_more = false
     assert!(!r.has_next_page());
 }
@@ -63,7 +63,7 @@ fn fetch_previous_page_prepends_page() {
 
     // Load initial page via next
     let id1 = r.begin_fetch_next(&mut seq, 1_000).unwrap();
-    r.complete_page_success(id1, vec!["page1".to_string()], true, true, 2_000);
+    r.complete_page_success(id1, vec!["page1"], true, true, 2_000);
 
     // Enable previous and prepend
     r.set_has_previous_page(true);
@@ -73,15 +73,15 @@ fn fetch_previous_page_prepends_page() {
 
     let accepted = r.complete_page_success(
         id2,
-        vec!["page0".to_string()],
+        vec!["page0"],
         false,
         false, // is_next = false => prepend
         4_000,
     );
     assert!(accepted);
     assert_eq!(r.page_count(), 2);
-    assert_eq!(r.first_page(), Some(&vec!["page0".to_string()]));
-    assert_eq!(r.last_page(), Some(&vec!["page1".to_string()]));
+    assert_eq!(r.first_page(), Some(&vec!["page0"]));
+    assert_eq!(r.last_page(), Some(&vec!["page1"]));
     // has_more from completion updated has_previous_page
     assert!(!r.has_previous_page());
 }
@@ -145,7 +145,7 @@ fn latest_wins_allows_replacement() {
 
 #[test]
 fn ignore_while_loading_prevents_replacement() {
-    let mut r = InfiniteQueryResource::<Vec<String>>::new(
+    let mut r = InfiniteQueryResource::<Vec<&'static str>>::new(
         QueryKey::from("items"),
         CachePolicy::Ttl { ttl_ms: 60_000 },
         RequestPolicy::IgnoreWhileLoading,
@@ -191,7 +191,7 @@ fn has_more_false_stops_further_fetches() {
     let mut seq = RequestSequencer::new();
 
     let id = r.begin_fetch_next(&mut seq, 1_000).unwrap();
-    r.complete_page_success(id, vec!["only".to_string()], false, true, 2_000);
+    r.complete_page_success(id, vec!["only"], false, true, 2_000);
 
     assert!(!r.has_next_page());
     // Attempting to fetch next should return None
@@ -205,12 +205,12 @@ fn has_more_propagated_on_prepend() {
     let mut seq = RequestSequencer::new();
 
     let id1 = r.begin_fetch_next(&mut seq, 1_000).unwrap();
-    r.complete_page_success(id1, vec!["page1".to_string()], true, true, 2_000);
+    r.complete_page_success(id1, vec!["page1"], true, true, 2_000);
 
     r.set_has_previous_page(true);
     let id2 = r.begin_fetch_previous(&mut seq, 3_000).unwrap();
     // has_more = false => has_previous_page set to false
-    r.complete_page_success(id2, vec!["page0".to_string()], false, false, 4_000);
+    r.complete_page_success(id2, vec!["page0"], false, false, 4_000);
 
     assert!(!r.has_previous_page());
 }

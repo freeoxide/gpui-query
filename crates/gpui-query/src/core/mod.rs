@@ -34,7 +34,7 @@
 mod error;
 mod infinite_query;
 mod key;
-pub mod key_filter;
+mod key_filter;
 mod mutation;
 mod network_mode;
 mod policy;
@@ -60,3 +60,42 @@ pub use retry::RetryPolicy;
 pub use select::{MappedQueryResource, SelectTransform};
 pub use signal::QuerySignal;
 pub use status::QueryStatus;
+
+// ── Task storage helper (client feature) ────────────────────────────────
+//
+// `gpui::Task<T>` is `Debug` but not `Clone`, `PartialEq`, or `Eq`. Several
+// resource structs derive `Clone`/`PartialEq`/`Eq`, so storing a raw
+// `Option<Task<()>>` would break those derives when the `client` feature is
+// enabled. `CurrentTask` is a thin newtype that implements `Clone` (producing
+// an empty handle — the original task keeps running), `PartialEq`/`Eq`
+// (treating all instances as equal — task identity does not affect resource
+// equality), and `Default` (no task). Dropping the inner `Task` cancels it
+// immediately (gpui semantics), so `set` and `abort` simply replace the
+// inner value, dropping the previous task.
+#[cfg(feature = "client")]
+mod current_task {
+    use gpui::Task;
+
+    #[derive(Debug, Default)]
+    pub(crate) struct CurrentTask(Option<Task<()>>);
+
+    impl Clone for CurrentTask {
+        fn clone(&self) -> Self {
+            Self(None)
+        }
+    }
+
+    impl PartialEq for CurrentTask {
+        fn eq(&self, _other: &Self) -> bool {
+            true
+        }
+    }
+
+    impl Eq for CurrentTask {}
+
+    impl CurrentTask {
+        pub(crate) fn set(&mut self, task: Task<()>) {
+            self.0 = Some(task);
+        }
+    }
+}

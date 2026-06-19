@@ -15,6 +15,7 @@
 ///
 /// Returns `Some(R)` on success, or `None` if the entity could not be read
 /// (e.g. dropped or accessed off-thread) under the `Result`-returning API.
+#[inline]
 pub(crate) fn read_entity<T: 'static, R, C: gpui::AppContext>(
     entity: &gpui::Entity<T>,
     cx: &C,

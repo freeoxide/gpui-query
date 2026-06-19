@@ -30,13 +30,22 @@
 //! use gpui_query::{use_query, use_mutation, use_infinite_query, QueryClient};
 //! ```
 
+// T5: enable `#[doc(cfg(...))]` attribute gating on docs.rs builds so the
+// rendered API docs annotate items with the feature gate that enables them
+// (`core`, `client`, `hook`). `doc_cfg` is a nightly-only intradoc feature,
+// so it is only turned on under the `docsrs` config attribute.
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 #[cfg(feature = "core")]
+#[cfg_attr(docsrs, doc(cfg(feature = "core")))]
 pub mod core;
 
 #[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub mod client;
 
 #[cfg(feature = "hook")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hook")))]
 pub mod hook;
 
 // Convenience re-exports (star-export each enabled layer at crate root).
@@ -46,13 +55,16 @@ pub mod hook;
 // users can import from either layer. Suppress the ambiguous_glob_reexports
 // lint since the duplicate is harmless and both are public API.
 #[cfg(feature = "core")]
+#[cfg_attr(docsrs, doc(cfg(feature = "core")))]
 pub use core::*;
 
 #[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 #[allow(ambiguous_glob_reexports)]
 pub use client::*;
 
 #[cfg(feature = "hook")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hook")))]
 pub use hook::*;
 
 // ── Tests ──────────────────────────────────────────────────────────────

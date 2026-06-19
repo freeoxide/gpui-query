@@ -3,6 +3,7 @@
 use crate::core::*;
 use crate::tests::core_cache::*;
 use crate::tests::test_support::*;
+use std::num::NonZero;
 
 // ══════════════════════════════════════════════════════════════════════════
 // CACHE INTERACTIONS WITH REQUEST POLICIES
@@ -53,7 +54,7 @@ fn ignore_while_loading_rejects_duplicate_request() {
 fn latest_wins_replaces_active_request() {
     let mut r = ttl_resource();
     let mut seq = test_sequencer();
-    r.begin_request(&mut seq, 100, QueryFetchMode::Normal);
+    let _ = r.begin_request(&mut seq, 100, QueryFetchMode::Normal);
     let replacement = r.begin_request(&mut seq, 200, QueryFetchMode::Normal);
     assert!(matches!(
         replacement,
@@ -77,7 +78,7 @@ fn ignore_while_loading_with_swr_still_serves_stale() {
     );
     let mut seq = test_sequencer();
     seed_data(&mut r, "cached", STORED_AT_MS);
-    r.begin_request(&mut seq, STORED_AT_MS + 1_500, QueryFetchMode::Force);
+    let _ = r.begin_request(&mut seq, STORED_AT_MS + 1_500, QueryFetchMode::Force);
     assert!(r.is_loading());
     let result = r.begin_request(&mut seq, STORED_AT_MS + 1_600, QueryFetchMode::Normal);
     assert!(matches!(
@@ -94,7 +95,7 @@ fn record_cache_hit_transitions_to_success() {
     let mut r = ttl_resource();
     seed_data(&mut r, "data", STORED_AT_MS);
     assert_eq!(r.status(), QueryStatus::Success);
-    r.begin_loading(RequestId::scoped(1, 1), STORED_AT_MS + 100);
+    r.begin_loading(RequestId::scoped(NonZero::new(1).unwrap(), 1), STORED_AT_MS + 100);
     assert_eq!(r.status(), QueryStatus::LoadingWithData);
     r.record_cache_hit();
     assert_eq!(r.status(), QueryStatus::Success);

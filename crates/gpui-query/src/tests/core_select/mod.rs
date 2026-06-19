@@ -8,6 +8,8 @@
 //! - Different output types (identity, count, projection)
 //! - Clone semantics
 
+use std::sync::Arc;
+
 use crate::core::{MappedQueryResource, SelectTransform};
 
 // ── SelectTransform ─────────────────────────────────────────────────────
@@ -65,7 +67,7 @@ fn select_transform_different_types() {
 #[test]
 fn mapped_resource_new_with_data() {
     let transform = SelectTransform::new(|v: &Vec<i32>| v.len());
-    let mapped = MappedQueryResource::<_, usize, ()>::new(Some(vec![1, 2, 3]), transform);
+    let mapped = MappedQueryResource::<_, usize, ()>::new(Some(Arc::new(vec![1, 2, 3])), transform);
     assert!(mapped.has_data());
     assert_eq!(mapped.data(), Some(3));
 }
@@ -86,7 +88,7 @@ fn mapped_resource_update_source_to_some() {
         MappedQueryResource::new(None, transform);
     assert_eq!(mapped.data(), None);
 
-    mapped.update_source(Some(vec![1, 2, 3]));
+    mapped.update_source(Some(Arc::new(vec![1, 2, 3])));
     assert!(mapped.has_data());
     assert_eq!(mapped.data(), Some(6));
 }
@@ -95,7 +97,7 @@ fn mapped_resource_update_source_to_some() {
 fn mapped_resource_update_source_to_none() {
     let transform = SelectTransform::new(|v: &Vec<i32>| v.len());
     let mut mapped: MappedQueryResource<Vec<i32>, usize, ()> =
-        MappedQueryResource::new(Some(vec![1, 2, 3]), transform);
+        MappedQueryResource::new(Some(Arc::new(vec![1, 2, 3])), transform);
     assert_eq!(mapped.data(), Some(3));
 
     mapped.update_source(None);
@@ -107,10 +109,10 @@ fn mapped_resource_update_source_to_none() {
 fn mapped_resource_update_source_replaces_previous() {
     let transform = SelectTransform::new(|v: &Vec<String>| v.join(", "));
     let mut mapped: MappedQueryResource<Vec<String>, String, ()> =
-        MappedQueryResource::new(Some(vec!["a".to_string()]), transform);
+        MappedQueryResource::new(Some(Arc::new(vec!["a".to_string()])), transform);
     assert_eq!(mapped.data(), Some("a".to_string()));
 
-    mapped.update_source(Some(vec!["x".to_string(), "y".to_string()]));
+    mapped.update_source(Some(Arc::new(vec!["x".to_string(), "y".to_string()])));
     assert_eq!(mapped.data(), Some("x, y".to_string()));
 }
 
@@ -123,14 +125,14 @@ fn mapped_resource_data_applies_transform_lazily() {
     let transform = SelectTransform::new(|v: &Vec<i32>| v.len());
 
     let mut mapped: MappedQueryResource<Vec<i32>, usize, ()> =
-        MappedQueryResource::new(Some(vec![1, 2]), transform);
+        MappedQueryResource::new(Some(Arc::new(vec![1, 2])), transform);
     assert_eq!(mapped.data(), Some(2));
 
     // Repeated data() calls must still return the correct value.
     assert_eq!(mapped.data(), Some(2));
 
     // After updating the source, data() must reflect the new source.
-    mapped.update_source(Some(vec![1, 2, 3]));
+    mapped.update_source(Some(Arc::new(vec![1, 2, 3])));
     assert_eq!(mapped.data(), Some(3));
 }
 
@@ -138,18 +140,18 @@ fn mapped_resource_data_applies_transform_lazily() {
 fn mapped_resource_clone_is_independent() {
     let transform = SelectTransform::new(|v: &Vec<i32>| v.len());
     let mut mapped: MappedQueryResource<Vec<i32>, usize, ()> =
-        MappedQueryResource::new(Some(vec![1, 2, 3]), transform);
+        MappedQueryResource::new(Some(Arc::new(vec![1, 2, 3])), transform);
 
     let mut cloned = mapped.clone();
     assert_eq!(cloned.data(), Some(3));
 
     // Updating the original does not affect the clone
-    mapped.update_source(Some(vec![1]));
+    mapped.update_source(Some(Arc::new(vec![1])));
     assert_eq!(mapped.data(), Some(1));
     assert_eq!(cloned.data(), Some(3), "clone should be independent");
 
     // Updating the clone does not affect the original
-    cloned.update_source(Some(vec![4, 5, 6, 7]));
+    cloned.update_source(Some(Arc::new(vec![4, 5, 6, 7])));
     assert_eq!(cloned.data(), Some(4));
     assert_eq!(mapped.data(), Some(1));
 }
@@ -157,7 +159,7 @@ fn mapped_resource_clone_is_independent() {
 #[test]
 fn mapped_resource_with_unit_error_type() {
     let transform = SelectTransform::new(|s: &String| s.len());
-    let mapped = MappedQueryResource::<String, usize, ()>::new(Some("hello".to_string()), transform);
+    let mapped = MappedQueryResource::<String, usize, ()>::new(Some(Arc::new("hello".to_string())), transform);
     assert_eq!(mapped.data(), Some(5));
 }
 
@@ -165,10 +167,10 @@ fn mapped_resource_with_unit_error_type() {
 fn mapped_resource_identity_transform() {
     let transform = SelectTransform::new(|x: &i32| *x);
     let mut mapped: MappedQueryResource<i32, i32, ()> =
-        MappedQueryResource::new(Some(42), transform);
+        MappedQueryResource::new(Some(Arc::new(42)), transform);
     assert_eq!(mapped.data(), Some(42));
 
-    mapped.update_source(Some(99));
+    mapped.update_source(Some(Arc::new(99)));
     assert_eq!(mapped.data(), Some(99));
 }
 
@@ -197,6 +199,6 @@ fn mapped_resource_complex_projection() {
     ];
 
     let mapped: MappedQueryResource<Vec<User>, Vec<String>, ()> =
-        MappedQueryResource::new(Some(users), active_names);
+        MappedQueryResource::new(Some(Arc::new(users)), active_names);
     assert_eq!(mapped.data(), Some(vec!["Alice".to_string(), "Carol".to_string()]));
 }

@@ -1,44 +1,11 @@
-//! Data retention tests: placeholder_data, previous_data, display_data, rollback.
+//! Data retention tests: previous_data and rollback.
 
 use crate::core::*;
 use crate::tests::core_cache::*;
-use crate::tests::test_support::*;
 
 // ══════════════════════════════════════════════════════════════════════════
-// DATA RETENTION: placeholder_data, previous_data, display_data, rollback
+// DATA RETENTION: previous_data and rollback
 // ══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn placeholder_data_set_and_clear() {
-    let mut r = ttl_resource();
-    assert_eq!(r.placeholder_data(), None);
-    r.set_placeholder_data(Some("loading..."));
-    assert_eq!(r.placeholder_data(), Some(&"loading..."));
-    r.set_placeholder_data(None);
-    assert_eq!(r.placeholder_data(), None);
-}
-
-#[test]
-fn display_data_prefers_real_data_over_placeholder() {
-    let mut r = ttl_resource();
-    r.set_placeholder_data(Some("placeholder"));
-    seed_data(&mut r, "real", STORED_AT_MS);
-    assert_eq!(r.display_data(), Some(&"real"));
-}
-
-#[test]
-fn display_data_falls_back_to_placeholder_when_no_data() {
-    let mut r = ttl_resource();
-    r.set_placeholder_data(Some("placeholder"));
-    assert_eq!(r.data(), None);
-    assert_eq!(r.display_data(), Some(&"placeholder"));
-}
-
-#[test]
-fn display_data_none_when_neither_set() {
-    let r = ttl_resource();
-    assert_eq!(r.display_data(), None);
-}
 
 #[test]
 fn previous_data_tracked_across_successive_successes() {
@@ -110,15 +77,12 @@ fn rollback_after_optimistic_update() {
 }
 
 #[test]
-fn reset_clears_placeholder_and_previous() {
+fn reset_clears_previous_data() {
     let mut r = ttl_resource();
     seed_data(&mut r, "first", 100);
     seed_data(&mut r, "second", 200);
-    r.set_placeholder_data(Some("placeholder"));
     assert_eq!(r.previous_data(), Some(&"first"));
-    assert_eq!(r.placeholder_data(), Some(&"placeholder"));
     r.reset();
-    assert_eq!(r.placeholder_data(), None);
     assert_eq!(r.previous_data(), None);
     assert_eq!(r.data(), None);
 }

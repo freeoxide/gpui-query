@@ -2,6 +2,11 @@
 //! CachePolicy, RequestPolicy, and QueryFetchMode.
 
 use crate::core::*;
+use crate::tests::test_support::assert_serde_roundtrip;
+use std::num::NonZero;
+
+// The serde-roundtrip helper is now shared from `test_support` (extends audit
+// #129 / T10); the four enum roundtrip tests below call it directly.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // QueryStatus
@@ -44,18 +49,15 @@ fn query_status_is_pending() {
 
 #[test]
 fn query_status_serde_roundtrip() {
-    for status in [
+    // Audit fix #55: table-driven via the shared roundtrip helper.
+    assert_serde_roundtrip(&[
         QueryStatus::Idle,
         QueryStatus::LoadingEmpty,
         QueryStatus::LoadingWithData,
         QueryStatus::Success,
         QueryStatus::Failure,
         QueryStatus::Cancelled,
-    ] {
-        let json = serde_json::to_string(&status).unwrap();
-        let back: QueryStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, status);
-    }
+    ]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -69,8 +71,8 @@ fn query_timestamp_from_millis() {
 }
 
 #[test]
-fn query_timestamp_from_u128() {
-    let ts: QueryTimestamp = 5_000u128.into();
+fn query_timestamp_from_u64() {
+    let ts: QueryTimestamp = 5_000u64.into();
     assert_eq!(ts.as_millis(), 5_000);
 }
 
@@ -82,8 +84,8 @@ fn query_timestamp_zero() {
 
 #[test]
 fn query_timestamp_large_value() {
-    let ts = QueryTimestamp::from_millis(u128::MAX);
-    assert_eq!(ts.as_millis(), u128::MAX);
+    let ts = QueryTimestamp::from_millis(u64::MAX);
+    assert_eq!(ts.as_millis(), u64::MAX);
 }
 
 #[test]
@@ -112,9 +114,9 @@ fn query_timestamp_equality() {
 #[test]
 fn request_id_hash_consistency() {
     use std::collections::HashSet;
-    let a = RequestId::scoped(1, 10);
-    let b = RequestId::scoped(1, 10);
-    let c = RequestId::scoped(2, 10);
+    let a = RequestId::scoped(NonZero::new(1).unwrap(), 10);
+    let b = RequestId::scoped(NonZero::new(1).unwrap(), 10);
+    let c = RequestId::scoped(NonZero::new(2).unwrap(), 10);
     let mut set = HashSet::new();
     set.insert(a);
     assert!(set.contains(&b), "equal ids should have equal hashes");
@@ -123,14 +125,14 @@ fn request_id_hash_consistency() {
 
 #[test]
 fn request_id_copy_semantics() {
-    let a = RequestId::scoped(5, 10);
+    let a = RequestId::scoped(NonZero::new(5).unwrap(), 10);
     let b = a; // Copy
     assert_eq!(a, b);
 }
 
 #[test]
 fn request_id_serde_roundtrip() {
-    let id = RequestId::scoped(42, 99);
+    let id = RequestId::scoped(NonZero::new(42).unwrap(), 99);
     let json = serde_json::to_string(&id).unwrap();
     let back: RequestId = serde_json::from_str(&json).unwrap();
     assert_eq!(back, id);
@@ -155,16 +157,13 @@ fn mutation_status_labels() {
 
 #[test]
 fn mutation_status_serde_roundtrip() {
-    for status in [
+    // Audit fix #55: table-driven via the shared roundtrip helper.
+    assert_serde_roundtrip(&[
         MutationStatus::Idle,
         MutationStatus::Loading,
         MutationStatus::Success,
         MutationStatus::Failure,
-    ] {
-        let json = serde_json::to_string(&status).unwrap();
-        let back: MutationStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, status);
-    }
+    ]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -231,15 +230,12 @@ fn cache_policy_ttl_is_expired_past_ttl() {
 
 #[test]
 fn cache_policy_serde_roundtrip() {
-    for policy in [
+    // Audit fix #55: table-driven via the shared roundtrip helper.
+    assert_serde_roundtrip(&[
         CachePolicy::NoCache,
         CachePolicy::Ttl { ttl_ms: 5_000 },
         CachePolicy::StaleWhileRevalidate { ttl_ms: 1_000, stale_ms: 2_000 },
-    ] {
-        let json = serde_json::to_string(&policy).unwrap();
-        let back: CachePolicy = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, policy);
-    }
+    ]);
 }
 
 #[test]
@@ -273,11 +269,8 @@ fn request_policy_labels() {
 
 #[test]
 fn request_policy_serde_roundtrip() {
-    for policy in [RequestPolicy::LatestWins, RequestPolicy::IgnoreWhileLoading] {
-        let json = serde_json::to_string(&policy).unwrap();
-        let back: RequestPolicy = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, policy);
-    }
+    // Audit fix #55: table-driven via the shared roundtrip helper.
+    assert_serde_roundtrip(&[RequestPolicy::LatestWins, RequestPolicy::IgnoreWhileLoading]);
 }
 
 #[test]

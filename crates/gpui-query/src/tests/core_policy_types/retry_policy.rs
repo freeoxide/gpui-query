@@ -1,6 +1,7 @@
 //! Tests for RetryPolicy and RefetchTrigger.
 
 use crate::core::*;
+use crate::tests::test_support::assert_serde_roundtrip;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RetryPolicy
@@ -119,10 +120,12 @@ fn retry_policy_should_retry_zero_max() {
 
 #[test]
 fn retry_policy_serde_roundtrip() {
-    let policy = RetryPolicy::new(5).with_delay(200).with_exponential_backoff().with_max_delay(5000);
-    let json = serde_json::to_string(&policy).unwrap();
-    let back: RetryPolicy = serde_json::from_str(&json).unwrap();
-    assert_eq!(back, policy);
+    // T10: shared roundtrip helper.
+    assert_serde_roundtrip(&[
+        RetryPolicy::new(5).with_delay(200).with_exponential_backoff().with_max_delay(5000),
+        RetryPolicy::no_retries(),
+        RetryPolicy::default(),
+    ]);
 }
 
 #[test]
@@ -161,9 +164,10 @@ fn refetch_trigger_equality_and_copy() {
 
 #[test]
 fn refetch_trigger_serde_roundtrip() {
-    for trigger in [RefetchTrigger::Always, RefetchTrigger::IfStale, RefetchTrigger::Never] {
-        let json = serde_json::to_string(&trigger).unwrap();
-        let back: RefetchTrigger = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, trigger);
-    }
+    // T10: shared roundtrip helper.
+    assert_serde_roundtrip(&[
+        RefetchTrigger::Always,
+        RefetchTrigger::IfStale,
+        RefetchTrigger::Never,
+    ]);
 }

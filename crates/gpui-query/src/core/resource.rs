@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CachePolicy, QueryError, QueryKey, QuerySignal, QueryStatus, QueryTimestamp, RequestId,
-    RequestPolicy, RetryPolicy,
+    RequestPolicy, RequestSequencer, RetryPolicy,
 };
 
 mod accessors;
@@ -37,10 +37,14 @@ pub struct QueryResource<T, E = QueryError> {
     ignored_results: u64,
     retry_count: u32,
     retry_policy: RetryPolicy,
-    placeholder_data: Option<T>,
     previous_data: Option<T>,
+    /// Per-resource sequencer used by [`begin_request_with_id`](Self::begin_request_with_id)
+    /// when no external id is supplied, so transient callers without a
+    /// `QueryClient` still get monotonic, collision-free ids instead of every
+    /// call colliding at `RequestId(1,1)` (N3). `#[serde(skip)]` — runtime
+    /// state, not persisted.
     #[serde(skip)]
-    initial_data: Option<T>,
+    transient_sequencer: RequestSequencer,
     #[serde(skip)]
     signal: Option<QuerySignal>,
 }
@@ -67,9 +71,8 @@ impl<T, E> QueryResource<T, E> {
             ignored_results: 0,
             retry_count: 0,
             retry_policy: RetryPolicy::no_retries(),
-            placeholder_data: None,
             previous_data: None,
-            initial_data: None,
+            transient_sequencer: RequestSequencer::new(),
             signal: None,
         }
     }

@@ -21,7 +21,7 @@ pub struct QueryDiagnostic {
     /// Cache policy label.
     pub cache_policy: String,
     /// Cache age in milliseconds, if available.
-    pub cache_age_ms: Option<u128>,
+    pub cache_age_ms: Option<u64>,
     /// Number of cache hits.
     pub cache_hits: u64,
     /// Number of retries.

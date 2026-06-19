@@ -13,15 +13,16 @@
 //!
 //! # GC test design
 //!
-//! The bucket's GC reads a cached `StatusSnapshot` (not the live entity).
-//! Direct entity manipulation (`apply_success`, etc.) and `PreparedFetch`
-//! completions update the entity but do NOT update the bucket snapshot.
-//! The snapshot is only updated by the hook layer in production.
+//! The bucket's GC reads live entity state directly via `entity.read(cx)`
+//! (CL2/#106 removed the cached `StatusSnapshot`). Direct entity
+//! manipulation (`apply_success`, etc.) and `PreparedFetch` completions
+//! are therefore visible to GC immediately, with no separate snapshot
+//! refresh step.
 //!
-//! For deterministic GC tests, we use `client.update_query_snapshot()` to
-//! simulate what the hook layer would do: set the snapshot status and
-//! `last_updated_ms` to known values. This lets us assert exact eviction
-//! and preservation behavior without the hook layer.
+//! For deterministic GC tests, we drive resources to a known status and
+//! `last_updated_ms` via direct entity updates (e.g. `apply_success`),
+//! then call `gc_with_time()` and assert the expected eviction /
+//! preservation behavior without the hook layer.
 
 mod client_basics;
 mod invalidation_reset_gc;

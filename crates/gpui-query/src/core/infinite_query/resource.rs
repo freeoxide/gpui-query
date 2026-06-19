@@ -2,12 +2,13 @@
 //! [`InfiniteQueryResource`].
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::core::{
     CachePolicy, QueryError, QueryKey, QuerySignal, QueryStatus, QueryTimestamp, RequestId,
-    RequestPolicy, RetryPolicy,
+    RequestPolicy, RequestSequencer, RetryPolicy,
 };
 
 /// Default maximum number of pages to retain.
@@ -40,14 +41,17 @@ pub enum FetchDirection {
 ///
 /// Inspired by TanStack Query's `useInfiniteQuery`. Each "page" is a `T` —
 /// typically a batch of items fetched from an API.
-#[derive(Clone, Debug)]
-#[derive(Serialize, Deserialize)]
+///
+/// Pages are stored internally as `Arc<T>` so that [`last_page_arc`](Self::last_page_arc)
+/// and [`first_page_arc`](Self::first_page_arc) can hand the fetcher a cheap
+/// `Arc::clone` instead of cloning the full page data.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound(serialize = "T: serde::Serialize, E: serde::Serialize"))]
 #[serde(bound(deserialize = "T: serde::de::DeserializeOwned, E: serde::de::DeserializeOwned"))]
 pub struct InfiniteQueryResource<T, E = QueryError> {
     pub(super) key: QueryKey,
     #[serde(with = "vec_deque_serde")]
-    pub(super) pages: VecDeque<T>,
+    pub(super) pages: VecDeque<Arc<T>>,
     pub(super) status: QueryStatus,
     pub(super) error: Option<E>,
     pub(super) active_request_id: Option<RequestId>,
@@ -61,44 +65,65 @@ pub struct InfiniteQueryResource<T, E = QueryError> {
     pub(super) retry_count: u32,
     pub(super) has_next_page: bool,
     pub(super) has_previous_page: bool,
-    pub(super) is_fetching_next_page: bool,
-    pub(super) is_fetching_previous_page: bool,
+    /// Which direction (if any) is currently being fetched.
+    ///
+    /// Collapses the previous `is_fetching_next_page` / `is_fetching_previous_page`
+    /// pair into a single `Option<PageDirection>`, making the mutual-exclusion
+    /// invariant unbreakable at the type level (N18). The two boolean getters
+    /// are retained for backwards compatibility.
+    pub(super) fetching_direction: Option<super::lifecycle::PageDirection>,
     pub(super) max_pages: Option<usize>,
     pub(super) direction: FetchDirection,
     pub(super) retry_policy: RetryPolicy,
+    /// Per-resource sequencer used by [`begin_fetch`](Self::begin_fetch_next)
+    /// when no external id is supplied, so transient callers without a
+    /// `QueryClient` still get monotonic, collision-free ids instead of every
+    /// call colliding at `RequestId(1,1)` (N3). `#[serde(skip)]` — runtime
+    /// state, not persisted.
+    #[serde(skip)]
+    pub(super) transient_sequencer: RequestSequencer,
     #[serde(skip)]
     pub(super) signal: Option<QuerySignal>,
+    #[cfg(feature = "client")]
+    #[serde(skip)]
+    pub(crate) current_task: crate::core::current_task::CurrentTask,
 }
 
-/// Serde helpers for `VecDeque` — serializes as a plain sequence and
-/// deserializes into `VecDeque`. This keeps the wire format identical to the
-/// old `Vec` representation so existing cached data remains compatible.
+/// Serde helpers for `VecDeque<Arc<T>>` — serializes as a plain sequence and
+/// deserializes into `VecDeque<Arc<T>>`. This keeps the wire format identical
+/// to the old `Vec<T>` representation so existing cached data remains
+/// compatible (`Arc<T>` serializes transparently as `T`).
 pub(super) mod vec_deque_serde {
     use std::collections::VecDeque;
+    use std::sync::Arc;
 
     use serde::de::{Deserialize, DeserializeOwned};
     use serde::ser::SerializeSeq;
     use serde::{Deserializer, Serializer};
 
-    pub fn serialize<S, T>(deque: &VecDeque<T>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S, T>(deque: &VecDeque<Arc<T>>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
         T: serde::Serialize,
     {
         let mut seq = serializer.serialize_seq(Some(deque.len()))?;
         for item in deque {
-            seq.serialize_element(item)?;
+            // Serialize the inner `T` directly (`&**item`) rather than the
+            // `Arc<T>`. This avoids requiring `Arc<T>: Serialize` (which is only
+            // available with serde's `rc` feature / certain configs) and keeps
+            // the wire format identical to the old `Vec<T>` representation.
+            seq.serialize_element(&**item)?;
         }
         seq.end()
     }
 
-    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<VecDeque<T>, D::Error>
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<VecDeque<Arc<T>>, D::Error>
     where
         D: Deserializer<'de>,
         T: DeserializeOwned,
     {
         let vec: Vec<T> = Vec::<T>::deserialize(deserializer)?;
-        Ok(vec.into())
+        Ok(vec.into_iter().map(Arc::new).collect())
     }
 }
 
@@ -158,12 +183,22 @@ impl<T, E> InfiniteQueryResource<T, E> {
             retry_count: 0,
             has_next_page: has_next,
             has_previous_page: has_prev,
-            is_fetching_next_page: false,
-            is_fetching_previous_page: false,
+            fetching_direction: None,
             max_pages: Some(DEFAULT_MAX_PAGES),
             direction,
             retry_policy: RetryPolicy::default(),
+            transient_sequencer: RequestSequencer::new(),
             signal: None,
+            #[cfg(feature = "client")]
+            current_task: crate::core::current_task::CurrentTask::default(),
         }
+    }
+}
+
+#[cfg(feature = "client")]
+impl<T, E> InfiniteQueryResource<T, E> {
+    /// Store a new background task, cancelling any previously stored task.
+    pub(crate) fn set_current_task(&mut self, task: gpui::Task<()>) {
+        self.current_task.set(task);
     }
 }

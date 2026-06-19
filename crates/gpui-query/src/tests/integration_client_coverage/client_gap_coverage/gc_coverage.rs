@@ -4,58 +4,19 @@
 //! query buckets including observer retention, SWR window protection, loading
 //! state preservation, max-entries eviction, and observer configuration.
 
-use gpui::{AppContext as _, BorrowAppContext as _, Entity, TestAppContext};
+use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
 
 use crate::client::{QueryClient, QueryObserver};
 use crate::core::*;
 use crate::tests::test_support::*;
 
-// -- Gap 1: GC protection for resources with active observers ----------------
+// -- Gap 1: (removed) observer_count-based GC protection --------------------
 //
-// QueryBucket::retain() and release() observer_count tracking is never called
-// by any test or production hook code. This test verifies that when
-// observer_count > 0, GC preserves resources that would otherwise be evicted.
-
-#[gpui::test]
-fn test_gc_preserves_resources_with_active_observers(cx: &mut TestAppContext) {
-    setup_query_client_with_gc(cx, 1_000);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let key = QueryKey::from("observed");
-
-            // Create and populate a resource
-            let entity = client.resource::<String, QueryError>(key.clone(), cx);
-            entity.update(cx, |r, _| r.apply_success("data".to_string(), 1_000));
-            client.update_query_snapshot::<String, QueryError>(
-                &key, QueryStatus::Success, Some(1_000), CachePolicy::Ttl { ttl_ms: 5_000 },
-            );
-
-            // Retain the resource (simulates an active observer subscription)
-            client.retain_query::<String, QueryError>(&key);
-
-            // GC at t=10000: age=9000 > success_threshold(2*1000=2000), but
-            // observer_count > 0 must protect from eviction.
-            client.gc_with_time(10_000, cx);
-
-            let remaining = client.all_queries::<String, QueryError>();
-            assert_eq!(
-                remaining.len(), 1,
-                "observed resource must survive GC even when age exceeds success threshold"
-            );
-            assert_eq!(remaining[0].read(cx).data().unwrap(), "data");
-
-            // Release the observer and run GC again — now it should be evicted
-            client.release_query::<String, QueryError>(&key);
-            client.gc_with_time(10_000, cx);
-
-            let after = client.all_queries::<String, QueryError>();
-            assert!(
-                after.is_empty(),
-                "resource should be evicted after observer release when age exceeds threshold"
-            );
-        });
-    });
-}
+// Audit #8 removed `observer_count` / `retain` / `release` from the buckets:
+// the count was never incremented from production hooks (GPUI `Drop` has no
+// `cx`), so it was always 0. GC now relies solely on `WeakEntity::upgrade()`
+// liveness plus age/status — there is no observer-based eviction protection
+// to test. Observed-but-aged resources are evicted by the normal age rules.
 
 // -- Gap 3: GC protection for StaleWhileRevalidate resources within stale window
 //
@@ -74,9 +35,8 @@ fn test_gc_preserves_swr_resources_within_stale_window(cx: &mut TestAppContext) 
                 key.clone(), swr, RequestPolicy::LatestWins, cx,
             );
             entity.update(cx, |r, _| r.apply_success("data".to_string(), 1_000));
-            client.update_query_snapshot::<String, QueryError>(
-                &key, QueryStatus::Success, Some(1_000), swr,
-            );
+            // GC reads live entity state (audit #CL2): Success + swr policy +
+            // last_updated_at=1000 are all set by `apply_success` above.
 
             // GC at t=3000: age=2000, ttl expired (2000 > 1000), but within
             // stale window (2000 <= 6000). SWR protection should prevent eviction.
@@ -110,9 +70,8 @@ fn test_gc_preserves_swr_resources_within_ttl(cx: &mut TestAppContext) {
                 key.clone(), swr, RequestPolicy::LatestWins, cx,
             );
             entity.update(cx, |r, _| r.apply_success("fresh".to_string(), 1_000));
-            client.update_query_snapshot::<String, QueryError>(
-                &key, QueryStatus::Success, Some(1_000), swr,
-            );
+            // GC reads live entity state (audit #CL2): Success + swr policy +
+            // last_updated_at=1000 are all set by `apply_success` above.
 
             // GC at t=3000: age=2000 < ttl(5000), still fresh
             client.gc_with_time(3_000, cx);
@@ -155,7 +114,7 @@ fn test_gc_evicts_completed_mutation_after_gc_time(cx: &mut TestAppContext) {
             // Success mutations are NOT in the evictable set (Idle | Failure only),
             // so they survive GC regardless of age.
             assert!(
-                mutations.len() >= 1,
+                !mutations.is_empty(),
                 "Success mutation should survive GC — only Idle/Failure are evictable"
             );
         });
@@ -206,16 +165,8 @@ fn test_gc_preserves_loading_infinite_query(cx: &mut TestAppContext) {
             });
             assert!(entity.read(cx).status().is_loading());
 
-            // Update the cached snapshot so GC reads Loading instead of Idle.
-            // Without this, GC uses the stale snapshot (Idle) and would evict.
-            client.update_infinite_snapshot::<String, QueryError>(
-                &key,
-                QueryStatus::LoadingEmpty,
-                None,
-                CachePolicy::default(),
-            );
-
-            // GC at far-future — loading resources should survive
+            // GC reads the live LoadingEmpty status (audit #CL2) — no snapshot
+            // update is needed; loading resources survive regardless of age.
             client.gc_with_time(1_000_000, cx);
 
             assert!(
@@ -226,33 +177,34 @@ fn test_gc_preserves_loading_infinite_query(cx: &mut TestAppContext) {
     });
 }
 
-// -- Gap 6c: Infinite query with observer_count > 0 survives GC ---------------
+// -- Gap 6c / #133: InfiniteQueryBucket evicts aged successful resources -----
+//
+// Audit #1/#133: successful infinite resources must be evicted once their age
+// exceeds `SUCCESS_GC_MULTIPLIER * gc_time_ms` — previously they were never
+// evicted, causing unbounded memory growth. (`observer_count` protection was
+// removed in #8, so this is pure age-based eviction of a Success entry.)
 
 #[gpui::test]
-fn test_gc_preserves_observed_infinite_query(cx: &mut TestAppContext) {
+fn test_gc_evicts_aged_successful_infinite_query(cx: &mut TestAppContext) {
     setup_query_client_with_gc(cx, 1_000);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            let key = QueryKey::from("inf_gc_observed");
-            let _entity = client.infinite_resource::<String, QueryError>(key.clone(), cx);
+            let key = QueryKey::from("inf_gc_success");
+            let entity = client.infinite_resource::<String, QueryError>(key.clone(), cx);
 
-            // Retain to simulate an active observer
-            client.retain_infinite_query::<String, QueryError>(&key);
+            // Load one page successfully at t=1_000 (sets last_updated_at=1_000).
+            entity.update(cx, |r, _| {
+                let mut seq = RequestSequencer::new();
+                let id = r.begin_fetch_next(&mut seq, 1_000).expect("begin fetch");
+                r.complete_page_success(id, "page0".to_string(), false, true, 1_000);
+            });
+            assert_eq!(entity.read(cx).status(), QueryStatus::Success);
 
-            // GC at far-future — observer_count > 0 should protect
-            client.gc_with_time(100_000, cx);
-
-            assert!(
-                client.infinite_query::<String, QueryError>(&key).is_some(),
-                "observed infinite query must survive GC"
-            );
-
-            // Release and GC again — should be evicted now
-            client.release_infinite_query::<String, QueryError>(&key);
-            client.gc_with_time(100_000, cx);
+            // success_threshold = 2 * 1000 = 2000. GC at t=3500 -> age=2500 > 2000 -> evicted.
+            client.gc_with_time(3_500, cx);
             assert!(
                 client.infinite_query::<String, QueryError>(&key).is_none(),
-                "released infinite query should be evicted by GC"
+                "successful infinite query aged past success_threshold must be evicted (#1/#133)"
             );
         });
     });
@@ -379,11 +331,9 @@ fn test_query_observer_observe_returns_some_for_live_entity(cx: &mut TestAppCont
             // Create an observer and verify it can observe a live entity
             let mut observer = QueryObserver::new(&entity);
 
-            struct DummyView;
-            let view = cx.new(|_| DummyView);
-
-            // observe() should return Some(Subscription) for a live entity
-            let sub = view.update(cx, |_view, cx| observer.observe(cx));
+            // Audit fix #52: adopt the shared `observe_with_dummy_view` helper
+            // instead of defining a local `struct DummyView;` + manual view dance.
+            let sub = observe_with_dummy_view::<String, QueryError>(cx, &mut observer);
             assert!(
                 sub.is_some(),
                 "observe should return Some(Subscription) for a live entity"
@@ -417,4 +367,67 @@ fn test_observer_status_dedup_default_config_is_status_change_only(_cx: &mut Tes
         !always_notify.notify_on_status_change_only,
         "explicit always-notify config should be false"
     );
+}
+
+// -- #134: MutationBucket evict_oldest triggers past DEFAULT_MAX_ENTRIES ------
+//
+// Audit #134: verify that the MutationBucket `max_entries` cap actually binds
+// growth. `evict_oldest` (audit #2) is called from `insert` when the bucket is
+// at capacity, evicting the oldest non-loading entry. We insert more than
+// `DEFAULT_MAX_ENTRIES` (10_000) Idle mutations and assert the live entry count
+// stays bounded at exactly the cap — proving eviction fired on every subsequent
+// insert rather than growing without limit.
+//
+// `DEFAULT_MAX_ENTRIES` lives in the private `client::bucket::types` module and
+// isn't nameable from here; we mirror its documented value (10_000) as the
+// expected bound. If the constant changes, this test's expected value must be
+// updated to match.
+
+#[gpui::test]
+fn test_mutation_bucket_evict_oldest_keeps_count_bounded(cx: &mut TestAppContext) {
+    // Mirrors `crate::client::bucket::types::DEFAULT_MAX_ENTRIES` (pub(crate),
+    // not nameable from the tests module).
+    const MAX_ENTRIES: usize = 10_000;
+
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            // Hold strong refs to every created entity for the duration of the
+            // test. The bucket stores only WeakEntity handles; `evict_oldest`
+            // and `all_entities` skip dead weak refs, so the entities must stay
+            // alive for the count assertions below to be meaningful.
+            let mut live: Vec<gpui::Entity<MutationResource<String, String, QueryError>>> =
+                Vec::with_capacity(MAX_ENTRIES + 2);
+
+            // Insert MAX_ENTRIES + 2 Idle mutations — crossing the cap by 2
+            // is enough to trigger evict_oldest and prove the count stays
+            // bounded (audit T14: avoid constructing 10 005 entities).
+            for _ in 0..(MAX_ENTRIES + 2) {
+                let entity = cx.new(|_| {
+                    MutationResource::<String, String, QueryError>::new(RetryPolicy::no_retries())
+                });
+                client.register_mutation::<String, String, QueryError>(&entity, cx);
+                live.push(entity);
+            }
+
+            let mutations = client.all_mutations::<String, String, QueryError>();
+            assert_eq!(
+                mutations.len(),
+                MAX_ENTRIES,
+                "MutationBucket entry count must stay bounded at DEFAULT_MAX_ENTRIES \
+                 ({}); evict_oldest should have triggered on every insert past the \
+                 cap (#134)", MAX_ENTRIES
+            );
+
+            // Diagnostics should agree with the bounded bucket size.
+            let diag = client.diagnostics(cx);
+            assert_eq!(
+                diag.mutation_count, MAX_ENTRIES,
+                "diagnostics.mutation_count must match the bounded bucket size"
+            );
+
+            // Hold `live` to the end so the strong refs outlive the assertions.
+            drop(live);
+        });
+    });
 }

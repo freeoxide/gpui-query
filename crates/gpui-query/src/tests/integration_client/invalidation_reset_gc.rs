@@ -1,6 +1,6 @@
 //! Tests for cache management: invalidation, reset, and garbage collection.
 
-use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
+use gpui::{BorrowAppContext as _, TestAppContext};
 
 use crate::client::QueryClient;
 use crate::core::*;
@@ -157,11 +157,10 @@ fn test_reset_queries_prefix_preserves_non_matching(cx: &mut TestAppContext) {
 
 // ── 6. GC evicts stale Idle/Failure/Success resources ───────────────────
 //
-// GC uses a cached StatusSnapshot (not the live entity). The snapshot is
-// updated by the hook layer in production. For deterministic tests, we use
-// `client.update_query_snapshot()` to set the snapshot to a known state
-// before calling `gc_with_time()`, then assert the expected outcome
-// unconditionally.
+// GC reads live entity state directly via `entity.read(cx)` (CL2/#106); no
+// cached snapshot is involved. For deterministic tests, we drive resources
+// to a known status / `last_updated_ms` via direct entity updates before
+// calling `gc_with_time()`, then assert the expected outcome unconditionally.
 //
 // gc_time_ms=1000 means: MIN_GC_TIME_MS=1000 (enforced floor), so
 //   - Idle/Failure: evicted when age >= gc_threshold (1000ms)
@@ -204,19 +203,11 @@ fn test_gc_evicts_failure_resources_after_gc_time(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("fail_key");
 
-            // Create resource, fail a fetch, then update the snapshot to Failure
-            let prepared = client
-                .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
-                .expect("should start");
-            prepared.complete_failure(QueryError::response("broken"), cx);
-
-            // Simulate hook-layer snapshot update: Failure at t=1000
-            client.update_query_snapshot::<String, QueryError>(
-                &key,
-                QueryStatus::Failure,
-                Some(1_000),
-                CachePolicy::Ttl { ttl_ms: 5_000 },
-            );
+            // Drive the resource to Failure at a controlled timestamp (t=1000).
+            // GC reads live entity state (audit #CL2), so we set `last_updated_at`
+            // directly via `apply_failure` instead of faking a snapshot.
+            let entity = client.resource::<String, QueryError>(key.clone(), cx);
+            entity.update(cx, |r, _| r.apply_failure(QueryError::response("broken"), 1_000));
 
             // GC at t=2500: age = 2500 - 1000 = 1500 > gc_threshold(1000) -> evicted
             client.gc_with_time(2_500, cx);
@@ -237,19 +228,9 @@ fn test_gc_preserves_failure_resources_before_gc_time(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("fail_key_early");
 
-            // Create resource, fail a fetch, then update the snapshot to Failure
-            let prepared = client
-                .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
-                .expect("should start");
-            prepared.complete_failure(QueryError::response("broken"), cx);
-
-            // Simulate hook-layer snapshot update: Failure at t=2000
-            client.update_query_snapshot::<String, QueryError>(
-                &key,
-                QueryStatus::Failure,
-                Some(2_000),
-                CachePolicy::Ttl { ttl_ms: 5_000 },
-            );
+            // Drive the resource to Failure at a controlled timestamp (t=2000).
+            let entity = client.resource::<String, QueryError>(key.clone(), cx);
+            entity.update(cx, |r, _| r.apply_failure(QueryError::response("broken"), 2_000));
 
             // GC at t=2500: age = 2500 - 2000 = 500 < gc_threshold(1000) -> preserved
             client.gc_with_time(2_500, cx);
@@ -275,18 +256,11 @@ fn test_gc_preserves_loading_resources_regardless_of_age(cx: &mut TestAppContext
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("loading_key");
 
-            // Start a fetch via the public API but don't complete it
+            // Start a fetch via the public API but don't complete it. GC reads
+            // the live LoadingEmpty status (audit #CL2) — no snapshot needed.
             let prepared = client
                 .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
                 .expect("should start");
-
-            // Simulate hook-layer snapshot update: LoadingEmpty at t=0
-            client.update_query_snapshot::<String, QueryError>(
-                &key,
-                QueryStatus::LoadingEmpty,
-                Some(0),
-                CachePolicy::Ttl { ttl_ms: 5_000 },
-            );
 
             // GC at t=1_000_000 — age is enormous, but Loading resources are never evicted
             client.gc_with_time(1_000_000, cx);
@@ -325,18 +299,9 @@ fn test_gc_evicts_success_resources_after_success_threshold(cx: &mut TestAppCont
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("success_old");
 
-            let prepared = client
-                .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
-                .expect("should start");
-            prepared.complete_success("data".to_string(), cx);
-
-            // Simulate hook-layer snapshot update: Success at t=1000
-            client.update_query_snapshot::<String, QueryError>(
-                &key,
-                QueryStatus::Success,
-                Some(1_000),
-                CachePolicy::Ttl { ttl_ms: 5_000 },
-            );
+            // Drive the resource to Success at a controlled timestamp (t=1000).
+            let entity = client.resource::<String, QueryError>(key.clone(), cx);
+            entity.update(cx, |r, _| r.apply_success("data".to_string(), 1_000));
 
             // GC at t=3500: age = 3500 - 1000 = 2500 > success_threshold(2000) -> evicted
             client.gc_with_time(3_500, cx);
@@ -358,18 +323,9 @@ fn test_gc_preserves_success_resources_within_success_threshold(cx: &mut TestApp
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("success_fresh");
 
-            let prepared = client
-                .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
-                .expect("should start");
-            prepared.complete_success("data".to_string(), cx);
-
-            // Simulate hook-layer snapshot update: Success at t=2000
-            client.update_query_snapshot::<String, QueryError>(
-                &key,
-                QueryStatus::Success,
-                Some(2_000),
-                CachePolicy::Ttl { ttl_ms: 5_000 },
-            );
+            // Drive the resource to Success at a controlled timestamp (t=2000).
+            let entity = client.resource::<String, QueryError>(key.clone(), cx);
+            entity.update(cx, |r, _| r.apply_success("data".to_string(), 2_000));
 
             // GC at t=3500: age = 3500 - 2000 = 1500 < success_threshold(2000) -> preserved
             client.gc_with_time(3_500, cx);

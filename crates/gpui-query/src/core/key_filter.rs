@@ -2,7 +2,7 @@ use super::QueryKey;
 
 /// A filter for matching query keys, used by bulk operations like
 /// `invalidate_queries`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueryKeyFilter<'a> {
     /// Match only the key that is exactly equal.
     Exact(&'a QueryKey),

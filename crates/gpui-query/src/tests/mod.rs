@@ -7,7 +7,9 @@ mod core_request;
 mod core_select;
 mod core_policy_types;
 mod core_resource_advanced;
+#[cfg(feature = "client")]
 mod coverage_gaps;
+#[cfg(feature = "client")]
 mod integration_client;
 #[cfg(feature = "hook")]
 mod integration_client_coverage;

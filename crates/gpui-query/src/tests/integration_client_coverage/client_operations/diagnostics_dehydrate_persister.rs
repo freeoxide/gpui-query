@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
+use gpui::{BorrowAppContext as _, TestAppContext};
 
 use crate::client::{
     DehydratedEntry, DehydratedState, QueryClient,
@@ -166,7 +166,7 @@ fn test_persister_empty_restore(cx: &mut TestAppContext) {
 
             // No resources yet — persist should produce no entries
             client.persist(&EmptyPersister, cx);
-            let loaded = client.restore(&EmptyPersister);
+            let loaded = QueryClient::restore(&EmptyPersister);
             assert!(loaded.is_empty());
         });
     });

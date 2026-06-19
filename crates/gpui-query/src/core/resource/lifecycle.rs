@@ -7,6 +7,19 @@ use crate::core::{
 
 use super::QueryResource;
 
+/// Source of the [`RequestId`] for the shared `begin_request_inner` helper.
+///
+/// Mirrors the `MaybeRequestId` pattern already used by
+/// `InfiniteQueryResource` to dedup its four entry points. Keeping the two
+/// public `begin_request` / `begin_request_with_id` entry points sharing one
+/// implementation avoids the ~90% duplication flagged in N4, and threads the
+/// stored per-resource sequencer (N3) through the `None` path so transient
+/// callers no longer collide at `RequestId(1,1)`.
+enum MaybeRequestId<'a> {
+    FromSequencer(&'a mut RequestSequencer),
+    Provided(Option<RequestId>),
+}
+
 impl<T, E> QueryResource<T, E> {
     /// Begin a new request on this resource.
     ///
@@ -17,9 +30,64 @@ impl<T, E> QueryResource<T, E> {
     pub fn begin_request(
         &mut self,
         sequencer: &mut RequestSequencer,
-        now_ms: u128,
+        now_ms: u64,
         fetch_mode: QueryFetchMode,
     ) -> QueryBeginResult {
+        self.begin_request_inner(now_ms, fetch_mode, MaybeRequestId::FromSequencer(sequencer))
+    }
+
+    /// Like [`begin_request`](Self::begin_request) but accepts an optional
+    /// pre-generated `RequestId` instead of using a `RequestSequencer`.
+    ///
+    /// When `maybe_request_id` is `Some`, uses that ID directly (useful when
+    /// the bucket's co-located sequencer has already generated the ID).
+    /// When `None`, falls back to the resource's own stored sequencer so the
+    /// generated ids are monotonic and collision-free across calls (N3) rather
+    /// than every call producing a colliding `RequestId(1,1)`.
+    ///
+    /// This is the preferred entry point for the hook layer (audit fixes
+    /// #1/#5/#15/#18): it allows the bucket's persistent sequencer to provide
+    /// globally unique, monotonically increasing RequestIds.
+    pub fn begin_request_with_id(
+        &mut self,
+        maybe_request_id: Option<RequestId>,
+        now_ms: u64,
+        fetch_mode: QueryFetchMode,
+    ) -> QueryBeginResult {
+        self.begin_request_inner(
+            now_ms,
+            fetch_mode,
+            MaybeRequestId::Provided(maybe_request_id),
+        )
+    }
+
+    /// Shared implementation behind [`begin_request`](Self::begin_request) and
+    /// [`begin_request_with_id`](Self::begin_request_with_id) (N4).
+    ///
+    /// `id_source` selects where the request id comes from: an external
+    /// sequencer (for `begin_request`) or a pre-allocated id with a
+    /// per-resource fallback (for `begin_request_with_id`). The fallback uses
+    /// the resource's own stored sequencer (N3) instead of a fresh
+    /// `RequestSequencer::new()`.
+    fn begin_request_inner(
+        &mut self,
+        now_ms: u64,
+        fetch_mode: QueryFetchMode,
+        mut id_source: MaybeRequestId,
+    ) -> QueryBeginResult {
+        // Helper that resolves the next id from whichever source we were given,
+        // evaluated lazily so early-return guards never consume a sequence
+        // number (preserving the original counter-consumption behavior).
+        macro_rules! next_id {
+            () => {{
+                match &mut id_source {
+                    MaybeRequestId::FromSequencer(seq) => seq.next_request(),
+                    MaybeRequestId::Provided(maybe_id) => maybe_id
+                        .unwrap_or_else(|| self.transient_sequencer.next_request()),
+                }
+            }};
+        }
+
         // 1. Fresh cache hit — no fetch needed at all.
         if fetch_mode == QueryFetchMode::Normal && self.should_short_circuit_cache(now_ms) {
             self.record_cache_hit();
@@ -47,10 +115,10 @@ impl<T, E> QueryResource<T, E> {
 
             let replaced_request_id = self.active_request_id;
             if replaced_request_id.is_some() {
-                self.cancelled_count += 1;
+                self.cancelled_count = self.cancelled_count.saturating_add(1);
             }
 
-            let request_id = sequencer.next_request();
+            let request_id = next_id!();
             let status = self.begin_loading(request_id, now_ms);
             return QueryBeginResult::StaleCacheHit {
                 request_id,
@@ -69,85 +137,10 @@ impl<T, E> QueryResource<T, E> {
         // 4. Normal fetch — start a new request.
         let replaced_request_id = self.active_request_id;
         if replaced_request_id.is_some() {
-            self.cancelled_count += 1;
+            self.cancelled_count = self.cancelled_count.saturating_add(1);
         }
 
-        let request_id = sequencer.next_request();
-        let status = self.begin_loading(request_id, now_ms);
-        QueryBeginResult::Started {
-            request_id,
-            status,
-            replaced_request_id,
-        }
-    }
-
-    /// Like [`begin_request`] but accepts an optional pre-generated `RequestId`
-    /// instead of using a `RequestSequencer`.
-    ///
-    /// When `maybe_request_id` is `Some`, uses that ID directly (useful when
-    /// the bucket's co-located sequencer has already generated the ID).
-    /// When `None`, falls back to a transient `RequestSequencer::new()` for
-    /// compatibility.
-    ///
-    /// This is the preferred entry point for the hook layer (audit fixes
-    /// #1/#5/#15/#18): it allows the bucket's persistent sequencer to provide
-    /// globally unique, monotonically increasing RequestIds.
-    pub fn begin_request_with_id(
-        &mut self,
-        maybe_request_id: Option<RequestId>,
-        now_ms: u128,
-        fetch_mode: QueryFetchMode,
-    ) -> QueryBeginResult {
-        // 1. Fresh cache hit — no fetch needed at all.
-        if fetch_mode == QueryFetchMode::Normal && self.should_short_circuit_cache(now_ms) {
-            self.record_cache_hit();
-            return QueryBeginResult::CacheHit;
-        }
-
-        // 2. Stale-while-revalidate
-        if fetch_mode == QueryFetchMode::Normal && self.should_serve_stale_and_revalidate(now_ms) {
-            self.record_stale_cache_hit();
-
-            if self.request_policy == RequestPolicy::IgnoreWhileLoading
-                && let Some(active_request_id) = self.active_request_id
-            {
-                return QueryBeginResult::StaleCacheHit {
-                    request_id: active_request_id,
-                    status: self.status,
-                    replaced_request_id: None,
-                };
-            }
-
-            let replaced_request_id = self.active_request_id;
-            if replaced_request_id.is_some() {
-                self.cancelled_count += 1;
-            }
-
-            let request_id = maybe_request_id
-                .unwrap_or_else(|| RequestSequencer::new().next_request());
-            let status = self.begin_loading(request_id, now_ms);
-            return QueryBeginResult::StaleCacheHit {
-                request_id,
-                status,
-                replaced_request_id,
-            };
-        }
-
-        // 3. IgnoreWhileLoading guard
-        if self.request_policy == RequestPolicy::IgnoreWhileLoading
-            && let Some(active_request_id) = self.active_request_id
-        {
-            return QueryBeginResult::IgnoredWhileLoading { active_request_id };
-        }
-
-        // 4. Normal fetch — start a new request.
-        let replaced_request_id = self.active_request_id;
-        if replaced_request_id.is_some() {
-            self.cancelled_count += 1;
-        }
-
-        let request_id = maybe_request_id
-            .unwrap_or_else(|| RequestSequencer::new().next_request());
+        let request_id = next_id!();
         let status = self.begin_loading(request_id, now_ms);
         QueryBeginResult::Started {
             request_id,
@@ -166,7 +159,7 @@ impl<T, E> QueryResource<T, E> {
     /// intentional — it cancels the old request and starts a new one. The old
     /// request's async task holds a stale `RequestId` and will be rejected by
     /// `accept_current_request()`.
-    pub(crate) fn begin_loading(&mut self, request_id: RequestId, now_ms: u128) -> QueryStatus {
+    pub(crate) fn begin_loading(&mut self, request_id: RequestId, now_ms: u64) -> QueryStatus {
         let status = if self.has_data() {
             QueryStatus::LoadingWithData
         } else {
@@ -229,14 +222,13 @@ impl<T, E> QueryResource<T, E> {
         self.active_request_id = None;
         self.status = QueryStatus::Cancelled;
         self.error = Some(error);
-        self.cancelled_count += 1;
+        self.cancelled_count = self.cancelled_count.saturating_add(1);
 
         // Save current data to previous_data before clearing so
         // rollback_to_previous() can recover it.
         if self.data.is_some() {
             self.previous_data = self.data.take();
         }
-        self.data = None;
 
         if let Some(signal) = self.signal.as_ref() {
             signal.cancel();
@@ -246,7 +238,7 @@ impl<T, E> QueryResource<T, E> {
     }
 
     pub fn mark_ignored_result(&mut self) {
-        self.ignored_results += 1;
+        self.ignored_results = self.ignored_results.saturating_add(1);
     }
 
     /// Whether the current data was served from stale cache (i.e., a
@@ -276,11 +268,6 @@ impl<T, E> QueryResource<T, E> {
     /// resets. Use `QueryResource::new()` to create a fully fresh resource with
     /// default policies.
     ///
-    /// **`initial_data`** is transient — it is marked `#[serde(skip)]` and is not
-    /// persisted across serialization/deserialization. After deserialization,
-    /// `initial_data` is `None` regardless of its prior value. `reset()` also
-    /// clears `initial_data`.
-    ///
     /// Calling `reset()` on an already-Idle resource resets diagnostic counters
     /// (`cache_hits`, `cancelled_count`, `ignored_results`, `retry_count`) to zero.
     /// This is intentional — `reset()` always resets counters regardless of current
@@ -300,24 +287,19 @@ impl<T, E> QueryResource<T, E> {
         self.cancelled_count = 0;
         self.ignored_results = 0;
         self.retry_count = 0;
-        self.placeholder_data = None;
         self.previous_data = None;
-        // Note: initial_data is transient (#[serde(skip)]) and is cleared on reset.
-        // It will not survive serialization/deserialization either.
-        self.initial_data = None;
         self.signal = None;
     }
 
-    /// Set placeholder data (shown while loading before first fetch).
-    pub fn set_placeholder_data(&mut self, data: Option<T>) {
-        self.placeholder_data = data;
-    }
-
     /// Roll back to the previous data (optimistic update undo).
+    ///
+    /// Clears any stored error to maintain the invariant that `Success`
+    /// implies `error is None` (mirroring `apply_success`).
     pub fn rollback_to_previous(&mut self) -> bool {
         if let Some(prev) = self.previous_data.take() {
             self.data = Some(prev);
             self.status = QueryStatus::Success;
+            self.error = None;
             return true;
         }
         false
@@ -330,27 +312,15 @@ impl<T, E> QueryResource<T, E> {
     }
 
     /// Clear data optimistically. Current data is saved for rollback.
+    ///
+    /// Transitions status to `Idle` to maintain the invariant that `Success`
+    /// implies data is available (mirroring `apply_success_optional`'s `None`
+    /// branch). Without this, a `Success` resource with `data = None` would
+    /// panic on `data.unwrap()`.
     pub fn clear_data(&mut self) {
         self.previous_data = self.data.take();
-    }
-
-    /// Seed initial data (only when Idle with no data).
-    ///
-    /// Note: `initial_data` is transient — it is marked `#[serde(skip)]` and
-    /// will be lost if the resource is serialized and deserialized.
-    pub fn set_initial_data(&mut self, data: T, now_ms: u128)
-    where
-        T: Clone,
-    {
-        if self.status == QueryStatus::Idle && self.data.is_none() {
-            self.initial_data = Some(data);
-            self.data = self.initial_data.clone();
-            self.last_updated_at = Some(QueryTimestamp::from(now_ms));
+        if self.status == QueryStatus::Success {
+            self.status = QueryStatus::Idle;
         }
-    }
-
-    /// Clear the stored initial data reference.
-    pub fn clear_initial_data(&mut self) {
-        self.initial_data = None;
     }
 }

@@ -51,18 +51,13 @@ impl CachePolicy {
     ///
     /// Sub-second values are shown with millisecond precision (e.g. "500ms")
     /// rather than truncating to "0s" via integer division.
+    ///
+    /// Thin wrapper around the [`Display`](std::fmt::Display) impl that
+    /// allocates a `String`. Prefer `format!("{policy}")` or writing directly
+    /// to a formatter to avoid the heap allocation for log/diagnostic callers.
+    // Audit fix #45: keep label for backward compat; Display writes directly.
     pub fn label(self) -> String {
-        match self {
-            Self::NoCache => "No cache".to_string(),
-            Self::Ttl { ttl_ms } => format!("Cache TTL {}", format_duration(ttl_ms)),
-            Self::StaleWhileRevalidate { ttl_ms, stale_ms } => {
-                format!(
-                    "Stale-while-revalidate TTL {} stale {}",
-                    format_duration(ttl_ms),
-                    format_duration(stale_ms)
-                )
-            }
-        }
+        self.to_string()
     }
 
     /// Whether this policy can short-circuit (return cached data without fetching).
@@ -123,9 +118,9 @@ impl CachePolicy {
     /// Whether the data is fresh (within the TTL window).
     ///
     /// Returns `false` if the policy has no TTL or the data age exceeds TTL.
-    pub fn is_fresh(self, age_ms: u128) -> bool {
+    pub fn is_fresh(self, age_ms: u64) -> bool {
         self.ttl_ms()
-            .map(|ttl| age_ms <= ttl as u128)
+            .map(|ttl| age_ms <= ttl)
             .unwrap_or(false)
     }
 
@@ -134,11 +129,11 @@ impl CachePolicy {
     /// Data is "stale-but-serveable" when:
     /// - The policy is `StaleWhileRevalidate`
     /// - Data age is past TTL but within `ttl_ms + stale_ms`
-    pub fn is_stale_but_serveable(self, age_ms: u128) -> bool {
+    pub fn is_stale_but_serveable(self, age_ms: u64) -> bool {
         match self {
             Self::StaleWhileRevalidate { ttl_ms, stale_ms } => {
-                let total = (ttl_ms as u128) + (stale_ms as u128);
-                age_ms > (ttl_ms as u128) && age_ms <= total
+                let total = ttl_ms.saturating_add(stale_ms);
+                age_ms > ttl_ms && age_ms <= total
             }
             _ => false,
         }
@@ -147,10 +142,47 @@ impl CachePolicy {
     /// Whether the data is expired (past the total valid window).
     ///
     /// Returns `true` if the data age exceeds the total valid window for this policy.
-    pub fn is_expired(self, age_ms: u128) -> bool {
+    pub fn is_expired(self, age_ms: u64) -> bool {
         self.total_valid_ms()
-            .map(|total| age_ms > total as u128)
+            .map(|total| age_ms > total)
             .unwrap_or(true) // NoCache always considers data expired
+    }
+}
+
+impl std::fmt::Display for CachePolicy {
+    /// Reproduces the exact strings produced by [`CachePolicy::label`].
+    ///
+    /// The duration formatting is inlined here (mirroring [`format_duration`])
+    /// so that no intermediate `String` is allocated when writing to a
+    /// formatter — the whole point of the `Display` impl.
+    // Audit fix #45: write directly to the formatter, avoiding String allocs.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoCache => write!(f, "No cache"),
+            Self::Ttl { ttl_ms } => {
+                write!(f, "Cache TTL ")?;
+                write_duration(f, *ttl_ms)
+            }
+            Self::StaleWhileRevalidate { ttl_ms, stale_ms } => {
+                write!(f, "Stale-while-revalidate TTL ")?;
+                write_duration(f, *ttl_ms)?;
+                write!(f, " stale ")?;
+                write_duration(f, *stale_ms)
+            }
+        }
+    }
+}
+
+/// Write a duration (in milliseconds) directly to a formatter, mirroring
+/// [`format_duration`] exactly: seconds for `>= 1000ms`, milliseconds otherwise.
+///
+/// This avoids the `String` allocation that `format_duration` performs, while
+/// producing byte-identical output.
+fn write_duration(f: &mut std::fmt::Formatter<'_>, ms: u64) -> std::fmt::Result {
+    if ms >= 1_000 {
+        write!(f, "{}s", ms / 1_000)
+    } else {
+        write!(f, "{ms}ms")
     }
 }
 
@@ -190,6 +222,7 @@ pub enum QueryFetchMode {
 
 /// The result of calling `begin_request` on a query resource.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum QueryBeginResult {
     /// A new request was started.
     Started {
@@ -221,11 +254,17 @@ pub enum QueryBeginResult {
 /// Shows seconds for values >= 1000ms, milliseconds otherwise.
 /// This avoids the misleading "0s" label that integer division produces
 /// for sub-second values.
+/// Reference formatting impl. The `Display` impls below intentionally inline
+/// this logic (writing directly to the `Formatter`) to avoid the `String`
+/// allocation; this standalone version is retained as the documented reference
+/// and is exercised by the unit tests below. Allowed dead because the lib-only
+/// build has no non-test caller.
+#[allow(dead_code)]
 fn format_duration(ms: u64) -> String {
     if ms >= 1_000 {
         format!("{}s", ms / 1_000)
     } else {
-        format!("{}ms", ms)
+        format!("{ms}ms")
     }
 }
 

@@ -51,7 +51,7 @@ fn ttl_renewal_resets_freshness() {
     let mut r = ttl_resource();
     seed_data(&mut r, "v1", STORED_AT_MS);
     assert!(!r.is_cache_fresh(STORED_AT_MS + 1_500));
-    let renewed_at: u128 = AT_TTL_BOUNDARY;
+    let renewed_at: u64 = AT_TTL_BOUNDARY;
     seed_data(&mut r, "v2", renewed_at);
     assert!(r.is_cache_fresh(renewed_at + 500));
     assert_eq!(r.data(), Some(&"v2"));
@@ -170,7 +170,7 @@ fn swr_stale_boundary_exact() {
 
 #[test]
 fn nocache_never_fresh() {
-    let mut r = nocache_resource();
+    let mut r = nocache_test_resource();
     seed_data(&mut r, "data", STORED_AT_MS);
     assert!(!r.is_cache_fresh(STORED_AT_MS));
     assert!(!r.is_cache_fresh(STORED_AT_MS + 1));
@@ -178,7 +178,7 @@ fn nocache_never_fresh() {
 
 #[test]
 fn nocache_always_expired() {
-    let mut r = nocache_resource();
+    let mut r = nocache_test_resource();
     seed_data(&mut r, "data", STORED_AT_MS);
     assert!(r.is_cache_expired(STORED_AT_MS));
     assert!(r.is_cache_expired(500));
@@ -186,7 +186,7 @@ fn nocache_always_expired() {
 
 #[test]
 fn nocache_no_short_circuit() {
-    let mut r = nocache_resource();
+    let mut r = nocache_test_resource();
     seed_data(&mut r, "data", STORED_AT_MS);
     assert!(!r.should_short_circuit_cache(STORED_AT_MS));
 }
@@ -198,7 +198,7 @@ fn nocache_cannot_short_circuit_policy() {
 
 #[test]
 fn nocache_begin_request_always_starts() {
-    let mut r = nocache_resource();
+    let mut r = nocache_test_resource();
     let mut seq = test_sequencer();
     seed_data(&mut r, "data", STORED_AT_MS);
     let result = r.begin_request(&mut seq, STORED_AT_MS, QueryFetchMode::Normal);
@@ -208,6 +208,6 @@ fn nocache_begin_request_always_starts() {
 
 #[test]
 fn nocache_should_clear_data_on_complete() {
-    let r = nocache_resource();
+    let r = nocache_test_resource();
     assert!(r.should_clear_data_on_complete());
 }

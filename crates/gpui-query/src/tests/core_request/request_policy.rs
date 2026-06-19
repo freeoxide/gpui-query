@@ -9,7 +9,10 @@ use crate::core::{
     CachePolicy, QueryBeginResult, QueryFetchMode, QueryResource, QuerySignal, QueryStatus,
     RequestId, RequestPolicy,
 };
-use crate::tests::test_support::{assert_status, test_resource_with_policies, test_sequencer, TEST_NOW_MS};
+use std::num::NonZero;
+use crate::tests::test_support::{
+    assert_status, begin_request_id, test_resource_with_policies, test_sequencer, TEST_NOW_MS,
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RequestPolicy: LatestWins cancels previous
@@ -22,11 +25,7 @@ fn latest_wins_cancels_previous_request_and_signal() {
     let mut seq = test_sequencer();
 
     // Start request 1, capture its signal
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let old_id = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let old_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
     let old_signal = resource.signal().unwrap().clone();
     assert!(!old_signal.is_cancelled());
 
@@ -69,7 +68,7 @@ fn latest_wins_increments_cancelled_count_for_each_replacement() {
     let mut seq = test_sequencer();
 
     for _ in 0..5 {
-        resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
+        let _ = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
     }
     // First request: 0 cancellations; each subsequent: +1
     assert_eq!(resource.cancelled_count(), 4);
@@ -89,11 +88,7 @@ fn ignore_while_loading_rejects_new_request_when_loading() {
     let mut seq = test_sequencer();
 
     // First request starts normally
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let first_id = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let first_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
     assert_status(&resource, QueryStatus::LoadingEmpty);
 
     // Second request should be ignored
@@ -124,11 +119,7 @@ fn ignore_while_loading_allows_new_request_after_completion() {
     let mut seq = test_sequencer();
 
     // Start and complete first request
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let first_id = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let first_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
     let completed = resource.complete_current_success(first_id, "data", TEST_NOW_MS);
     assert!(completed);
     assert_status(&resource, QueryStatus::Success);
@@ -152,16 +143,16 @@ fn each_request_gets_a_fresh_signal() {
     let mut seq = test_sequencer();
 
     // Request 1
-    resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
+    let _ = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
     let signal_1 = resource.signal().unwrap().clone();
 
     // Complete request 1 — completion does not clear the signal;
     // it remains until replaced by the next begin_loading call.
-    let id_1 = RequestId::scoped(1, 1);
+    let id_1 = RequestId::scoped(NonZero::new(1).unwrap(), 1);
     resource.complete_current_success(id_1, "result", TEST_NOW_MS);
 
     // Request 2 — begin_loading cancels the old signal and creates a new one
-    resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
+    let _ = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
     let signal_2 = resource.signal().unwrap().clone();
 
     assert_ne!(signal_1, signal_2, "each request should get a distinct signal");
@@ -205,14 +196,10 @@ fn request_id_from_different_scope_is_rejected() {
     let mut seq = test_sequencer();
 
     // Start a request — scope 1
-    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-    let active_id = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
+    let active_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     // Manually craft a request id in a different scope
-    let fake_id = RequestId::scoped(999, 1);
+    let fake_id = RequestId::scoped(NonZero::new(999).unwrap(), 1);
     let result = resource.accept_current_request(fake_id);
     assert!(
         result.is_none(),

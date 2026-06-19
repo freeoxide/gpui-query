@@ -25,7 +25,7 @@
 //! // Transform: extract just the count.
 //! let transform = SelectTransform::new(|users: &Vec<&str>| users.len());
 //!
-//! let mapped = MappedQueryResource::<_, usize, ()>::new(Some(users), transform);
+//! let mapped = MappedQueryResource::<_, usize, ()>::new(Some(std::sync::Arc::new(users)), transform);
 //! assert_eq!(mapped.data(), Some(3));
 //! ```
 //!
@@ -97,6 +97,16 @@ impl<T, U> std::fmt::Debug for SelectTransform<T, U> {
     }
 }
 
+impl<T, U> PartialEq for SelectTransform<T, U> {
+    fn eq(&self, other: &Self) -> bool {
+        // Closures have no PartialEq; compare by shared pointer identity,
+        // mirroring QuerySignal's Arc::ptr_eq approach (signal.rs).
+        Arc::ptr_eq(&self.transform, &other.transform)
+    }
+}
+
+impl<T, U> Eq for SelectTransform<T, U> {}
+
 impl<T, U> SelectTransform<T, U> {
     /// Create a new select transform from a closure.
     pub fn new(transform: impl Fn(&T) -> U + Send + Sync + 'static) -> Self {
@@ -124,16 +134,27 @@ impl<T, U> SelectTransform<T, U> {
 /// - `T`: The source data type (the cached query result).
 /// - `U`: The projected output type (the derived view).
 /// - `E`: The error type (carried through for API consistency).
-#[derive(Clone, Debug)]
+///
+/// # Storage
+///
+/// Source data is held as `Option<Arc<T>>` (audit #20) so that cloning a
+/// `MappedQueryResource` (e.g. for derived views) is a cheap `Arc::clone`
+/// rather than a full copy of `T`. `Arc<T>` is `Send + Sync` exactly when `T`
+/// is, so the existing bounds are preserved.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MappedQueryResource<T, U, E> {
-    source_data: Option<T>,
+    source_data: Option<Arc<T>>,
     transform: SelectTransform<T, U>,
     _error_marker: std::marker::PhantomData<E>,
 }
 
 impl<T, U, E> MappedQueryResource<T, U, E> {
     /// Create a new mapped resource.
-    pub fn new(source_data: Option<T>, transform: SelectTransform<T, U>) -> Self {
+    ///
+    /// Takes ownership of the source data as `Option<Arc<T>>` (audit #20). For
+    /// the common case of constructing from a plain `T`, wrap it with
+    /// `Some(Arc::new(t))`.
+    pub fn new(source_data: Option<Arc<T>>, transform: SelectTransform<T, U>) -> Self {
         Self {
             source_data,
             transform,
@@ -154,7 +175,7 @@ impl<T, U, E> MappedQueryResource<T, U, E> {
     /// use gpui_query::core::{MappedQueryResource, SelectTransform};
     ///
     /// let transform = SelectTransform::new(|v: &Vec<i32>| v.len());
-    /// let mapped = MappedQueryResource::<_, usize, ()>::new(Some(vec![1, 2, 3]), transform);
+    /// let mapped = MappedQueryResource::<_, usize, ()>::new(Some(std::sync::Arc::new(vec![1, 2, 3])), transform);
     /// let data = mapped.data(); // transform runs once
     /// assert_eq!(data, Some(3));
     /// // use `data` freely below
@@ -163,7 +184,9 @@ impl<T, U, E> MappedQueryResource<T, U, E> {
     /// For lightweight transforms (field access, counting, simple projections) the
     /// cost is negligible and no caching is needed.
     pub fn data(&self) -> Option<U> {
-        self.source_data.as_ref().map(|d| self.transform.apply(d))
+        // `source_data` is `Option<Arc<T>>`; deref the Arc so the transform
+        // still receives `&T` as documented (audit #20).
+        self.source_data.as_ref().map(|d| self.transform.apply(d.as_ref()))
     }
 
     /// Whether source data exists.
@@ -173,11 +196,13 @@ impl<T, U, E> MappedQueryResource<T, U, E> {
 
     /// Read-only access to the source data.
     ///
-    /// Used internally by the hook layer to compare source data by reference
-    /// before cloning, avoiding unnecessary allocations when the data has not
-    /// changed.
+    /// Returns `Option<&T>` by dereferencing the stored `Arc<T>` (audit #20).
+    /// Keeping the `&T` return type (rather than `&Arc<T>`) is the least
+    /// disruptive choice: existing callers compare the pointed-to `T` and do
+    /// not need to change. Used by the hook layer to detect when the source
+    /// has changed before re-storing.
     pub fn source_data(&self) -> Option<&T> {
-        self.source_data.as_ref()
+        self.source_data.as_ref().map(|arc| arc.as_ref())
     }
 
     /// Update the source data from the underlying query resource.
@@ -185,8 +210,9 @@ impl<T, U, E> MappedQueryResource<T, U, E> {
     /// Call this when the source `QueryResource` changes (fetch completes,
     /// cache invalidation, etc.) to keep the mapped view in sync. The transform
     /// is not applied here — it is applied lazily when [`data()`](Self::data)
-    /// is called.
-    pub fn update_source(&mut self, data: Option<T>) {
+    /// is called. Takes `Option<Arc<T>>` so callers can hand over a cheap
+    /// `Arc::clone` instead of cloning the full `T` (audit #20).
+    pub fn update_source(&mut self, data: Option<Arc<T>>) {
         self.source_data = data;
     }
 }

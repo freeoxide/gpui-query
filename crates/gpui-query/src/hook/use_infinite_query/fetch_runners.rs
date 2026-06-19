@@ -3,15 +3,53 @@
 //! These are the retry-aware async functions that execute the actual fetch
 //! operations with captured `RequestId`s and two-phase completion protocol.
 
+use std::sync::Arc;
+
 use crate::core::{InfiniteQueryResource, RequestId};
 
 use crate::hook::{current_time_ms, read_entity};
 
 // ── Internal fetch runners ───────────────────────────────────────────────
 
-/// Execute a fetch-next-page operation with a captured `RequestId`.
+/// Direction of an infinite-query page fetch.
 ///
-/// #fix #5/#6: The `request_id` is the one returned from `begin_fetch_next`,
+/// The next/previous fetch runners are ~90% identical, differing only in
+/// which page they read as the cursor and which `is_next` flag they pass to
+/// [`InfiniteQueryResource::complete_success_with_guard`]. This enum
+/// parameterizes that single difference so the shared body lives in one place.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PageDirection {
+    Next,
+    Previous,
+}
+
+impl PageDirection {
+    /// The `is_next` flag handed to `complete_success_with_guard`.
+    fn is_next(self) -> bool {
+        match self {
+            PageDirection::Next => true,
+            PageDirection::Previous => false,
+        }
+    }
+
+    /// The page used as the fetcher cursor: the last page for `Next`, the
+    /// first page for `Previous`. Read via the refcount-bumped `Arc<T>`
+    /// accessor (no full page clone).
+    fn cursor_page_arc<T: Clone + Send + Sync + 'static, E>(
+        self,
+        resource: &InfiniteQueryResource<T, E>,
+    ) -> Option<Arc<T>> {
+        match self {
+            PageDirection::Next => resource.last_page_arc(),
+            PageDirection::Previous => resource.first_page_arc(),
+        }
+    }
+}
+
+/// Execute a fetch-page operation with a captured `RequestId` in the given
+/// [`PageDirection`].
+///
+/// #fix #5/#6: The `request_id` is the one returned from `begin_fetch_*`,
 /// not re-read after the fetcher completes. This prevents stale-ID acceptance
 /// when concurrent fetches are in flight.
 ///
@@ -20,58 +58,51 @@ use crate::hook::{current_time_ms, read_entity};
 /// the race window between reading active_request_id and completing.
 ///
 /// #fix #13: Applies retry policy on fetch failure.
-pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
+async fn run_fetch_page_with_id<T, E, F, Fut>(
     entity: &gpui::WeakEntity<InfiniteQueryResource<T, E>>,
     fetcher: &F,
     request_id: RequestId,
     retry_policy: &crate::core::RetryPolicy,
     cx: &mut gpui::AsyncApp,
+    direction: PageDirection,
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
     F: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    // #fix #3: Read the last page reference inside the entity update closure
-    // to avoid cloning the entire page data. We only need a reference for the
-    // fetcher. However, since the fetcher is async and we can't hold a borrow
-    // across .await, we clone only if needed. For the initial fetch (no pages),
-    // no clone occurs.
-    let last_page_data: Option<T> = {
-        let e = match entity.upgrade() {
-            Some(e) => e,
-            None => return,
-        };
-        read_entity(&e, cx, |r, _| r.last_page().cloned()).flatten()
-    };
-
     let mut attempt: u32 = 0;
 
     loop {
-        let result = fetcher(last_page_data.as_ref()).await;
+        // Audit fix #5/#73: Read the cursor page inside the loop via the cheap
+        // refcount-bumped `Arc<T>` accessor (no full page clone), and re-read
+        // it fresh each retry so the fetcher sees up-to-date data. We capture
+        // the `Arc<T>` and hand the fetcher an `Option<&T>` via `as_ref` — the
+        // fetcher signature is unchanged. For `Next` this is the last page;
+        // for `Previous` it is the first page.
+        let cursor_page_arc: Option<Arc<T>> = {
+            let Some(e) = entity.upgrade() else { return };
+            read_entity(&e, cx, |r, _| direction.cursor_page_arc(r)).flatten()
+        };
+
+        let result = fetcher(cursor_page_arc.as_ref().map(|a| a.as_ref())).await;
 
         let now_ms = current_time_ms();
 
-        let e = match entity.upgrade() {
-            Some(e) => e,
-            None => return,
-        };
+        let Some(e) = entity.upgrade() else { return };
 
         match result {
             Ok((page, has_more)) => {
                 // #fix #12: Two-phase completion — accept then complete.
-                e.update(cx, |resource, cx| {
+                let _ = e.update(cx, |resource, cx| {
                     if let Some(guard) = resource.accept_current_request(request_id) {
                         resource.complete_success_with_guard(
-                            &guard, page, has_more, true, now_ms,
+                            guard, page, has_more, direction.is_next(), now_ms,
                         );
                         // Notify on terminal state change (success).
                         cx.notify();
                     } else {
-                        eprintln!(
-                            "DEBUG: run_fetch_next_page_with_id: request {} no longer active, result discarded",
-                            request_id.label()
-                        );
+                        // stale request, result discarded
                     }
                 });
                 return;
@@ -88,16 +119,28 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
                             .await;
                     }
 
-                    // #fix #7: After the retry delay, check whether the signal
-                    // has been cancelled. A cancelled fetch should not retry.
-                    let e = match entity.upgrade() {
-                        Some(e) => e,
-                        None => return,
-                    };
-                    let cancelled = read_entity(&e, cx, |r, _| {
-                        r.signal().map(|s| s.is_cancelled()).unwrap_or(false)
-                    }).unwrap_or(true);
+                    // #fix #7 / Audit H14: After the retry delay, check whether
+                    // the signal has been cancelled AND whether this request is
+                    // still the active one in a single read_entity pass (was two
+                    // sequential reads). A cancelled or superseded fetch should
+                    // not retry.
+                    let Some(e) = entity.upgrade() else { return };
+                    let (cancelled, still_current) =
+                        read_entity(&e, cx, |r, _| {
+                            (
+                                r.signal().map(|s| s.is_cancelled()).unwrap_or(false),
+                                r.is_current_request(request_id),
+                            )
+                        })
+                        .unwrap_or((true, false));
                     if cancelled {
+                        return;
+                    }
+
+                    // Audit fix #73/#118: After the delay, also confirm this
+                    // request is still the active one. If a newer fetch has
+                    // superseded it, bail out instead of retrying a stale op.
+                    if !still_current {
                         return;
                     }
 
@@ -109,17 +152,16 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
                     // Loop to retry
                 } else {
                     // No more retries — complete with failure using two-phase protocol
-                    e.update(cx, |resource, cx| {
+                    // Audit fix #72: notify is moved INSIDE the accept arm so a
+                    // discarded (stale) result does not trigger a spurious re-render.
+                    let _ = e.update(cx, |resource, cx| {
                         if let Some(guard) = resource.accept_current_request(request_id) {
-                            resource.complete_failure_with_guard(&guard, error);
+                            resource.complete_failure_with_guard(guard, error);
+                            // Notify on terminal state change (failure).
+                            cx.notify();
                         } else {
-                            eprintln!(
-                                "DEBUG: run_fetch_next_page_with_id: request {} no longer active on failure, result discarded",
-                                request_id.label()
-                            );
+                            // stale request, result discarded
                         }
-                        // Notify on terminal state change (failure).
-                        cx.notify();
                     });
                     return;
                 }
@@ -128,9 +170,30 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
     }
 }
 
+/// Execute a fetch-next-page operation with a captured `RequestId`.
+///
+/// Thin direction-specific wrapper around [`run_fetch_page_with_id`]. See that
+/// function's docs for the shared behavior (captured `RequestId`, two-phase
+/// completion, retry policy).
+pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
+    entity: &gpui::WeakEntity<InfiniteQueryResource<T, E>>,
+    fetcher: &F,
+    request_id: RequestId,
+    retry_policy: &crate::core::RetryPolicy,
+    cx: &mut gpui::AsyncApp,
+) where
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    F: Fn(Option<&T>) -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
+{
+    run_fetch_page_with_id(entity, fetcher, request_id, retry_policy, cx, PageDirection::Next).await;
+}
+
 /// Execute a fetch-previous-page operation with a captured `RequestId`.
 ///
-/// Same fixes as `run_fetch_next_page_with_id`:
+/// Thin direction-specific wrapper around [`run_fetch_page_with_id`]. Same
+/// fixes as [`run_fetch_next_page_with_id`]:
 /// - Captured `RequestId` prevents stale-ID acceptance
 /// - Two-phase completion protocol
 /// - Retry policy on failure
@@ -146,85 +209,5 @@ pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
     F: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    // #fix #3: Read the first page reference inside entity update.
-    let first_page_data: Option<T> = {
-        let e = match entity.upgrade() {
-            Some(e) => e,
-            None => return,
-        };
-        read_entity(&e, cx, |r, _| r.first_page().cloned()).flatten()
-    };
-
-    let mut attempt: u32 = 0;
-
-    loop {
-        let result = fetcher(first_page_data.as_ref()).await;
-
-        let now_ms = current_time_ms();
-
-        let e = match entity.upgrade() {
-            Some(e) => e,
-            None => return,
-        };
-
-        match result {
-            Ok((page, has_more)) => {
-                e.update(cx, |resource, cx| {
-                    if let Some(guard) = resource.accept_current_request(request_id) {
-                        resource.complete_success_with_guard(
-                            &guard, page, has_more, false, now_ms,
-                        );
-                        // Notify on terminal state change (success).
-                        cx.notify();
-                    } else {
-                        eprintln!(
-                            "DEBUG: run_fetch_previous_page_with_id: request {} no longer active, result discarded",
-                            request_id.label()
-                        );
-                    }
-                });
-                return;
-            }
-            Err(error) => {
-                if retry_policy.should_retry(attempt) {
-                    let delay_ms = retry_policy.delay_for_attempt(attempt);
-                    attempt += 1;
-
-                    if delay_ms > 0 {
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_millis(delay_ms))
-                            .await;
-                    }
-
-                    // #fix #7: Check signal cancellation after retry delay.
-                    let e = match entity.upgrade() {
-                        Some(e) => e,
-                        None => return,
-                    };
-                    let cancelled = read_entity(&e, cx, |r, _| {
-                        r.signal().map(|s| s.is_cancelled()).unwrap_or(false)
-                    }).unwrap_or(true);
-                    if cancelled {
-                        return;
-                    }
-
-                    // #fix #1: No cx.notify() during retry wait.
-                } else {
-                    e.update(cx, |resource, cx| {
-                        if let Some(guard) = resource.accept_current_request(request_id) {
-                            resource.complete_failure_with_guard(&guard, error);
-                        } else {
-                            eprintln!(
-                                "DEBUG: run_fetch_previous_page_with_id: request {} no longer active on failure, result discarded",
-                                request_id.label()
-                            );
-                        }
-                        // Notify on terminal state change (failure).
-                        cx.notify();
-                    });
-                    return;
-                }
-            }
-        }
-    }
+    run_fetch_page_with_id(entity, fetcher, request_id, retry_policy, cx, PageDirection::Previous).await;
 }

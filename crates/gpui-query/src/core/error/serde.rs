@@ -7,13 +7,13 @@ use super::types::{QueryError, QueryErrorKind};
 impl Serialize for QueryError {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         #[derive(Serialize)]
-        struct Helper {
+        struct Helper<'a> {
             kind: QueryErrorKind,
-            message: String,
+            message: &'a str,
         }
         Helper {
             kind: self.kind,
-            message: self.message.to_string(),
+            message: &self.message,
         }
         .serialize(serializer)
     }

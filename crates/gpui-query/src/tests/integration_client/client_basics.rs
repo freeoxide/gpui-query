@@ -311,7 +311,7 @@ fn test_query_observer_observe_returns_subscription(cx: &mut TestAppContext) {
             struct DummyView;
             let view = cx.new(|_| DummyView);
 
-            let mut observer = QueryObserver::new(&entity);
+            let observer = QueryObserver::new(&entity);
             let subscription = view.update(cx, |_view, cx| observer.observe(cx));
             assert!(
                 subscription.is_some(),

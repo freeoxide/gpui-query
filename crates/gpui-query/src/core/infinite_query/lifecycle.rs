@@ -1,12 +1,37 @@
 //! Lifecycle methods for [`InfiniteQueryResource`]: fetch, complete, reset,
 //! invalidate, and two-phase protocol.
 
+use std::sync::Arc;
+
 use crate::core::{
     QuerySignal, QueryStatus, QueryTimestamp, RequestGuard, RequestId, RequestSequencer,
 };
 
 use super::FetchDirection;
 use super::InfiniteQueryResource;
+
+/// Direction of an infinite-query page fetch, used internally to share logic
+/// between the four `begin_fetch_*` entry points (audit #12).
+///
+/// `pub(super)` so it can back the collapsed `fetching_direction` field on
+/// [`InfiniteQueryResource`] (N18). Derives `Serialize`/`Deserialize` because
+/// it is now a serde-serialized field on the resource.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) enum PageDirection {
+    Next,
+    Previous,
+}
+
+/// Source of the [`RequestId`] for [`InfiniteQueryResource::begin_fetch`] (audit #12).
+///
+/// Keeps the sequencer-based and pre-allocated-id entry points sharing one
+/// implementation: the sequencer variant borrows the sequencer and only calls
+/// `next_request()` after the early-return guards, preserving the original
+/// counter-consumption behavior exactly.
+enum MaybeRequestId<'a> {
+    FromSequencer(&'a mut RequestSequencer),
+    Provided(Option<RequestId>),
+}
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
 
@@ -23,46 +48,23 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// This is intentional for `LatestWins` semantics — the most recent direction
     /// wins. Callers should check `is_fetching_next_page()` / `is_fetching_previous_page()`
     /// before completing if they need to detect direction changes.
+    ///
+    /// **Per-direction `IgnoreWhileLoading` semantics** (audit #87): the guard
+    /// only applies within the same direction. Beginning a next-page fetch while
+    /// `is_fetching_previous_page` is active bypasses the `IgnoreWhileLoading`
+    /// guard and cancels/replaces the in-flight previous fetch — the reverse is
+    /// also true for `begin_fetch_previous`. See [`begin_fetch_previous`] for the
+    /// mirror case.
     pub fn begin_fetch_next(
         &mut self,
         sequencer: &mut RequestSequencer,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
-        if !self.has_next_page {
-            return None;
-        }
-
-        if self.is_fetching_next_page {
-            match self.request_policy {
-                crate::core::RequestPolicy::IgnoreWhileLoading => return None,
-                crate::core::RequestPolicy::LatestWins => {}
-            }
-        }
-
-        if self.active_request_id.is_some() {
-            self.cancelled_count += 1;
-        }
-
-        // v2 fix: Cancel old signal before replacing
-        if let Some(old_signal) = self.signal.as_ref() {
-            old_signal.cancel();
-        }
-
-        self.is_fetching_next_page = true;
-        self.is_fetching_previous_page = false;
-
-        let request_id = sequencer.next_request();
-        self.active_request_id = Some(request_id);
-        self.status = if self.pages.is_empty() {
-            QueryStatus::LoadingEmpty
-        } else {
-            QueryStatus::LoadingWithData
-        };
-        self.started_at = Some(QueryTimestamp::from(now_ms));
-        self.error = None;
-        self.signal = Some(QuerySignal::new());
-
-        Some(request_id)
+        self.begin_fetch(
+            PageDirection::Next,
+            MaybeRequestId::FromSequencer(sequencer),
+            now_ms,
+        )
     }
 
     /// Begin fetching the previous page.
@@ -77,46 +79,24 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// This is intentional for `LatestWins` semantics — the most recent direction
     /// wins. Callers should check `is_fetching_next_page()` / `is_fetching_previous_page()`
     /// before completing if they need to detect direction changes.
+    ///
+    /// **Per-direction `IgnoreWhileLoading` semantics** (audit #87): the guard
+    /// only applies within the same direction. Beginning a previous-page fetch
+    /// while `is_fetching_next_page` is active bypasses the `IgnoreWhileLoading`
+    /// guard and cancels/replaces the in-flight next fetch — and vice versa for
+    /// `begin_fetch_next`. This is intentional: a same-direction re-entrancy is
+    /// suppressed under `IgnoreWhileLoading`, but an opposite-direction fetch is
+    /// treated as a new request that supersedes the current one.
     pub fn begin_fetch_previous(
         &mut self,
         sequencer: &mut RequestSequencer,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
-        if !self.has_previous_page {
-            return None;
-        }
-
-        if self.is_fetching_previous_page {
-            match self.request_policy {
-                crate::core::RequestPolicy::IgnoreWhileLoading => return None,
-                crate::core::RequestPolicy::LatestWins => {}
-            }
-        }
-
-        if self.active_request_id.is_some() {
-            self.cancelled_count += 1;
-        }
-
-        // v2 fix: Cancel old signal before replacing
-        if let Some(old_signal) = self.signal.as_ref() {
-            old_signal.cancel();
-        }
-
-        self.is_fetching_previous_page = true;
-        self.is_fetching_next_page = false;
-
-        let request_id = sequencer.next_request();
-        self.active_request_id = Some(request_id);
-        self.status = if self.pages.is_empty() {
-            QueryStatus::LoadingEmpty
-        } else {
-            QueryStatus::LoadingWithData
-        };
-        self.started_at = Some(QueryTimestamp::from(now_ms));
-        self.error = None;
-        self.signal = Some(QuerySignal::new());
-
-        Some(request_id)
+        self.begin_fetch(
+            PageDirection::Previous,
+            MaybeRequestId::FromSequencer(sequencer),
+            now_ms,
+        )
     }
 
     /// Like [`begin_fetch_next`] but accepts an optional pre-generated `RequestId`
@@ -135,44 +115,13 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub fn begin_fetch_next_with_id(
         &mut self,
         maybe_request_id: Option<RequestId>,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
-        if !self.has_next_page {
-            return None;
-        }
-
-        if self.is_fetching_next_page {
-            match self.request_policy {
-                crate::core::RequestPolicy::IgnoreWhileLoading => return None,
-                crate::core::RequestPolicy::LatestWins => {}
-            }
-        }
-
-        if self.active_request_id.is_some() {
-            self.cancelled_count += 1;
-        }
-
-        // v2 fix: Cancel old signal before replacing
-        if let Some(old_signal) = self.signal.as_ref() {
-            old_signal.cancel();
-        }
-
-        self.is_fetching_next_page = true;
-        self.is_fetching_previous_page = false;
-
-        let request_id = maybe_request_id
-            .unwrap_or_else(|| RequestSequencer::new().next_request());
-        self.active_request_id = Some(request_id);
-        self.status = if self.pages.is_empty() {
-            QueryStatus::LoadingEmpty
-        } else {
-            QueryStatus::LoadingWithData
-        };
-        self.started_at = Some(QueryTimestamp::from(now_ms));
-        self.error = None;
-        self.signal = Some(QuerySignal::new());
-
-        Some(request_id)
+        self.begin_fetch(
+            PageDirection::Next,
+            MaybeRequestId::Provided(maybe_request_id),
+            now_ms,
+        )
     }
 
     /// Like [`begin_fetch_previous`] but accepts an optional pre-generated
@@ -191,21 +140,46 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub fn begin_fetch_previous_with_id(
         &mut self,
         maybe_request_id: Option<RequestId>,
-        now_ms: u128,
+        now_ms: u64,
     ) -> Option<RequestId> {
-        if !self.has_previous_page {
+        self.begin_fetch(
+            PageDirection::Previous,
+            MaybeRequestId::Provided(maybe_request_id),
+            now_ms,
+        )
+    }
+
+    /// Shared implementation behind the four `begin_fetch_*` entry points
+    /// (audit #12). Behavior-preserving: the public wrappers retain their
+    /// original signatures.
+    ///
+    /// `id_source` is either a live sequencer (for the `_next`/`_previous`
+    /// variants) or a pre-allocated id (for the `_with_id` variants).
+    fn begin_fetch(
+        &mut self,
+        direction: PageDirection,
+        id_source: MaybeRequestId,
+        now_ms: u64,
+    ) -> Option<RequestId> {
+        let (has_page, is_fetching_same_direction) = match direction {
+            PageDirection::Next => (self.has_next_page, self.is_fetching_next_page()),
+            PageDirection::Previous => {
+                (self.has_previous_page, self.is_fetching_previous_page())
+            }
+        };
+
+        if !has_page {
             return None;
         }
 
-        if self.is_fetching_previous_page {
-            match self.request_policy {
-                crate::core::RequestPolicy::IgnoreWhileLoading => return None,
-                crate::core::RequestPolicy::LatestWins => {}
-            }
+        if is_fetching_same_direction
+            && self.request_policy == crate::core::RequestPolicy::IgnoreWhileLoading
+        {
+            return None;
         }
 
         if self.active_request_id.is_some() {
-            self.cancelled_count += 1;
+            self.cancelled_count = self.cancelled_count.saturating_add(1);
         }
 
         // v2 fix: Cancel old signal before replacing
@@ -213,11 +187,21 @@ impl<T, E> InfiniteQueryResource<T, E> {
             old_signal.cancel();
         }
 
-        self.is_fetching_previous_page = true;
-        self.is_fetching_next_page = false;
+        // N18: collapse the two mutually-exclusive direction bools into a
+        // single Option<PageDirection>. The single assignment is what makes
+        // the invariant (only one direction in flight) unbreakable.
+        self.fetching_direction = Some(direction);
 
-        let request_id = maybe_request_id
-            .unwrap_or_else(|| RequestSequencer::new().next_request());
+        let request_id = match id_source {
+            MaybeRequestId::FromSequencer(sequencer) => sequencer.next_request(),
+            MaybeRequestId::Provided(maybe_id) => {
+                // N3: fall back to the resource's own sequencer so transient
+                // callers without a QueryClient still get monotonic,
+                // collision-free ids instead of every call producing
+                // RequestId(1,1).
+                maybe_id.unwrap_or_else(|| self.transient_sequencer.next_request())
+            }
+        };
         self.active_request_id = Some(request_id);
         self.status = if self.pages.is_empty() {
             QueryStatus::LoadingEmpty
@@ -246,6 +230,9 @@ impl<T, E> InfiniteQueryResource<T, E> {
             self.active_request_id = None;
             Some(RequestGuard::new(request_id))
         } else {
+            // Mirror QueryResource::accept_current_request: a stale/replaced
+            // request's result is ignored, so bump the diagnostic counter (N1).
+            self.mark_ignored_result();
             None
         }
     }
@@ -257,20 +244,26 @@ impl<T, E> InfiniteQueryResource<T, E> {
     ///
     /// **Audit 3**: Uses `VecDeque::push_back` for append and `VecDeque::push_front`
     /// for prepend — both O(1) amortized.
+    ///
+    /// **N27**: Any pages evicted by `enforce_max_pages_remove_*` are silently
+    /// dropped here (their `Arc<T>` refcounts are decremented, no leak). This
+    /// differs from `append_page`/`prepend_page`, which return evicted pages.
+    /// Returning them would change this method's signature, so the drop is
+    /// intentional and documented.
     pub fn complete_success_with_guard(
         &mut self,
-        _guard: &RequestGuard,
+        _guard: RequestGuard,
         page: T,
         has_more: bool,
         is_next: bool,
-        now_ms: u128,
+        now_ms: u64,
     ) {
         if is_next {
-            self.pages.push_back(page);
+            self.pages.push_back(Arc::new(page));
             self.has_next_page = has_more;
             self.enforce_max_pages_remove_front();
         } else {
-            self.pages.push_front(page);
+            self.pages.push_front(Arc::new(page));
             self.has_previous_page = has_more;
             self.enforce_max_pages_remove_back();
         }
@@ -278,8 +271,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.status = QueryStatus::Success;
         self.error = None;
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
     }
 
@@ -293,11 +285,10 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// accessible via [`pages`](Self::pages). Use
     /// [`is_page_data_valid`](Self::is_page_data_valid) to check whether page
     /// data can be relied upon.
-    pub fn complete_failure_with_guard(&mut self, _guard: &RequestGuard, error: E) {
+    pub fn complete_failure_with_guard(&mut self, _guard: RequestGuard, error: E) {
         self.status = QueryStatus::Failure;
         self.error = Some(error);
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
     }
 
@@ -307,25 +298,30 @@ impl<T, E> InfiniteQueryResource<T, E> {
     ///
     /// **Audit 3**: Uses `VecDeque::push_back` for append and `VecDeque::push_front`
     /// for prepend — both O(1) amortized.
+    ///
+    /// **N27**: Any pages evicted by `enforce_max_pages_remove_*` are silently
+    /// dropped (their `Arc<T>` refcounts are decremented, no leak); see
+    /// [`complete_success_with_guard`](Self::complete_success_with_guard) for
+    /// the rationale.
     pub fn complete_page_success(
         &mut self,
         request_id: RequestId,
         page: T,
         has_more: bool,
         is_next: bool,
-        now_ms: u128,
+        now_ms: u64,
     ) -> bool {
         if self.active_request_id != Some(request_id) {
-            self.ignored_results += 1;
+            self.ignored_results = self.ignored_results.saturating_add(1);
             return false;
         }
 
         if is_next {
-            self.pages.push_back(page);
+            self.pages.push_back(Arc::new(page));
             self.has_next_page = has_more;
             self.enforce_max_pages_remove_front();
         } else {
-            self.pages.push_front(page);
+            self.pages.push_front(Arc::new(page));
             self.has_previous_page = has_more;
             self.enforce_max_pages_remove_back();
         }
@@ -334,8 +330,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.error = None;
         self.active_request_id = None;
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
 
         true
@@ -352,15 +347,14 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// data can be relied upon.
     pub fn complete_page_failure(&mut self, request_id: RequestId, error: E) -> bool {
         if self.active_request_id != Some(request_id) {
-            self.ignored_results += 1;
+            self.ignored_results = self.ignored_results.saturating_add(1);
             return false;
         }
 
         self.status = QueryStatus::Failure;
         self.error = Some(error);
         self.active_request_id = None;
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
 
         true
@@ -405,8 +399,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
         };
         self.has_next_page = has_next;
         self.has_previous_page = has_prev;
-        self.is_fetching_next_page = false;
-        self.is_fetching_previous_page = false;
+        self.fetching_direction = None;
         self.signal = None;
     }
 

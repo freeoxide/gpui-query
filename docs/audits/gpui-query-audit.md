@@ -1,609 +1,480 @@
-# gpui-query Performance & Boilerplate Audit
+# gpui-query Deep Audit — Follow-up Findings (Performance, Fallbacks, Improvements)
 
-**Date:** 2026-06-18 (verified 2026-06-18)
-**Crate:** `crates/gpui-query/`
-**Scope:** `src/core`, `src/client`, `src/hook`, and `src/tests`
-**Total code:** ~25.7 kloc (tests included), ~10 kloc production code
-**Focus:** Performance optimizations, boilerplate reduction, GPUI-specific correctness, and idiomatic Rust.
+**Date:** 2026-06-20
+**Scope:** Whole crate (`src/core`, `src/client`, `src/hook`, `src/tests`, `src/lib.rs`) — looking **beyond** the existing 144-finding audit (`gpui-query-audit.md`) and its implementation status (`gpui-query-audit-implementation-status.md`).
+**Method:** Four parallel explore subagents (core / client / hook / tests+lib) read every file in their area, cross-checked against the indexed finding numbers, and only reported items that don't overlap with the existing 144 findings or the implementation-status notes. Criticals were then hand-verified against the live source.
+**Verification:** A second pass with four parallel verification subagents checked every cited file:line, cross-reference, and proposed fix against the live source. **Result: 44/51 fully CONFIRMED, 7 PARTIALLY ACCURATE (corrected inline below), 0 INACCURATE.** No line-number drift. No finding entirely wrong. No proposed fix would break load-bearing code (one fix — M7 — had an incorrect justification about GPUI notify semantics; refined below). The most significant corrections: the #112 drift claim had a fabricated quote (now fixed to cite the real doc text), M7's fix justification was wrong about `entity.update` always notifying (now refined), and T8/T9 allocation counts were off (now corrected: 40 not 86, 54 not 29).
 
-> **Verification status:** This audit was re-verified against the live source tree by five
-> parallel sub-audits (core, client, hooks, tests, clippy ground-truth) using the GPUI skills
-> (`gpui-entity`, `gpui-async`, `gpui-context`, `gpui-event`, `gpui-test`, `gpui-style-guide`)
-> and `rust-best-practices`. Each finding below carries an inline `✅ Verified`,
-> `⚠️ Corrected`, or `❌ Inaccurate` marker with the corrected file:line. New issues discovered
-> during verification are in the **Verification Addenda** (findings #98+).
-
-## Executive Summary
-
-`gpui-query` has a clean layered architecture (core state machine → GPUI client registry → hooks)
-and a robust request lifecycle, but it still carries significant duplication and several hot-path
-inefficiencies. Verification surfaced **two panic bugs reachable from production error paths**
-and **a fully-dead GC subsystem**, both of which elevate the risk of the original findings:
-
-1. **Unbounded memory growth** in infinite-query buckets and mutation buckets (#1, #2) —
-   compounded by **GC never being called from production code** (#CL1) and
-   **status snapshots never being refreshed** (#CL2).
-2. **Two panic-on-non-ASCII bugs** in error sanitization (#C1, #C2), reachable via
-   `QueryError::sanitized()` on any message containing multi-byte UTF-8.
-3. **Large per-update clones** in `use_query_select`, mutation retries, and infinite page fetches.
-4. **Detached async tasks** that keep running after unmount or replacement — **9 sites, not the
-   4 originally listed** (#6 expanded).
-5. **Massive bucket/hook duplication** that can be collapsed with generics and macros.
-6. **Many mechanical clippy/idiom fixes** — all originally-cited lints confirmed at exact
-   file:line by `cargo clippy`; several additional style-group lints were missed (see #98).
-
-This document lists 97 primary findings plus **42 verification addenda (#98–#139)** discovered
-during re-check, grouped by impact and implementation order. The addenda include 7 new core
-issues, 10 new client issues, 7 new hook issues, 8 new test issues, and 6 coverage gaps.
+**Total NEW findings: 51** (2 HIGH, 19 MED, 30 LOW) — grouped by area below.
 
 ---
 
-## Audit Methodology
+## Headline
 
-- Loaded all available GPUI skills (`gpui-entity`, `gpui-async`, `gpui-context`, `gpui-event`,
-  `gpui-focus-handle`, `gpui-global`, `gpui-layout-and-style`, `gpui-style-guide`, `gpui-test`)
-  and the `rust-best-practices` skill (chapters 1, 3, 4, 5, 6, 9).
-- Ran **five parallel subagent audits**: (1) `src/core/*`, (2) `src/client/*`, (3) `src/hook/*`,
-  (4) `src/tests/*` (quantitative counts via `rg`), (5) mechanical clippy verification.
-- Verified lint findings with:
-  `cargo clippy --package gpui-query --all-features --all-targets -- -W clippy::perf -W clippy::complexity -W clippy::style -W clippy::pedantic`
-  (695 warnings captured; the audit's original command used `perf/complexity/style` only).
-- Each finding was checked against the actual file:line and marked
-  `✅ Verified` / `⚠️ Corrected` / `❌ Inaccurate` / `👻 Already-fixed`.
+The previous audit + implementation pass was thorough on the correctness and GC surface, but it left a second tier of **hot-path performance issues** and **API-constraint gaps** that only surface when you look past the cited findings. The biggest new items are:
+
+1. **`evict_oldest` is O(n) entity reads per eviction** (M2). Once a bucket hits `max_entries`, **every new unique key** pays 10 000 `WeakEntity::upgrade` + `entity.read(cx)` lock cycles. This is the single hottest previously-unreported bottleneck.
+2. **`use_query_select` allocates an `Arc<T>` (with full `T::clone`) on every source notification even when data is unchanged** (H1). Polling/refetch workloads with identical responses pay a full clone per tick.
+3. **`MutationEntry::loading` is a dead field** (M1) — always `false`, drives a dead branch in `gc`, wastes 1 byte + padding per entry.
+4. **`MutationResource` / `InfiniteQueryResource` are missing `PartialEq`/`Eq` derives** (N7/N8) — the implementation status doc claims #78 is "Implemented", but only `QuerySignal` got it.
+5. **`cargo test --no-default-features --features core` does not compile** (T1) — three test modules use `crate::client::QueryClient` without `#[cfg(feature = "client")]` gating.
+6. **`sanitize_message` does 5 full-text scans + 5+ allocations even when no patterns match** (N6) — no `contains` early-exit guards; the `Cow<str>` is always `Owned` after the first call.
 
 ---
 
-## 🚨 Critical Bugs Discovered During Verification
+## ✅ Verified implementation-status drift (not findings, but worth flagging)
 
-These were NOT in the original 55/97 findings and are the highest-priority items in this audit.
+The implementation-status doc (`gpui-query-audit-implementation-status.md`) is **internally contradictory** on three items — its top "Implementation Complete" section (`:12-35`) correctly says they're done, but its detailed tables (`:88-150`, written as a pre-implementation baseline) were never updated. The code is in better shape than the doc's tables report:
 
-### C1. `redact_tokens` panics and corrupts non-ASCII input — **panic in production**
-- **File:** `src/core/error/sanitize.rs:127-161` (byte walk at 130-159; `lower[i..]` at 136/147;
-  `bytes[i] as char` at 157)
-- **Issue:** The function iterates by **byte index** (`bytes = text.as_bytes()`, `i += 1`). For
-  any non-ASCII UTF-8 char in non-bearer/non-token text, the `else` branch does
-  `result.push(bytes[i] as char)` (corrupting multi-byte chars into Latin-1) and advances `i`
-  mid-character; the next `lower[i..]` then slices at a non-char-boundary and **panics**.
-  Reproducer: `redact_tokens("x café bearer secret", "")` panics at `lower[4..]`.
-- **Impact:** `QueryError::sanitized()` (`types.rs:111`) panics on common real-world error
-  messages. The panic surfaces inside GPUI `cx.spawn` tasks where it silently aborts the task.
-- **Fix:** Rewrite using a `char_indices()` scan (like `redact_emails`/`redact_hex` already do
-  with `Vec<char>`), so all slice indices are char-boundary-aligned.
-
-### C2. `sanitize_message` truncation panics on non-char-boundary — **panic in production**
-- **File:** `src/core/error/sanitize.rs:43-45` (`s.truncate(SANITIZE_MAX_LEN)`)
-- **Issue:** `String::truncate` is `assert!(self.is_char_boundary(new_len))` — it **panics** if
-  byte 512 falls inside a multi-byte UTF-8 char. The existing test uses `"x".repeat(600)`
-  (ASCII, boundary-safe), so it's uncaught. Reproducer:
-  `sanitize_message(&("a".to_string() + &"é".repeat(300)))` (601 bytes; byte 512 is the 2nd
-  byte of `é`).
-- **Impact:** Same as C1 — panic on `QueryError::sanitized()` for any >512-byte message whose
-  512th byte is mid-character.
-- **Fix:** Find the largest char-boundary `<= SANITIZE_MAX_LEN` via `char_indices` before
-  truncating: `let cut = s.char_indices().map(|(b,_)| b).filter(|&b| b <= SANITIZE_MAX_LEN).last().unwrap_or(0); s.truncate(cut);`
-
-### CL1. GC is never triggered from production code — **entire GC subsystem is dead**
-- **File:** `src/client/lifecycle.rs:34-37` (`gc`/`gc_with_time`); all of `src/hook/*`
-- **Issue:** `rg` for `.gc(` / `.gc_with_time(` across `src/` finds calls only in
-  `lifecycle.rs` (self-referential) and `src/tests/`. **No hook** (`use_query`, `use_mutation`,
-  `use_infinite_query`, `mutate`) calls `gc()`. There is no periodic `cx.spawn` task, no
-  app-lifecycle callback, and no documentation telling users to call `gc()` manually. The
-  `gc_time_ms` setting (`mod.rs:69`, `with_gc_time`) is completely dead in production.
-- **Impact:** All buckets grow without bound in production. `QueryBucket` has a 10,000-entry
-  hard cap via `evict_oldest` in `get_or_create` (`ops.rs:115`), but `InfiniteQueryBucket` and
-  `MutationBucket` have no such cap. This **compounds #1, #2, and #8** — the memory leaks are
-  worse than the original audit implied because even the existing GC logic never runs.
-- **Fix:** Add a periodic GC task in the hook layer (e.g. `cx.spawn` with
-  `smol::Timer::after` loop calling `cx.update_global::<QueryClient>(|c, cx| c.gc(cx))`), or
-  call `gc()` opportunistically in `get_or_create`/`insert` on every Nth insertion. At minimum,
-  document that the user must call `gc()` periodically.
-
-### CL2. `StatusSnapshot` is never updated from production — GC would see stale data
-- **File:** `src/client/bucket/ops.rs:218-232` (`update_status_snapshot` — `#[allow(dead_code)]`);
-  `src/client/infinite_bucket.rs:146-160`; all of `src/hook/*`
-- **Issue:** `update_status_snapshot` is only called from test helpers in `lifecycle.rs:68-110`.
-  In production the snapshot is always `{ status: Idle, last_updated_ms: None, cache_policy: initial }`
-  from `get_or_create`. If GC *were* called, `is_loading()` (`erased_ops.rs:79`) would always
-  return `false`, the Success-specific retention (`erased_ops.rs:94-114`) would never trigger,
-  and entries would be evicted immediately regardless of real status.
-- **Impact:** The entire snapshot-based GC optimization is broken in production. Even after
-  wiring GC (CL1), GC would misbehave until snapshots are refreshed.
-- **Fix:** Call `bucket.update_status_snapshot(key, ...)` from the hook layer after each request
-  completion, or revert GC to reading entity state directly (like `MutationBucket::gc` does at
-  `mutation_bucket.rs:265`).
-
-### CL7. Deprecated `use_mutation_with_options` doesn't register with `QueryClient`
-- **File:** `src/hook/mutation_hooks/hooks.rs:108-127`
-- **Issue:** The deprecated `use_mutation_with_options` creates the entity and observer but does
-  NOT call `client.register_mutation(&entity, cx)` (compare with `use_mutation` at 92-96).
-  Mutations created via this deprecated hook are invisible to `use_mutation_state` and never
-  garbage-collected.
-- **Impact:** Silent data loss for users migrating from the deprecated API.
-- **Fix:** Add the same `register_mutation` block, or delegate to `use_mutation`.
+- **#20 `MappedQueryResource` stores `Option<Arc<T>>`** — the doc's "Not implemented" table (`:119`) says "still stores `Option<T>`", but the doc's top section (`:23`) says it's done. The code **has** it (`core/select.rs:136`). The remaining gap is only H1 (per-notification clone when unchanged).
+- **#71 `Observer::observe` is `&self`** — the doc's "Not implemented" table (`:143`) says "still `&mut self`", but the doc's top section (`:25`) says it's done. The code **has** `&self` for all three observer types (`observer.rs:60,109,167`).
+- **#112 `MutationBucket::touch` / `last_updated_at`** — the doc's "Partial" table (`:105`) says "`MutationBucket::touch()` exists but is never called from hooks → `updated_at` still insertion-time", but the doc's top section (`:20`) says it's done. The code confirms the top section: `MutationResource::last_updated_at_ms` **exists** (`mutation.rs:101`) and is stamped in `complete_success`/`complete_failure` (`mutation.rs:190,204`); `gc` at `mutation_bucket.rs:284` correctly prefers it over the insertion-time fallback. There are also **zero** `#[allow(dead_code)]` left in `src/client/` (the doc's `:101` claims 4 remain).
 
 ---
 
-## 🔴 High-Impact Fixes
+## 🚨 HIGH severity (2)
 
-### 1. `InfiniteQueryBucket` never evicts successful resources — memory leak
-- **File:** `src/client/infinite_bucket.rs:187-226` — ✅ Verified (GC at 211-214; struct 38-40)
-- **Issue:** `gc()` only evicts `Idle | Failure`; `Success` and `Cancelled` hit `return true` at
-  215. No `max_entries` field, no `evict_oldest`, no `SUCCESS_GC_MULTIPLIER`.
-- **Fix:** Mirror `QueryBucket::gc()`: add `max_entries`, apply `SUCCESS_GC_MULTIPLIER`,
-  implement `evict_oldest`.
-- **Impact:** Prevents unbounded memory growth. **Compounded by CL1** (GC never runs anyway).
+### M2 — `evict_oldest` does O(n) entity upgrades + reads per eviction; at capacity every new unique key pays O(n)
+**Files:** `client/bucket/ops.rs:37-62`, `client/infinite_bucket.rs:101-124` (byte-identical), `client/mutation_bucket.rs:111-128` (structurally similar — reads `entry.updated_at` directly instead of from entity, uses `*id` instead of `key.clone()`); driven by `ops.rs:106-108`
+**Severity:** HIGH | **New:** YES
 
-### 2. `MutationBucket` has no entry limit
-- **File:** `src/client/mutation_bucket.rs:68-71` — ✅ Verified (struct 70-71; insert 103-117)
-- **Issue:** Unbounded `AHashMap<u64, MutationEntry<...>>`; `insert()` never checks a limit.
-- **Fix:** Add `max_entries` and `evict_oldest` for completed mutations.
-- **Impact:** Prevents unbounded mutation cache growth. **Compounded by CL1 and CL4.**
+`evict_oldest` iterates **every** entry, calls `entry.entity.upgrade()?` and `entity.read(cx)` (a GPUI lock acquire+release) per entry to fetch `is_loading()` and `last_updated_at_ms()`. The capacity guard `else if self.entries.len() >= self.max_entries` at `ops.rs:106` fires on **every insert of a new unique key once the bucket is full** (10 000 entries). So steady-state insertion of fresh keys into a full bucket is **O(n) entity locks per insert** — 10 000 lock-acquire+release cycles per new key.
 
-### 3. Mutation retry clones the entire variables payload every attempt
-- **File:** `src/hook/mutation_hooks/internals.rs:53-54, 175-176` — ✅ Verified
-- **Issue:** `mutator((*variables).clone()).await` clones `V` on every retry; mutator bound
-  `Fn(V) -> Fut` (`hooks.rs:212,267`) forces it. The inline comment "Arc::clone instead of
-  variables.clone()" is misleading — `Arc<V>` only saves inter-attempt storage, the per-call
-  clone of `V` remains.
-- **Fix (non-breaking):** Add `mutate_by_ref` / `mutate_arc` that stores `Arc<V>` and passes
-  `&V` to the mutator. The breaking `Fn(&V) -> Fut` change is GPUI-safe but API-breaking.
-- **Impact:** Eliminates large per-retry allocations.
+The 64-op opportunistic GC (`mod.rs:142-156`) adds another O(n) sweep every 64 inserts, but `evict_oldest`'s per-insert O(n) dominates once full.
 
-### 4. `use_query_select` clones the entire source dataset on every update
-- **File:** `src/hook/use_query_select.rs:112-138` — ✅ Verified (`data().cloned()` at 113, 134)
-- **Issue:** Two entity locks plus `entity.read(cx).data().cloned()` on each source change. The
-  `PartialEq` compare at 128 is also `O(|T|)` for large `T`.
-- **Fix:** Store source data in `MappedQueryResource` as `Option<Arc<T>>` (#20); compare
-  `Arc::ptr_eq` before re-transforming. GPUI-safe (`Arc<T>: Send+Sync ⇔ T: Send+Sync`).
-- **Impact:** Removes full clones of `T` for derived views.
+**Why it's not in the existing audit:** #59 covers the *clone* of the winning `QueryKey` (fixed). #17 covers `gc` upgrading every entry. **Neither covers `evict_oldest`'s O(n) entity reads, nor the steady-state O(n)-per-insert-at-capacity cost.**
 
-### 5. Infinite query runners clone the full last/first page to call the fetcher
-- **File:** `src/hook/use_infinite_query/fetch_runners.rs:40-46, 150-156` — ✅ Verified (45, 155)
-- **Issue:** `last_page().cloned()` / `first_page().cloned()` copies `T` into `Option<T>` then
-  passes `as_ref()` to a `Fn(Option<&T>)` fetcher. Clone is forced because the entity borrow
-  can't cross `.await`.
-- **Fix:** Store pages internally as `Arc<T>` and hand `Arc::clone` to fetchers.
-- **Impact:** Removes `O(|T|)` copy per page fetch.
+**Impact:** An app that constantly creates new query keys (feed with unique object IDs, paginated list with `page::N` keys, etc.) hits the cap and then pays O(10 000) entity reads on every subsequent `get_or_create`. The single hottest previously-unreported bottleneck in the client.
 
-### 6. Detached async tasks are never cancelled — ⚠️ Corrected (9 sites, not 4)
-- **Files:** ⚠️ **Complete inventory (9 sites, grep-confirmed):**
-  1. `src/hook/query_hooks.rs:80-92` — `use_query` → `fetch_signal_with_retry` (in original)
-  2. `src/hook/query_hooks.rs:129-133` — `use_query_unsignalled` → `fetch_with_retry` **(missed)**
-  3. `src/hook/query_hooks.rs:245-249` — `fetch_query` → `fetch_with_retry` **(missed)**
-  4. `src/hook/query_hooks.rs:292-328` — `fetch_query_with_signal` **(missed)**
-  5. `src/hook/mutation_hooks/hooks.rs:234-238` — `mutate` → `run_mutation_loop` (in original)
-  6. `src/hook/mutation_hooks/hooks.rs:286-298` — `mutate_with_callbacks` **(missed)**
-  7. `src/hook/use_infinite_query/hook.rs:227-238` — `use_infinite_query` initial fetch (in original)
-  8. `src/hook/use_infinite_query/fetch_helpers.rs:83-87` — `fetch_next_page_infinite` (in original, line off by 1)
-  9. `src/hook/use_infinite_query/fetch_helpers.rs:139-143` — `fetch_previous_page_infinite` **(missed)**
-- **Issue:** All 9 use `cx.spawn(...).detach()` with no abort handle. All capture `WeakEntity`
-  (no strong `Entity` leaked) — but fetchers that do not poll `QuerySignal` continue executing
-  after unmount or after being superseded. No `Task<()>` is stored anywhere; no `.abort()`
-  exists in `src/hook/*`.
-- **Fix:** Store `Option<Task<()>>` on the resource entity and drop/abort on replacement.
-  **GPUI-safe** per `gpui-async/SKILL.md` ("Tasks are automatically cancelled when dropped.
-  Store in struct to keep alive") and `gpui-entity/references/best-practices.md` (lines
-  397-422 shows the exact `current_task: Option<Task<()>>` pattern). Requires adding a field to
-  core resource structs — a cross-layer change but safe.
-- **Impact:** Saves CPU/network and prevents late side effects. **No test covers this** (CG2).
+**Proposed fix:** Mirror `last_updated_at_ms` and a `loading` hint into `BucketEntry`/`InfiniteBucketEntry` so `evict_oldest` can scan entry metadata with only a `WeakEntity::upgrade` liveness probe (cheap atomic) and **no `entity.read(cx)`**. The mirror must be refreshed on completion (a cross-layer change — the completion path needs to touch the bucket entry). Cheaper mitigations: (a) min-heap keyed on the mirrored timestamp for O(log n) eviction; (b) scale `GC_INTERVAL` with bucket size; (c) document that workloads with unbounded unique keys should raise `max_entries`.
 
-### 7. `mutate` has a read-then-update race window
-- **File:** `src/hook/mutation_hooks/hooks.rs:219-228, 270-280` — ✅ Verified (219/271 read, 225/277 begin)
-- **Issue:** `entity.read_with(cx, |r,_| r.is_loading())` then a separate
-  `entity.update(cx, |r,cx| { r.begin(variables.clone()); cx.notify(); })`. TOCTOU window is
-  real.
-- **Fix:** Check `is_loading` inside the same `entity.update` that calls `begin`. **GPUI-safe
-  and idiomatic** (single `update` closure using inner `cx`).
-- **Impact:** Prevents double mutation execution under rapid input. **Existing tests only cover
-  the synchronous case** (CG3); an async-interleaving test is needed.
+### T1 — Feature-gate inconsistency: `cargo test --no-default-features --features core` fails to compile
+**Files:** `tests/mod.rs:1` (`mod test_support;`), `:10` (`mod coverage_gaps;`), `:11` (`mod integration_client;`); `test_support.rs:33` (`use crate::client::QueryClient;`)
+**Severity:** HIGH | **New:** YES
 
-### 8. `retain` / `release` are dead code — GC may evict observed resources
-- **Files:** `src/client/bucket/ops.rs:183-203`, `src/client/infinite_bucket.rs:124-138`,
-  `src/client/mutation_bucket.rs:161-176` — ✅ Verified (all `#[allow(dead_code)]`;
-  `observer_count` initialized 0, never incremented)
-- **Issue:** Never wired to observer lifecycle. `observer_count` is the only GC protection but
-  is read in production GC (`erased_ops.rs:72`, `infinite_bucket.rs:199`,
-  `mutation_bucket.rs:259`) while always being 0.
-- **Fix:** ⚠️ The `ObserverGuard`/`Subscription` approach is **GPUI-problematic**: `Drop::drop`
-  does not receive a GPUI context, and bucket mutations require `&mut QueryClient` via
-  `cx.update_global`. **Recommended fix:** remove `observer_count` and rely on
-  `WeakEntity::upgrade()` liveness (GPUI-safe; the upgrade check in GC already handles entity
-  death). See CL1/CL2 — GC is currently dead anyway.
-- **Impact:** Ensures GC respects active observers once GC is wired.
+Three test modules use `crate::client::QueryClient` but are NOT `#[cfg(feature = "client")]` gated:
+1. `test_support.rs:33` — un-gated `use crate::client::QueryClient;` (the hook-only imports on :34-35 ARE gated).
+2. `integration_client/` — all 4 subfiles use `QueryClient`; module declared as plain `mod integration_client;` in `tests/mod.rs:11`.
+3. `coverage_gaps/gc_eviction.rs` — uses `QueryClient`; parent `coverage_gaps` is plain `mod coverage_gaps;` in `tests/mod.rs:10`.
 
-### 9. `dehydrate()` does expensive full diagnostics just to discard them
-- **File:** `src/client/lifecycle.rs:239-271` — ✅ Verified (243/257 call `collect_diagnostics`;
-  `data_json` hard-coded `None` at 250/264)
-- **Issue:** `collect_diagnostics()` upgrades every entity and allocates `Vec<QueryDiagnostic>`,
-  but only `diag.status` and `diag.key` are used.
-- **Fix:** Iterate bucket entries directly, reading only key + status. Cache one `now_ms`
-  (#92). Note: `dehydrate()` also **skips mutation buckets entirely** (CL9).
-- **Impact:** Removes `O(n)` allocations and entity reads per bucket.
+Only `integration_client_coverage`, `property_tests`, and `hook_tests` are correctly `#[cfg(feature = "hook")]` gated (`tests/mod.rs:12-17`).
+
+**Impact:** The `core` feature exists for transport-agnostic state-machine users without GPUI. `cargo test --no-default-features --features core` is supposed to work but doesn't — the core-only tests (`core_cache/`, `core_lifecycle/`, `core_mutation/`, `core_policy_types/`, `core_request/`, `core_select.rs`) don't need `client`, but they share `test_support.rs` which has an un-gated `use crate::client::QueryClient` that breaks the entire module.
+
+**Proposed fix:** Gate the client-dependent parts:
+- In `test_support.rs`: `#[cfg(feature = "client")]` on `use crate::client::QueryClient;` and on all functions that use `QueryClient` (`setup_query_client*`, `observe_with_dummy_view`, etc.). Core-only helpers (`test_resource`, `test_sequencer`, `begin_request_id`, `complete_success_id`, `assert_status`, `nocache_resource`, `fresh_resource`, `resource_with_sequencer`, `TEST_NOW_MS`) stay un-gated.
+- In `tests/mod.rs`: `#[cfg(feature = "client")]` on `mod integration_client;` and `mod coverage_gaps;` (or at minimum gate `gc_eviction` within `coverage_gaps/mod.rs`).
 
 ---
 
-## 🟠 Medium-Impact Fixes
+## 🟠 MED severity (19)
 
-### 10. Collapse duplicated bucket implementations
-- ✅ Verified — `QueryBucket` (233+261 lines) and `InfiniteQueryBucket` (340 lines) share ~90%
-  structure (`get_or_create`, `get`, `all_entities`, `gc`, `invalidate_matching`,
-  `reset_matching`, `remove_matching`, `cancel_matching`, `collect_diagnostics`).
-- **Fix:** Generic `Bucket<K, R>` parameterized by resource type.
+### Core (`src/core/*`) — 7 findings
 
-### 11. Dedupe the erased-bucket downcast-recovery block
-- ✅ Verified — `src/client/mod.rs:134-151`, `src/client/infinite_mutation_ops.rs:57-70,107-120,158-171`
-- **Fix:** Replace first `downcast_mut` with `type_id()` comparison, or extract helper macro.
+#### N1 — `InfiniteQueryResource::accept_current_request` doesn't increment `ignored_results` on stale IDs
+**File:** `infinite_query/lifecycle.rs:226-233`
+**Severity:** MED | **New:** YES
 
-### 12. Simplify infinite-query begin/completion duplication
-- ✅ Verified — `src/core/infinite_query/lifecycle.rs:26-232, 260-342` (four begin methods, two completion paths)
-- **Fix:** One `begin_fetch(direction, maybe_id, now_ms)` + one `insert_page`/`finish_completion`.
+```rust
+pub fn accept_current_request(&mut self, request_id: RequestId) -> Option<RequestGuard> {
+    if self.is_current_request(request_id) {
+        self.active_request_id = None;
+        Some(RequestGuard::new(request_id))
+    } else {
+        None  // <-- no ignored_results increment
+    }
+}
+```
 
-### 13. Merge `fetch_next_page_infinite` / `fetch_previous_page_infinite`
-- ✅ Verified — `fetch_helpers.rs:45-89,102-145`; `fetch_runners.rs:23-129,137-230` (~90% duplicated)
-- **Fix:** `PageDirection { Next, Previous }` + single helpers. **GPUI-safe** refactor.
+`QueryResource::accept_current_request` (`resource/lifecycle.rs:199-207`) calls `self.mark_ignored_result()` in the `else` branch. `InfiniteQueryResource::accept_current_request` does NOT. Meanwhile, the convenience methods `complete_page_success` (`:300-303`) and `complete_page_failure` (`:336-339`) DO increment `ignored_results` on stale IDs. The two-phase protocol (`accept_current_request` → `complete_*_with_guard`) is the preferred path (audit #86 made guards consume-by-value) and IS used in production (`fetch_runners.rs:98,153`). So `ignored_results` is systematically **undercounted** for infinite queries using the two-phase protocol.
 
-### 14. Merge the two query retry loops
-- ✅ Verified — `src/hook/fetch_retry.rs:119-231, 244-353` (only signal-handling differs)
-- **Fix:** Generic `run_query_retry_loop(..., attempt: impl FnMut(...))`.
+**Fix:** Add `self.ignored_results += 1;` (or `saturating_add`) in the `else` branch, matching `QueryResource`.
 
-### 15. Merge mutation retry loops
-- ✅ Verified — `src/hook/mutation_hooks/internals.rs:37-132, 158-315`
-- **Fix:** One loop taking `Option<&MutationCallbacks<T,E>>`.
+#### N2 — `MutationResource::reset` doesn't reset `last_updated_at_ms`
+**File:** `mutation.rs:228-239`
+**Severity:** MED | **New:** YES
 
-### 16. `prepare_fetch_query()` has a no-op boolean chain
-- ✅ Verified — `src/client/lifecycle.rs:365-383` (`.then(|| false).unwrap_or(false)` always `false`)
-- **Fix:** Capture `started` like `prepare_prefetch_query()` (439-454).
+`QueryResource::reset` (`resource/lifecycle.rs:298`) resets `last_updated_at = None`. `InfiniteQueryResource::reset` (`infinite_query/lifecycle.rs:377`) also resets it. `MutationResource::reset` does NOT. `last_updated_at_ms` is used by `MutationBucket` GC (#112) to measure recency from completion time. After `reset()`, the mutation is `Idle` but `last_updated_at_ms` still points to the old completion time — if GC runs, it measures recency from the stale timestamp, potentially evicting a just-reset mutation prematurely.
 
-### 17. `QueryBucket::gc()` upgrades every entry just to check liveness
-- ✅ Verified — `src/client/bucket/erased_ops.rs:60-65`
-- ⚠️ **The proposed "cache a dead flag" fix is impractical** — GPUI exposes no entity-dropped
-  callback; `WeakEntity::upgrade()` IS the liveness probe (atomic load + conditional refcount
-  increment). Real mitigation is reducing GC frequency (CL1), not cheaper per-entry checks.
+**Fix:** Add `self.last_updated_at_ms = None;` in `reset()`.
 
-### 18. `InfiniteQueryBucket::invalidate_matching()` pins entities
-- ✅ Verified — `src/client/infinite_bucket.rs:232-250` (collects `Vec<Entity>` at 233-243)
-- **Fix:** Collect `Vec<QueryKey>` and upgrade inside the loop, matching `QueryBucket`.
+#### N3 — `begin_request_with_id(None)` fallback generates duplicate `RequestId(1,1)`
+**File:** `resource/lifecycle.rs:126-127,149-150`
+**Severity:** MED | **New:** YES
 
-### 19. `QueryKey::to_path()` is O(n²) — ❌ Inaccurate
-- **File:** `src/core/key.rs:77-83`
-- **Issue:** ❌ **The "O(n²)" claim is wrong.** `String + &str` desugars to `push_str` which
-  reuses the buffer (amortized O(n) total across the loop), **not** a fresh allocation per
-  segment. The proposed `push_str` loop is equivalent in complexity, not a perf win.
-- **Fix:** Optional readability refactor only; no performance impact. Demote to style.
+```rust
+let request_id = maybe_request_id
+    .unwrap_or_else(|| RequestSequencer::new().next_request());
+```
 
-### 20. `MappedQueryResource` stores source data by value, not reference
-- ✅ Verified — `src/core/select.rs:128-132, 165-167, 189-191` (`source_data: Option<T>`)
-- **Fix:** Store `Option<Arc<T>>`. **GPUI-safe** (`Send`/`Sync` preserved). Aligns with the
-  transform's `&T` signature.
+When `maybe_request_id` is `None`, a **fresh** `RequestSequencer::new()` is created each time. `RequestSequencer::new()` starts at `scope_id: 1, next_request_id: 1` (`request.rs:133`). So every call with `None` produces `RequestId(1, 1)`. A second call with `None` produces the same ID — the second call's `begin_request_with_id` overwrites `active_request_id = Some(RequestId(1, 1))`, but the **first** request's later completion would check `is_current_request(RequestId(1, 1))` → `true` (same ID!), accepting a stale result. This breaks the stale-request rejection invariant.
 
-### 21. `QueryClient::Default` gives `gc_time_ms: 0`
-- ✅ Verified — `src/client/mod.rs:62-70, 81-91` (`#[derive(Default)]` → 0; `with_policies` → 300_000)
-- **Fix:** Explicit `Default` with `gc_time_ms: 300_000`. **Note:** moot until CL1 is fixed
-  (GC is never called, so the default value is currently irrelevant).
+Reachable: `fetch_retry.rs:55-66` calls `begin_request_with_id` with `None` when `!cx.has_global::<QueryClient>()`.
 
----
+**Fix:** Store a `RequestSequencer` in the resource (like `begin_request` takes one externally), or document that `None` is unsupported/deprecated.
 
-## 🟡 Mechanical / Idiomatic Fixes (clippy-verified)
+#### N4 — `QueryResource::begin_request` / `begin_request_with_id` ~90% duplicated
+**File:** `resource/lifecycle.rs:17-82` vs `95-157`
+**Severity:** MED | **New:** YES (audit #12 covered infinite-query begin methods, NOT `QueryResource`)
 
-All citations below were confirmed against `cargo clippy` ground truth (exact file:line).
+The two methods have identical logic (cache hit check → stale-while-revalidate → IgnoreWhileLoading guard → normal fetch). Only how the request ID is obtained differs (`sequencer.next_request()` vs `maybe_request_id.unwrap_or_else(...)`). ~60 lines duplicated with only 4 lines differing.
 
-| # | Issue | File(s) | Fix | Clippy status |
-|---|-------|---------|-----|---------------|
-| 22 | Deprecated re-export warning | `src/hook/mod.rs:134`, `src/hook/mutation_hooks/mod.rs:8` | Remove `use_mutation_with_options` from public re-exports | ✅ `deprecated` fires at both lines |
-| 23 | `manual_saturating_arithmetic` | `src/core/retry.rs:90:21` | `self.retry_delay_ms.saturating_mul(factor)` | ✅ 1 occurrence confirmed |
-| 24 | `redundant_closure` | `src/hook/fetch_retry.rs:325:39` | `.unwrap_or_else(QuerySignal::new)` | ✅ 1 occurrence confirmed |
-| 25 | `collapsible_if` | `page_management.rs:71,87`; `erased_ops.rs:153,174,214`; `ops.rs:165`; `infinite_bucket.rs:261,294`; `lifecycle.rs:80,105,126,143,160,177` | Combine nested `if let` with `&& let` | ✅ 14 production occurrences confirmed |
-| 26 | `doc_overindented_list_items` | `src/client/bucket/erased_ops.rs:34,36,38` | Indent with 3 spaces | ✅ 3 occurrences confirmed (exact lines) |
-| 27 | `unused_must_use` on `entity.update` | `fetch_retry.rs:147,170`; `internals.rs`; `query_hooks.rs:58,307`; `fetch_runners.rs`; **+ `mutation_hooks/hooks.rs:225,277`; `use_infinite_query/hook.rs:160,169` (missed)** | Prefix with `let _ =` | ✅ Confirmed; ⚠️ audit's file list was incomplete (see H7) |
-| 28 | Missing `#[must_use]` | `RequestGuard`, `RequestId`, `QueryBeginResult`, `PreparedFetch` | Add attribute | ✅ Confirmed — **but scope understated**: clippy reports 75 `must_use_candidate` + 25 `return_self_not_must_use` (100 total), not just 4 types |
-| 29 | `expect` in production | `src/client/mod.rs:150,211`, `src/client/infinite_mutation_ops.rs:69,119,170`, `src/client/mutation_bucket.rs:106`, `src/hook/mutation_hooks/hooks.rs:87,124` | `debug_assert!` + fallback or `Option`/`Result` | (manual review; not a clippy lint) ✅ sites verified |
-| 30 | Release-build `eprintln!` | `src/hook/use_infinite_query/fetch_runners.rs:71,116,180,217` | Remove or guard with `#[cfg(debug_assertions)]` | ⚠️ Corrected: H6 enumerates 4 unguarded `eprintln!("DEBUG: ...")` lines; audit's "187-193" was imprecise |
-| 31 | `QueryKey::starts_with()` manual zip | `src/core/key.rs:90-102` | Use `slice::starts_with` — **but preserve the empty-prefix guard (91-94)** | ✅ Verified (caveat: `slice::starts_with(&[])` returns true for empty self, breaking `starts_with_empty_prefix_does_not_match_empty_key` test) |
-| 32 | `CachePolicy::is_stale_but_serveable()` duplicates arithmetic | `src/core/policy.rs:137-145` | ⚠️ **Misleading**: reusing `total_valid_ms()` would fire `debug_assert!(ttl_ms>0/stale_ms>0)` not present here and swap `u128` add for `u64::saturating_add`; "duplication" is a single addition | (optional) |
-| 33 | `RetryPolicy::default` redundant builder calls | `src/core/retry.rs:102-109` | `Self::new(3).with_exponential_backoff()` | ✅ Verified (`new(3)` already sets delay=1000, max=30_000) |
-| 34 | `QueryResource::cancel()` can be simplified | `src/core/resource/lifecycle.rs:234-239` | ❌ **Inaccurate**: proposed `self.previous_data = self.data.take()` clobbers `previous_data` when `data` is `None` (e.g. after `clear_data`+`cancel`), breaking `rollback_to_previous()`. **The `if self.data.is_some()` guard is intentional and must stay.** | — |
-| 35 | `increment_retry()` inconsistent overflow behavior | `src/core/resource/accessors.rs:127-129`, `src/core/infinite_query/accessors.rs:175-177` | Use `saturating_add` everywhere | ✅ Verified (plain `+= 1` on `u32`; `MutationResource` already uses `saturating_add`) |
-| 36 | `enforce_max_pages_remove_back()` uses `pop` loop | `src/core/infinite_query/page_management.rs:85-97` | Use `drain` like the front variant | ✅ Verified (caveat: multi-eviction order flips back→front to front→back; no test covers it) |
-| 37 | `SelectTransform` has unnecessary `PhantomData` | `src/core/select.rs:80-83, 100-107` | ⚠️ **Misleading**: `T`/`U` are used via `dyn Fn(&T) -> U`, so `PhantomData` isn't needed for the unused-param lint — BUT removing it changes `SelectTransform`'s variance over `T` (invariant → contravariant). Audit omits this. | (decide deliberately) |
-| 38 | `InfiniteQueryResource` split derives | `src/core/infinite_query/resource.rs:43-44` | Combine to one line | ✅ Trivial (note: splitting serde derives is a common intentional style) |
-| 39 | `match` on two-variant `RequestPolicy` | `src/core/infinite_query/lifecycle.rs:36,90,145,201` | `if policy == IgnoreWhileLoading { return None; }` | ✅ Verified (`RequestPolicy: PartialEq+Eq+Copy`) |
-| 40 | `map(...).unwrap_or(false)` | `src/hook/use_infinite_query/fetch_runners.rs:98,205` | `map_or(false, ...)` or `is_some_and` | ✅ `map_unwrap_or` confirmed (9 occurrences total in crate) |
-| 41 | Duplicate `current_time_ms()` | `src/client/erased.rs:17`, `src/hook/mod.rs:144`, `src/client/mutation_bucket.rs:75` | Single crate-internal helper | ✅ Verified (hook side has one canonical helper; duplicates are in `src/client/*`) |
-| 42 | `InfiniteQueryOptions` missing `From` impls | `src/hook/options.rs:334-338` | Add `From<String>` and `From<QueryKey>` | ✅ Verified (only `From<&str>` present) |
-| 43 | `MutationOptions` missing builder methods | `src/hook/options.rs:183-198` | Add `.retry_policy()`, `.gc_time()` | ✅ Verified (`MutationOptions` has no builders; `QueryOptions` has six) |
-| 44 | `QueryOptions` / `InfiniteQueryOptions` duplicate builders | `src/hook/options.rs:117-161, 309-331` | Declarative macro | ✅ Verified (byte-for-byte equivalent) |
-| 45 | `RequestId::label()` / `CachePolicy::label()` force allocation | `src/core/request.rs:74-77`, `src/core/policy.rs:54-66` | Add `impl Display`; keep `label()` for compat | ✅ Verified (hook-side `request_id.label()` calls are mostly `#[cfg(debug_assertions)]`-guarded except `fetch_runners.rs:73,117,181,218` tied to #30) |
+**Fix:** Extract a shared `begin_request_inner(now_ms, fetch_mode, id_source: MaybeRequestId)` (mirroring the `InfiniteQueryResource::begin_fetch` + `MaybeRequestId` pattern already used in `infinite_query/lifecycle.rs:27-30,154-214`).
 
----
+#### N5 — `placeholder_data` and `initial_data` fields are dead in production
+**File:** `resource.rs:40,43` + their 6 methods (`accessors.rs:97-114`; `lifecycle.rs:312-314,353-367`)
+**Severity:** MED | **New:** YES
 
-## 🧪 Test-Specific Recommendations
+Zero production call sites for `set_placeholder_data`, `set_initial_data`, `clear_initial_data`, `placeholder_data()`, `initial_data()`, and `display_data()` within the crate. The hook layer never sets or reads these fields. Yet they:
+1. Add `2 × sizeof(Option<T>)` to every `QueryResource` (4 `Option<T>` fields total: `data`, `placeholder_data`, `previous_data`, `initial_data`).
+2. Must be cloned when the resource is cloned (forces `T: Clone` overhead even for users who don't use placeholders).
+3. Must be compared when the resource is compared (forces `T: PartialEq` overhead).
+4. Are carried through every state transition (memory bandwidth).
 
-| # | Issue | Fix | Verified count |
-|---|-------|-----|----------------|
-| 46 | ~100× repeated `setup_query_client(cx)` | Single `setup_test(cx)` helper or `#[gpui::test]` macro | ⚠️ **Inaccurate (understated ~2×)**: real count is **196** total `setup_query_client*` calls (160 exact `setup_query_client(cx)`) across 24 files |
-| 47 | ~50× one-off harness structs | Generic helpers in `test_support.rs` | ⚠️ **Inaccurate (understated ~1.6×)**: real count is **82** one-off harness structs (73 `struct H {}` + 8 `struct DummyView;` + 1 local `User`) |
-| 48 | 82× `cx.run_until_parked()` + read block | `run_until_parked_and_read()` helper | ✅ **Exact**: 82 actual calls (83rd string match is a comment) across 12 files |
-| 49 | Busy-wait gate loops with 1 ms ticks | Reusable `Gate` helper with one-shot async signal | ✅ Verified: 5 loops (`hook_coverage.rs:153`, `retry_reset_tests.rs:169`, `advanced_hooks.rs:245`, `lifecycle.rs:135`, `fetch.rs:258`) |
-| 50 | Repeated `MutationOptions { retry_policy, gc_time_ms }` | `no_retry_mutation_options()` constant | ✅ Verified: 6 literal constructions (all `gc_time_ms: 300_000`) |
-| 51 | Repeated `CachePolicy::Ttl { ttl_ms: 0 }` / `NoCache` | `no_cache_options(key)`, `ttl_zero_options(key)` | ✅ Verified: **32** `Ttl { ttl_ms: 0 }` + **74** `NoCache` = 106 total across 27 files |
-| 52 | Copy-pasted `DummyView` + observer pattern | `observe_with_dummy_view(cx, observer)` helper | ✅ Verified: 8 `struct DummyView;` across 4 files |
-| 53 | Property-test heavy allocations | Lower long-segment bounds, reduce `with_cases` 1000→256 | ✅ Verified: 5 `with_cases(1000)` blocks (22 proptest fns → 22,000 iterations) in `cache_policy_retry.rs`; module is `#[cfg(feature = "hook")]`-gated |
-| 54 | Large deterministic stress tests always run | Gate behind `stress` feature or `#[ignore]` | ⚠️ **Misleading**: `key_very_long_single_segment` (2000 chars, `deterministic_tests.rs:172`) and `key_deeply_nested_200_segments` (:195) have no `#[ignore]`, but the parent `property_tests` module is `#[cfg(feature = "hook")]` (`tests/mod.rs:14`). With default features they don't run; with `--all-features` they always run. `stress` feature still valid for finer gating. |
-| 55 | Table-driven opportunities | Consolidate policy/status/error roundtrip tests | ✅ Verified: `policy_and_status_types.rs` (34 tests), `cache_policy.rs` (22), `retry_policy.rs` (16), `query_error.rs` (24); 6× `*_serde_roundtrip` duplication |
+Audits #88 and #89 touched these fields but didn't note they're entirely unused by the crate's own hook layer.
 
----
+**Fix:** Either wire `placeholder_data`/`initial_data` into the hook layer (if the feature is intended), or move them behind a feature flag / wrapper struct, or remove them.
 
-## 🔍 Supplementary Findings (Re-check)
+#### N6 — `sanitize_message` does 5 full-text scans + 5+ allocations even when no patterns match
+**File:** `sanitize.rs:11-53`
+**Severity:** MED | **New:** YES
 
-### Performance
+`sanitize_message` calls `replace_regex` 5 times (lines 17-40). Each call dispatches to a redact function that always:
+- Allocates `lower` (via `to_ascii_lowercase()` or `Vec<char>` collect)
+- Allocates `result` (`String`)
+- Scans the full text
 
-| # | Issue | File(s) | Fix | Status |
-|---|-------|---------|-----|--------|
-| 56 | Single-pass URL-scheme redaction | `src/core/error/sanitize.rs:103-124` | Redact all schemes in one scan | ✅ Verified (low impact: DevTools/logging path). **See also C6 (sibling `redact_paths` missed).** |
-| 57 | Extra allocation in `QueryError` serialization | `src/core/error/serde.rs:8-19` | Serialize `&*self.message` not `to_string()` | ✅ Verified (line 16) |
-| 58 | `QueryKey` hashed multiple times in `get_or_create()` | `src/client/bucket/ops.rs:91,111,120`; `src/client/infinite_bucket.rs:62,78,82` | Use `AHashMap::entry()` | ✅ Verified (3 hashes dead-ref path, 2 create path). ⚠️ `entry()` fix is non-trivial — the upgrade/remove/re-create pattern doesn't fit `and_modify`/`or_insert_with` cleanly; would require `entry(key.clone())` (adding a clone). Current pattern clearer; extra hashes only on rare dead-ref path. |
-| 59 | `QueryBucket::evict_oldest()` clones `QueryKey` repeatedly | `src/client/bucket/ops.rs:46-70` | `min_by_key` + clone once | ✅ Verified (line 61). ⚠️ See CL5 — `evict_oldest` also doesn't check `is_loading()` |
-| 60 | `all_entities()` allocates on every call | `src/client/bucket/ops.rs:145-150`, `infinite_bucket.rs:117-122`, `mutation_bucket.rs:185-190` | Document as allocation-heavy; cache on hot render paths | ✅ Verified (`use_mutation_state` calls `all_mutations` per render) |
-| 61 | `use_query` clones `QueryKey` twice per hook call | `src/hook/query_hooks.rs:53,72` | Move `opts.key` into a local | ✅ Verified |
-| 62 | `begin_request_on_entity` locks entity twice on cache-hit path | `src/hook/fetch_retry.rs:56-73, 87-101` | `QueryResource::try_begin_request()` atomic check+transition | ✅ Verified. GPUI-safe. |
-| 63 | Infinite runners compute `current_time_ms()` before verifying entity exists | `src/hook/use_infinite_query/fetch_runners.rs:53,163` | Move time read inside `entity.upgrade()` success branch | ✅ Verified |
-| 64 | `fetch_signal_with_retry` reads fresh signal after cancellation check | `src/hook/fetch_retry.rs:313-325` | Return early before reading signal | 👻 **Already-fixed**: code already returns early at 314-320 when `!is_current_request(...)` BEFORE reading the fresh signal at 323. The audit's fix is the current behavior. **No action needed.** |
-| 65 | `load_n_pages` builds formatted strings in a loop | `src/tests/core_infinite_query/helpers.rs:22-37` | Accept a closure or `&'static str` pages | ✅ Verified (called 18×; all callers use default `format!("page{i}")`) |
-| 66 | `cx.run_until_parked()` used when no async work spawned | Various tests | Audit each call | ⚠️ **Misleading**: only **1 clear case** (`advanced_hooks.rs:97`); other 81 calls are correctly placed after a spawn. The vague "Various tests" citation is hard to act on. |
+Even if the text contains no sensitive patterns, all 5 functions run, each copying the full text into a new `String`. For a 512-byte message with no patterns, this is 5 full copies + 5+ auxiliary allocations. There's no early-exit guard like `if !text.contains("bearer") && !text.contains("token") { return text.to_string(); }`.
 
-### Boilerplate / Duplication
+The `Cow<str>` in `sanitize_message` is **useless** — `replace_regex` always returns `String`, so `Cow::Owned(...)` is created on every call; the initial `Cow::Borrowed(msg)` is immediately replaced.
 
-| # | Issue | File(s) | Fix | Status |
-|---|-------|---------|-----|--------|
-| 67 | `mutate` and `mutate_with_callbacks` duplicate guard/begin/spawn | `src/hook/mutation_hooks/hooks.rs:202-299` | Delegate | ✅ Verified |
-| 68 | `use_mutation` and `use_mutation_with_options` duplicate setup | `src/hook/mutation_hooks/hooks.rs:67-127` | Make deprecated delegate to `use_mutation` | ✅ Verified. **See CL7 — `use_mutation_with_options` also doesn't register with `QueryClient`.** |
-| 69 | `MIN_GC_TIME_MS` defined in three places | `src/client/bucket/types.rs:13`, `src/client/infinite_bucket.rs:22`, `src/client/mutation_bucket.rs:38` | Export once from `bucket::types` | ✅ Verified (all `const MIN_GC_TIME_MS: u64 = 1_000;` independently; `types.rs` is `pub(crate)` but unused by the other two) |
-| 70 | Repeated `begin()` / `complete_current_success()` pattern in tests | `src/tests/core_request/`, coverage tests | `complete_success_id()` helper | ✅ Verified (39 `QueryBeginResult::Started` match arms; 16 verbatim panic blocks) |
+**Fix:** Add quick `contains` guards at the start of each redact function, or do a single-pass scan matching all patterns simultaneously. Make `replace_regex` return `Cow<str>` (returning `Cow::Borrowed(self)` when no match) so the existing `Cow` plumbing actually short-circuits.
 
-### GPUI-Specific / Correctness
+#### N7 / N8 — `MutationResource` / `InfiniteQueryResource` missing `PartialEq`/`Eq` derives
+**Files:** `mutation.rs:37`, `infinite_query/resource.rs:48`
+**Severity:** MED | **New:** YES (discrepancy with implementation status doc)
 
-| # | Issue | File(s) | Fix | Status |
-|---|-------|---------|-----|--------|
-| 71 | `Observer::observe()` takes `&mut self` but only reads | `src/client/observer.rs:56,103,159` | Change to `&self` | ✅ Verified (bodies only read `self.entity` + `Copy` bool). GPUI-safe. |
-| 72 | `cx.notify()` called on terminal failure even when result discarded | `src/hook/use_infinite_query/fetch_runners.rs:112-123, 213-224` | Move `cx.notify()` inside the `accept_current_request` success branch | ✅ Verified (`cx.notify()` at 122/223 sits OUTSIDE the `accept_current_request` branch) |
-| 73 | Infinite runners check only signal cancellation after retry delay | `src/hook/use_infinite_query/fetch_runners.rs:93-102, 204-209` | Also verify `resource.is_current_request(request_id)` | ✅ Verified (weaker guard than query runners `fetch_retry.rs:193,313` which DO call it) |
-| 74 | `use_query_select` can trigger two renders per source update | `src/hook/use_query_select.rs:122-140` (cited 142-145) | ❌ **Misleading + LINE-OFF**: "two renders" is wrong — `mapped.update` at 135 has no `cx.notify()`, so only `query_subscription` triggers the caller's re-render (one render). **The proposed fix (drop `query_subscription`, keep only mapped) would BREAK re-renders** — `mapped_subscription` never notifies. See H2. | — |
+```rust
+#[derive(Clone, Debug, Serialize, Deserialize)]  // no PartialEq, Eq
+pub struct MutationResource<V, T, E = QueryError> { ... }
+```
 
-### Type Design / API Friction
+The implementation status doc (`:193`) lists #78 as "Implemented". The main audit (`gpui-query-audit.md:379`) says "✅ Verified (`QuerySignal: Eq` via `Arc::ptr_eq`; bounded impls generated)". But `MutationResource` and `InfiniteQueryResource` do NOT have the derives — only `QuerySignal` does (manual `Eq` impl at `signal.rs:19-25`). `QueryResource` (`resource.rs:24`) DOES have `PartialEq, Eq`. All fields of the other two have `PartialEq`/`Eq` available with appropriate bounds.
 
-| # | Issue | File(s) | Fix | Status |
-|---|-------|---------|-----|--------|
-| 75 | `#[allow(dead_code)]` on production methods masks API gaps | `src/client/bucket/ops.rs:34,158,183,199,218`, `infinite_bucket.rs:104,125,133,146`, `mutation_bucket.rs:31,124,137,148,160,171`, `lifecycle.rs:68,93,117,134,151,168` | Remove lint or move to `#[cfg(test)]` | ✅ Verified (20+ methods). **See CL2 — `update_status_snapshot` is the critical dead-code case.** |
-| 76 | `QueryBeginResult` variants carry identical shape | `src/core/policy.rs:192` (enum at 193) | Extract helper struct | ⚠️ **Misleading**: `Started`/`StaleCacheHit` are **public** enum variants accessed by named-field destructuring; a helper tuple-struct breaks the public API for ~3 fields. |
-| 77 | `Default` impls for options allocate default keys | `src/hook/options.rs:90-104, 268-279` | `const DEFAULT_KEY` if `QueryKey` const-constructible | (valid) |
-| 78 | Missing `PartialEq`/`Eq` derives | `src/core/mutation.rs:37` (derive), `38` (struct) | Add conditional derives | ✅ Verified (`QuerySignal: Eq` via `Arc::ptr_eq`; bounded impls generated) |
-| 79 | `use_query_manual` / `use_query_unsignalled` take raw policy params | `src/hook/query_hooks.rs:103-116, 153-157` | Overloads accepting `impl Into<QueryOptions>` | ✅ Verified |
-| 80 | Forward-compatibility fields on `QueryOptions` ignored | `src/hook/options.rs:57-87` | Implement or remove public setters | ✅ Verified (`gc_time_ms`, `keep_previous_data`, `refetch_on_*` have setters but are never read by `use_query`/`fetch_query`) |
+**Fix:** Add `PartialEq, Eq` to both derive lists (with `T: PartialEq + Eq`, `V: PartialEq + Eq`, `E: PartialEq + Eq` implicit bounds). Or remove the unconditional `PartialEq, Eq` from `QueryResource` for consistency (N29 below).
 
-### Error Handling / Edge Cases
+### Client (`src/client/*`) — 7 findings
 
-| # | Issue | File(s) | Fix | Status |
-|---|-------|---------|-----|--------|
-| 81 | Consider `thiserror` for `QueryError` | `src/core/error/convert.rs:5-11` | — | ⚠️ **Misleading**: manual `Display`+`Error` is ~6 lines, not ~15; `QueryError` is a struct (not a multi-variant enum), so `thiserror`'s per-variant `#[from]` benefit doesn't apply. Marginal savings, adds a dep. |
-| 82 | `From<String>` / `From<&str>` for `QueryError` always map to `Unknown` | `src/core/error/convert.rs:19-28` | Document or add typed constructors | ✅ Verified (both call `Self::unknown`) |
-| 83 | Silent fallback when system clock is before epoch | `src/client/erased.rs:17-21`, `src/hook/mod.rs:144` | Document or warn; consolidate time helper | ✅ Verified. **See T6 (wall-clock test flakiness).** |
-| 84 | `AsRef<Arc<str>>` not implemented for `QueryError` | `src/core/error/convert.rs:13-17` | Add (return `&self.message`) | ✅ Verified (only `AsRef<str>` exists; a `message_arc()` accessor would be more ergonomic than turbofish) |
+#### M1 — `MutationEntry::loading` is a dead field (dead branch in `gc`)
+**File:** `mutation_bucket.rs:73` (field), `:168` (only write site, `false`), `:251` (only read site)
+**Severity:** MED | **New:** YES
 
-### Test Maintainability
+Grep across all of `src/` (excluding tests) for `\.loading\s*=|loading: true|set_loading|set_not_loading` returns **zero** writes-to-true. The `set_loading`/`set_not_loading` methods were removed as dead code (#75), and the field is never set to `true`. So `if entry.loading { return true; }` in `gc` is a **dead branch** — always false. The field costs 1 byte/entry (10 000 entries → ~10 KB + padding) plus a useless branch in every GC pass. It escapes the compiler's dead-code lint because it *is* syntactically written (to `false`) and read.
 
-| # | Issue | File(s) | Fix | Status |
-|---|-------|---------|-----|--------|
-| 85 | Repeated `begin()` result matching / `complete_current_success()` | `src/tests/core_request/`, coverage tests | Use existing `begin_request_id` helper; add `complete_success_id` | ✅ Verified — **`begin_request_id` exists (`test_support.rs:301`) but is NOT used in `core_request/request_lifecycle.rs` (10 match arms) or `request_policy.rs` (5 match arms)**; 15+ blocks could be replaced. |
+The doc comment at `:70-72` even admits it "stays `false` in practice". The real loading guard is `entity.read(cx).is_loading()` at `:263`.
 
-### Second-Pass Additions
+**Fix:** Remove the `loading` field, the `loading: false` initializer, and the `if entry.loading` branch in `gc`. The `entity.upgrade()` + `entity.read(cx).is_loading()` checks (`:257,263`) fully cover liveness and in-flight status.
 
-| # | Issue | File(s) | Fix | Status |
-|---|-------|---------|-----|--------|
-| 86 | `InfiniteQueryResource::complete_success_with_guard` takes `&RequestGuard` instead of consuming it | `src/core/infinite_query/lifecycle.rs:260,296` | Change to `RequestGuard` by value | ✅ Verified (breaking API change; matches `QueryResource` two-phase protocol) |
-| 87 | `IgnoreWhileLoading` only applies per-direction in infinite queries | `src/core/infinite_query/lifecycle.rs:31-40, 89-94` | Global active-request guard or document per-direction behavior | ✅ Verified (`begin_fetch_previous` while `is_fetching_next_page` bypasses the guard, cancels in-flight next fetch, replaces it) |
-| 88 | `QueryResource::set_initial_data()` clones the value it just stored | `src/core/resource/lifecycle.rs:341-350` | Store as `Arc<T>` or move | ⚠️ **Misleading**: both `initial_data` and `data` are `Option<T>` needing ownership, so the clone is unavoidable; "move" can't give both fields ownership. Only the sweeping `Arc<T>` refactor (#20/#89) resolves it. |
-| 89 | Large optional data fields inlined in resource structs | `src/core/resource.rs:24-46`, `src/core/mutation.rs:37-49` | `Option<Box<T>>` when `T` large | ⚠️ **Misleading**: `T` is generic; forcing `Box<T>` penalizes small `T`. `Option<Box<T>>` is null-pointer-optimized, so callers already get the benefit by parameterizing on `Box<T>` — the crate shouldn't force it. |
-| 90 | `From<String>` / `From<Vec<String>>` for `QueryKey` copy strings into `Arc<str>` | `src/core/key.rs:128-156` | Accept `IntoIterator<Item: Into<Arc<str>>>` | ⚠️ **Misleading**: `From<String> for Arc<str>` is `Arc::from(&v[..])` — the **same copy**; "move owned strings" is impossible because `Arc<str>` always owns its own byte buffer. Genericity tweak, not a perf win. |
-| 91 | `MutationBucket::gc()` uses collect-then-remove | `src/client/mutation_bucket.rs:226-296` | `AHashMap::retain()` | ✅ Verified. GPUI-safe (`retain` closure only reads `entity.read(cx)`, no `update`). **See CL4 — also never evicts `Success`.** |
-| 92 | `dehydrate()` calls `current_time_ms()` twice | `src/client/lifecycle.rs:243,257` | Pass cached `now_ms` | ✅ Verified (`diagnostics()` at 197 already caches) |
-| 93 | Lifecycle retain/release helpers duplicated per bucket type | `src/client/lifecycle.rs:68-182` | Generic helpers over bucket map | ✅ Verified (6 methods differ only in bucket map + type) |
-| 94 | `dehydrate()` has near-duplicate loops for query and infinite buckets | `src/client/lifecycle.rs:242-268` | `dehydrate_bucket_entries(kind, ...)` | ✅ Verified. **Also skips mutation buckets (CL9).** |
-| 95 | Repeated `resource()` + `seq()` setup in core lifecycle tests | `src/tests/core_lifecycle/`, `src/tests/coverage_gaps/` | `(QueryResource, RequestSequencer)` helper or macro | ✅ Verified (~80 sequencer setups; 24 `test_resource_with_policies`) |
-| 96 | `clippy::type_complexity` on callback fields and return tuples | `src/hook/options.rs:209-211`, `src/hook/use_query_select.rs:95-99` | Type aliases `MutationCallback<T>`, `QuerySelectResult<T,U,E>` | ✅ Verified (7 `type_complexity` occurrences in crate) |
-| 97 | Manual `.clone()` that could borrow in hook hot paths | `src/hook/fetch_retry.rs:79`, `src/hook/use_infinite_query/fetch_helpers.rs:64,121` | Restructure to keep borrowed keys | ⚠️ **Misleading**: clones are **necessary** — `entity.read_with` returns a reference that can't escape the closure, and `cx.update_global` needs `&mut App` (conflicts with holding `&App` from a read). Holding the entity borrow across `update_global` is a borrow conflict. Only a new `QueryClient` API accepting an entity ref would fix it. |
+#### M3 — `prepare_fetch_query`/`prepare_prefetch_query` downcast the bucket twice
+**File:** `lifecycle.rs:258,262` (also `:336,345`)
+**Severity:** MED | **New:** YES
 
----
+`self.resource::<T,E>(key.clone(), cx)` internally does the full M4 downcast dance to get/create the bucket and entity. `self.next_request_id_for_key::<T,E>(&key)` then does the **entire same downcast dance again** on the same `TypeId` just to reach the sequencer. So one `prepare_fetch_query` = 2× (TypeId check + downcast + match) = 4 vtable calls + 2 `AHashMap` lookups for the same bucket. Plus `current_time_ms()` at `:259` and again in `complete_success`/`complete_failure` (`prepared_fetch.rs:56,67`) = 2 syscalls for a fetch+complete.
 
-## ➕ Verification Addenda (findings #98–#139)
+**Fix:** Have `resource_with_policies` return the `&mut QueryBucket<T,E>` alongside the entity so the sequencer is reachable without a second downcast. Thread the `now_ms` from `prepare_fetch_query` (`:259`) into the `PreparedFetch` so `complete_*` can reuse it instead of re-syscall.
 
-New issues discovered during the five subagent verifications, grouped by area.
+#### M4 — Redundant `TypeId` pre-check + `downcast_mut` = 2 vtable dispatches per op; 5× duplicated recovery block
+**File:** `mod.rs:193-220` (+ identical at `infinite_mutation_ops.rs:58-83,122-143,180-207`, `mod.rs:269-289`)
+**Severity:** MED | **New:** YES (perf angle; #11 covers only the dedup)
 
-### Core (`src/core/*`) — #98–#104
+The "audit fix #11" pattern does `bucket.as_any().type_id() != expected_type_id` (vtable call #1) **and then** `bucket.as_any_mut().downcast_mut::<QueryBucket<T,E>>()` (vtable call #2, which *internally* does its own `type_id() == TypeId::of::<T>()` check). The explicit TypeId pre-check is **redundant** with the downcast's internal check — it adds a vtable dispatch on every hot-path resource creation purely to pre-format an error message for an impossible (`debug_assert!(false)`) mismatch branch.
 
-| # | Severity | Issue | File:line | Fix |
-|---|----------|-------|-----------|-----|
-| 98 | 🔴 HIGH | `redact_tokens` panics + corrupts non-ASCII (see C1) | `core/error/sanitize.rs:127-161` | `char_indices()` scan |
-| 99 | 🔴 HIGH | `sanitize_message` truncation panics on non-char-boundary (see C2) | `core/error/sanitize.rs:43-45` | Largest char-boundary `<= SANITIZE_MAX_LEN` before `truncate` |
-| 100 | 🟠 MED | `rollback_to_previous` sets `Success` without clearing `error` | `core/resource/lifecycle.rs:317-324` | Clear `self.error = None;` (and refresh `last_updated_at`) when setting `Success`; violates "Success ⇒ error is None" invariant from `apply_success`/`record_cache_hit` |
-| 101 | 🟠 MED | `clear_data` leaves `Success` status with `data = None` | `core/resource/lifecycle.rs:333-335` | Transition to `Idle` (mirror `apply_success_optional` `None` branch); current state violates "Success ⇒ data available" and panics on `data.unwrap()` |
-| 102 | 🟠 MED | `record_stale_cache_hit` doc claims "Success status" but doesn't set it | `core/resource/cache.rs:102-108` | Set `status = Success` (matching `record_cache_hit` at 89-98) or fix the doc; currently can return `StaleCacheHit { status: Failure, ... }` |
-| 103 | 🟡 LOW | `redact_paths` rebuilds + re-lowercases per prefix (sibling of #56) | `core/error/sanitize.rs:164-183` | Single-pass scan matching any prefix, one `to_ascii_lowercase()` total |
-| 104 | 🟡 LOW | `redact_hex` redundant boundary conditions | `core/error/sanitize.rs:262-265` | Collapse to `if chars[i].is_ascii_hexdigit()` (other two checks are dead) |
+The 11-line recovery block is copy-pasted **5 times**. `next_request_id_for_key` is on the hot fetch path (`fetch_retry.rs:63`, `use_infinite_query/hook.rs:205`), so the redundancy fires on every fetch.
 
-### Client (`src/client/*`) — #105–#114
+**Fix:** Drop the pre-check; call `downcast_mut` once and handle `None` in the match arm (formatting the type name there, on the impossible path). Extract a private helper `fn bucket_or_recreate<B: ErasedBucket + Default>(slot: &mut Box<dyn ErasedBucket>, type_name: &str) -> &mut B` to kill the 5× duplication.
 
-| # | Severity | Issue | File:line | Fix |
-|---|----------|-------|-----------|-----|
-| 105 | 🔴 HIGH | GC is never triggered from production code (see CL1) | `client/lifecycle.rs:34-37`; all of `src/hook/*` | Periodic `cx.spawn` GC task or opportunistic GC in `get_or_create`/`insert` |
-| 106 | 🔴 HIGH | `StatusSnapshot` never updated from production — GC sees stale data (see CL2) | `client/bucket/ops.rs:218-232` | Call `update_status_snapshot` from hook completion paths, or revert GC to read entity state directly |
-| 107 | 🟠 MED | `Cancelled` entries are never evicted by GC | `client/bucket/erased_ops.rs:118-124`, `client/infinite_bucket.rs:211-217` | Add `Cancelled` to evictable set: `matches!(status, Idle \| Failure \| Cancelled)` |
-| 108 | 🟠 MED | `MutationBucket::gc` never evicts `Success` mutations | `client/mutation_bucket.rs:274-280` | Add `Success` to evictable set with age threshold (`SUCCESS_GC_MULTIPLIER`) or `max_entries`+`evict_oldest` |
-| 109 | 🟠 MED | `evict_oldest` can evict entries with in-flight requests | `client/bucket/ops.rs:46-70` | Skip entries where `status_snapshot.status.is_loading()` in the eviction loop |
-| 110 | 🟡 LOW | `InfiniteQueryBucket::get_or_create` doesn't update `status_snapshot.cache_policy` on policy change | `client/infinite_bucket.rs:69-73` | Mirror `ops.rs:104-106`: `entry.status_snapshot.cache_policy = cache_policy;` |
-| 111 | 🟠 MED | Deprecated `use_mutation_with_options` doesn't register with `QueryClient` (see CL7) | `hook/mutation_hooks/hooks.rs:108-127` | Add `register_mutation` block or delegate to `use_mutation` |
-| 112 | 🟡 LOW | `MutationBucket::updated_at` is never refreshed from production — GC would use insertion time | `client/mutation_bucket.rs:125-129` | Call `bucket.touch(id)` from hook completion, or compute `updated_at` from entity state in GC |
-| 113 | 🟡 LOW | `dehydrate()` skips mutation buckets entirely | `client/lifecycle.rs:239-271` | Add a mutation loop (`kind: "mutation"`) or document the exclusion by design |
-| 114 | 🟡 LOW | `MutationBucket::insert` takes an unused `_cx: &App` parameter | `client/mutation_bucket.rs:103` | Remove `_cx` or use it |
+#### M5 — `InfiniteQueryBucket::cancel_matching` doesn't bump `ignored_results` (divergent from `QueryBucket`)
+**File:** `infinite_bucket.rs:278-282` vs `erased_ops.rs:112-117`
+**Severity:** MED | **New:** YES
 
-### Hook (`src/hook/*`) — #115–#121
+`QueryBucket::cancel_matching` calls `resource.mark_ignored_result()` after cancelling the signal. `InfiniteQueryBucket::cancel_matching` only calls `signal.cancel()`. `InfiniteQueryResource` has **no** `mark_ignored_result` method (grep of `src/core/infinite_query` returns nothing). After a bulk `cancel_queries` touching infinite queries, the `ignored_results` counter diverges: query resources reflect the cancel, infinite resources do not.
 
-| # | Severity | Issue | File:line | Fix |
-|---|----------|-------|-----------|-----|
-| 115 | 🟡 LOW | Nested entity read inside `mapped.read_with` | `hook/use_query_select.rs:125-126` | `entity.read(cx).data()` inside `mapped.read_with` — shared-borrow safe today but a nested-update panic risk if anyone changes the inner call to `update`. Read source data once before the `mapped.read_with`. |
-| 116 | 🟠 MED | `mapped.update` silently mutates without `cx.notify()` | `hook/use_query_select.rs:135-137` | Add `cx.notify()` inside the closure, or document that `mapped_entity` is not independently observable (third-party observers miss updates) |
-| 117 | 🟡 LOW | Two sequential `entity.update` calls that should be batched | `hook/use_infinite_query/hook.rs:160-171` | Merge `set_max_pages` (160) and `set_retry_policy` (169) into one `update` closure (gpui-entity best-practice: "Batch updates") |
-| 118 | 🟠 MED | Stale page data reused across retries | `hook/use_infinite_query/fetch_runners.rs:40-51, 150-161` | `last_page_data`/`first_page_data` read once before the retry loop; a concurrent fetch changes pages between retries. Re-read on each retry iteration. Combined with #73's weak signal check. |
-| 119 | 🟡 LOW | Unnecessary `Clone` bound on mutator generic | `hook/mutation_hooks/hooks.rs:212, 267` | `F: ... + Clone` is never cloned (only `&mutator` is passed); over-constrains the API, rejecting closures capturing non-`Clone` resources. Drop `+ Clone`. |
-| 120 | 🟡 LOW | Release-build `eprintln!` lines not enumerated by #30 | `hook/use_infinite_query/fetch_runners.rs:71,116,180,217` | Four unguarded `eprintln!("DEBUG: ...")` calls; guard with `#[cfg(debug_assertions)]` or remove |
-| 121 | 🟡 LOW | `unused_must_use` sites missed by #27 | `hook/mutation_hooks/hooks.rs:225,277`; `hook/use_infinite_query/hook.rs:160,169` | Statement-form `entity.update` discards `Result`; prefix with `let _ =` |
+**Fix:** Add `InfiniteQueryResource::mark_ignored_result()` (one-liner, mirroring `QueryResource::mark_ignored_result` at `resource/lifecycle.rs:248-250`) and call it from the infinite `cancel_matching`. Or document that infinite-query `ignored_results` only counts stale completions, not explicit cancels.
 
-### Tests (`src/tests/*`) — #122–#129
+#### M6 — `MutationBucket::insert` calls `current_time_ms()` (syscall) on every mutation registration
+**File:** `mutation_bucket.rs:167`
+**Severity:** MED | **New:** YES
 
-| # | Severity | Issue | File:line | Fix |
-|---|----------|-------|-----------|-----|
-| 122 | 🟡 LOW | Duplicate `nocache_resource` helper with conflicting signatures | `test_support.rs:283` (takes key) vs `core_cache/mod.rs:67` (no param, fixed key) | Rename `core_cache::nocache_resource` to `nocache_test_resource()` or delegate |
-| 123 | 🟡 LOW | 11 dead helpers in `test_support.rs` | `test_support.rs:90,107,123,145,156,180,201,216,239,253,262,373` | Delete unused `#[allow(dead_code)]` helpers (`assert_data`, `error_message`, mock fetchers, etc.) — zero call sites |
-| 124 | 🟡 LOW | `User::default()`/`Post::default()` are inherent methods, not `Default` impls | `test_support.rs:337,360` | `#[derive(Default)]` + `impl Default`, or rename to `User::alice()`/`User::test_default()` |
-| 125 | 🟡 LOW | `Post::new` and `Post::default` methods are dead | `test_support.rs:349-362` | Remove the `impl Post` block; keep only the struct definition |
-| 126 | 🟡 LOW | Property tests in `query_key/proptests.rs` have no expense gate | `property_tests/query_key/proptests.rs` | `arb_key_special` generates strings up to 2000 chars; add a `proptest`/`stress` feature or `#[cfg(not(feature = "fast-tests"))]` |
-| 127 | 🟡 LOW | Wall-clock dependency in `test_prepare_prefetch_query_returns_none_for_fresh` | `tests/.../fetch_prefetch_cancel.rs:105` | Inject a time abstraction, or use a single captured `now` for both `apply_success` timestamp and freshness check |
-| 128 | 🟡 LOW | `test_current_time_ms_is_reasonable` has a hard 2033 expiry | `tests/.../gc_query_operations.rs:255` | Remove the `now < 2_000_000_000_000` upper bound, or widen to pre-2128 |
-| 129 | 🟡 LOW | `assert_key_invariants` helper is private to one file | `property_tests/query_key/deterministic_tests.rs:32` | Move to `strategies.rs` as `pub` so `proptests.rs` and future QueryKey tests can reuse |
+Every `register_mutation` (`infinite_mutation_ops.rs:194` → `insert`) pays a `SystemTime::now` syscall to stamp `updated_at`. The `MutationResource` *also* stamps its own `last_updated_at_ms` on completion (`mutation.rs:190,204`), and `gc` prefers that (`mutation_bucket.rs:284`), so `entry.updated_at` is only the fallback for never-completed mutations. For a hook that registers many mutations on mount, this is N syscalls.
 
-### Coverage Gaps — #130–#135
+`QueryBucket::get_or_create` does NOT call `current_time_ms` (the entity stamps its own timestamp); only `MutationBucket::insert` does. Inconsistent and avoidable.
 
-| # | Severity | Issue | Fix |
-|---|----------|-------|-----|
-| 130 | 🟠 MED | retain/release production integration is untested (#8) | `retain_*`/`release_*` (`lifecycle.rs:118-169`) are called ONLY from `gc_coverage.rs:34,48,240,251` — never from production. `observer_count` is read in production GC but always 0. No test verifies that `QueryObserver::observe()` increments `observer_count` and prevents GC eviction. When #8's fix is applied, there's no integration test to confirm GC respects it. |
-| 131 | 🟠 MED | Detached task cancellation has NO test (#6) | Zero `.abort()` calls in production; existing tests cover `QuerySignal::cancel()` (cooperative) only. No test verifies a spawned task stops after unmount/replacement via a stored `Task<()>` handle. |
-| 132 | 🟠 MED | Mutation race window only tested synchronously (#7) | `test_mutate_rejects_concurrent_calls`/`test_mutate_double_while_loading_second_rejected` call `mutate` twice synchronously inside `cx.new`. They verify the *synchronous* double-call. No test exercises two `mutate` calls from *different async spawn contexts* (the actual race). Existing tests would pass even if the race fix were reverted. |
-| 133 | 🟠 MED | InfiniteQueryBucket success eviction has NO test (#1) | `gc_coverage.rs` tests only Idle/Loading for infinite. No test verifies Success eviction (because production never evicts Success). No regression test for #1's fix. |
-| 134 | 🟠 MED | MutationBucket entry limit has NO test (#2) | `gc_coverage.rs:270` tests 100 resources fit within the 10_000 limit, but NOT that eviction happens when exceeded. No regression test for #2's fix. |
-| 135 | 🟡 LOW | `use_query_select` double-render is undetected (#74) | `hook_coverage.rs:189` verifies mapped data updates but does NOT count `cx.notify()`/render calls. No test detects #74's "two renders" claim (which is itself ❌ Misleading — see H2/116). |
+**Fix:** Accept an optional `now_ms: u128` parameter on `insert`/`register_mutation`, letting `maybe_opportunistic_gc`'s already-cached `now_ms` be reused; or drop `entry.updated_at` and have `gc` fall back to `0` when `last_updated_at_ms()` is `None` (never-completed mutations are either Idle → immediately evictable, or Loading → retained by the `is_loading` check, so the insertion timestamp is rarely load-bearing).
 
-### Clippy Lints Missed by the Original Audit — #136–#139
+#### M7 — `cancel_matching` does `read_with` then `update` = 2 entity locks per matching entry
+**File:** `erased_ops.rs:110-118` (and `infinite_bucket.rs:276-285`)
+**Severity:** MED | **New:** YES
 
-The original audit ran `clippy::perf/complexity/style` but did not report these **style-group**
-lints that ARE firing (verified via `cargo clippy`):
+For each matching key, the code does `entity.read_with(cx, |r, _| r.is_loading())` (lock #1) and, if loading, a separate `entity.update(cx, |resource, _| { signal.cancel(); … })` (lock #2). The `invalidate_matching`/`reset_matching` siblings correctly do a single `update`. The pre-check was added to avoid cancelling non-loading entries, but it costs a full extra lock acquire+release per match.
 
-| # | Lint | Count | Notes |
-|---|------|-------|-------|
-| 136 | `items_after_statements` | 95 | `clippy::style` — `struct H {}`/`use` after statements in test fns; bulk-fixable by hoisting items |
-| 137 | `uninlined_format_args` | 70 | `clippy::style` — `format!("item-{}", i)` → `format!("item-{i}")`; bulk-fixable |
-| 138 | `manual_let_else` | 37 | `clippy::style` — `if let ... { } else { return }` → `let ... else { return }` |
-| 139 | `must_use_candidate` + `return_self_not_must_use` | 75 + 25 | `clippy::pedantic` — #28 named 4 types but there are **100** missing-`#[must_use]` candidates |
+**Fix (refined after verification):** The original proposed fix (merge the check into `entity.update`) is **incorrect as stated** — GPUI's `entity.update` **always notifies observers** after the closure regardless of whether the closure mutated anything, so merging would cause extra re-renders for every non-loading matching entry. The current 2-lock pattern is actually intentional to avoid spurious notifications. Refined options: (a) accept the 2-lock pattern as a deliberate trade-off (cancel is not hot-path); (b) collect loading matches via `read_with` into a `Vec<Entity>`, then `update` only those — preserves the no-spurious-notify property while reducing lock acquisitions on non-loading matches to 1.
 
-> Additional one-off style lints firing: `single_match_else` (4), `single_char_pattern` (2),
-> `semicolon_if_nothing_returned` (1), `obfuscated_if_else` (1), `len_zero` (1),
-> `elidable_lifetime_names` (1). Pedantic-only (out of original scope but worth a follow-up):
-> `doc_markdown` (221), `cast_lossless` (31), `op_ref` (9), `missing_panics_doc` (9),
-> `match_same_arms` (5), `needless_pass_by_value` (4), `cast_sign_loss` (2), `borrow_as_ptr` (2),
-> `implicit_clone` (2), `similar_names` (2), `unnecessary_lazy_evaluations` (1),
-> `too_many_lines` (1), `struct_excessive_bools` (1), `multiple_bound_locations` (1).
+### Hook (`src/hook/*`) — 2 findings
+
+#### H1 — `use_query_select` allocates `Arc<T>` (with full `T::clone`) on every source notification even when data unchanged
+**File:** `use_query_select.rs:156-157`
+**Severity:** MED | **New:** YES
+
+```rust
+let fresh: Option<Arc<T>> =
+    entity.read(cx).data().map(|d| Arc::new(d.clone()));
+```
+
+Inside the `cx.observe` callback, the code unconditionally allocates a fresh `Arc<T>` (with a full `T::clone`) on **every** source notification. Then at `:158-162`, it compares `cached != fresh_ref` (via `PartialEq`) to decide whether anything changed. If nothing changed (the common case for periodic refetches that return identical data), the `Arc<T>` (and the `T` clone inside it) is discarded unused. For large `T` (e.g., `Vec<LargeStruct>`), this is a full `O(|T|)` clone + heap allocation wasted on every notification.
+
+The inline comment at `:140-146` explicitly acknowledges this trade-off (preserves audit #115's no-nested-borrow fix).
+
+**Fix:** Compare `&T` vs `&T` first (without allocating), only allocate `Arc<T>` if changed. This regresses #115's nested-borrow pattern, but for large `T` and frequent unchanged notifications, the perf win likely outweighs the style concern. Alternative: add a `data_arc()` accessor on `QueryResource` returning `Option<&Arc<T>>` (requires the broader Arc-ify-`QueryResource` architectural change) so `Arc::ptr_eq` can short-circuit without any `T` clone.
+
+#### H2 — Unnecessary `+ Clone` bound on infinite query fetchers
+**Files:** `fetch_helpers.rs:55,80,103`, `hook.rs:117`
+**Severity:** MED | **New:** YES (audit #119 fixed this for mutation mutators but NOT infinite-query fetchers)
+
+All four functions require `F: Fn(Option<&T>) -> Fut + 'static + Clone`. However, the fetcher is **never cloned** anywhere in the codebase — it's moved into the async block and borrowed as `&fetcher`. This over-constrains the API: fetcher closures that capture non-`Clone` resources (a `WeakEntity`, a `RefCell`, a non-`Clone` handle) are rejected by the compiler even though they would work fine at runtime.
+
+**Fix:** Drop `+ Clone` from all four bounds. Non-breaking for existing callers (removing a bound only loosens the constraint).
+
+### Tests / lib.rs — 3 findings
+
+#### T2 — Dead test helpers `no_cache_options` / `ttl_zero_options` (implementation status #51 marked "Implemented" but 0 callers)
+**File:** `test_support.rs:210,222`
+**Severity:** MED | **New:** YES
+
+Both functions are `pub` and documented but have **zero callers** across the entire test suite. Meanwhile, 114 literal `CachePolicy::NoCache` / `CachePolicy::Ttl { ttl_ms: 0 }` usages remain across 24 test files. The implementation status document marks audit #51 as "Implemented" — the helpers were created but never adopted.
+
+**Fix:** Either adopt the helpers in the 24 files that still use literals, or remove the dead helpers and update the implementation status.
+
+#### T3 — Stale test docs reference removed `StatusSnapshot` / snapshot APIs
+**Files:** `integration_client/mod.rs:16-24` (references `StatusSnapshot` and `update_query_snapshot()`), `invalidation_reset_gc.rs:160-164` (references `StatusSnapshot` and `update_query_snapshot()`), `gc_query_operations.rs:44` (references `update_status_snapshot`)
+**Severity:** MED | **New:** YES
+
+The CL2/#106 fix removed `StatusSnapshot` and the `update_status_snapshot`/`update_query_snapshot` APIs entirely — GC now reads live entity state directly. The production code comments were updated, but these TEST comments still describe the old snapshot-based approach and reference the non-existent snapshot APIs. (Note: the first two files say `update_query_snapshot()` — a misnomer even in the stale comments; the third says `update_status_snapshot`, the correct name of the removed API.)
+
+**Fix:** Update the comments to describe the current behavior: "GC reads live entity state directly via `entity.read(cx)` (CL2/#106)."
+
+#### T4 — `for _ in 0..200 { cx.run_until_parked() }` busy-wait in regression test
+**File:** `hook_tests/regression_tests.rs:215-220`
+**Severity:** MED | **New:** YES
+
+```rust
+for _ in 0..200 {
+    cx.run_until_parked();
+    if *second_ran.lock().unwrap() { break; }
+}
+```
+
+Calls `cx.run_until_parked()` up to 200 times, checking a `Mutex<bool>` each iteration. Typically breaks after 1-2 iterations, but in a degenerate case could iterate up to 200 times, each doing a full executor drain.
+
+**Fix:** Use the `Gate` helper pattern (one-shot async signal) — have the spawned task signal completion via a `Gate`, then `cx.run_until_parked()` once after the signal.
 
 ---
 
-## 🏗️ Architectural Recommendations
+## 🟡 LOW severity (30)
 
-1. **Generic bucket abstraction.** `QueryBucket`, `InfiniteQueryBucket`, and much of
-   `MutationBucket` share the same map/sequencer/observer-count/GC shape. A `Bucket<K, R>`
-   generic would cut hundreds of lines and prevent fixes from being applied twice. **Verified
-   ~90% structural overlap.**
+### Core (13)
 
-2. **Unified request runner.** The query, infinite-query, and mutation hook runners all do:
-   downgrade entity → check signal/is_current_request → retry/backoff → complete. A single
-   `run_retry_loop` parameterized by the attempt closure would remove ~400 lines. **All three
-   refactors (#13/#14/#15) are GPUI-safe.**
+| # | File:line | Issue | Fix |
+|---|-----------|-------|-----|
+| N9 | `resource/lifecycle.rs:239` | `cancel` has redundant `self.data = None` after `self.data.take()` — dead code | Remove line 239 |
+| N10 | `resource/lifecycle.rs:50,72,123,146,232,249`; `cache.rs:90,110`; `infinite_query/lifecycle.rs:178,301,337`; `mutation.rs:293` | `cancelled_count += 1`, `cache_hits += 1`, `ignored_results += 1` use plain `+=` not `saturating_add` — #35 only fixed `increment_retry` (u32); u64 counters are practically unoverflowable but #35 said "everywhere" | Use `saturating_add(1)` for consistency, or document u64 as intentionally not saturating |
+| N11 | `sanitize.rs:115` | `redact_url_schemes` allocates `format!("{scheme}://")` per scheme per loop iteration | Pre-compute `const NEEDLES: [&str; 4] = [...]` |
+| N12 | `sanitize.rs:237,306` | `redact_emails`/`redact_hex` use `String::new()` without preallocation (inconsistent with other redact fns) | `String::with_capacity(text.len())` |
+| N13 | `sanitize.rs:14-42` | `Cow<str>` in `sanitize_message` is useless — `replace_regex` always returns `String`, so `Cow` is always `Owned` after first call | Remove `Cow` and use `String`, or make `replace_regex` return `Cow<str>` (ties into N6) |
+| N14 | `retry.rs:35,45` | `RetryPolicy::no_retries()` and `RetryPolicy::new()` could be `const fn` | Add `const` to both signatures |
+| N15 | `key_filter.rs:5` | `QueryKeyFilter` missing `Copy` derive despite containing only `&'a QueryKey` (which is `Copy`) | Add `Copy` to derive list |
+| N16 | `request.rs:55,119` | `RequestId.scope_id` is `u64`, not `NonZero<u64>` — `Option<RequestId>` is 24 bytes instead of 16 (niche optimization lost) | Change to `NonZero<u64>` |
+| N17 | `request.rs:175` | `QueryTimestamp` uses `u128` for milliseconds — `u64` suffices until year 584M; doubles timestamp field sizes | Change to `u64` (or `NonZero<u64>` for niche) |
+| N18 | `infinite_query/resource.rs:68-69` | Two mutually-exclusive `bool` fields (`is_fetching_next_page`, `is_fetching_previous_page`) could be `Option<PageDirection>` | Replace with `Option<PageDirection>` (1 byte, unbreakable invariant) |
+| N19 | `resource/accessors.rs:127`; `mutation.rs:250`; `infinite_query/accessors.rs:194` | API naming inconsistency: `increment_retry` vs `increment_retry_count` | Pick one name and use it across all three |
+| N20 | `mutation.rs` (impl block) | `MutationResource` missing `set_retry_policy` (inconsistent with `QueryResource`/`InfiniteQueryResource`) | Add the setter |
+| N21 | `mutation.rs:8-19` vs `status.rs:11-25` | `MutationStatus` missing `is_loading()`/`is_idle()` etc. on the enum itself (unlike `QueryStatus`); methods duplicated on `MutationResource` | Add enum-level helpers, delegate from resource |
+| N22 | `key.rs:70-75` | `QueryKey::as_str()` returns only the first segment — misleading name (implies full key) | Rename to `first_segment()` or `as_first_str()` |
+| N23 | `resource/accessors.rs:92-94` | `signal_mut` never called in production — unused public API | Remove or mark `#[cfg(test)]` |
+| N24 | `mutation.rs:161` | `with_key` never called in production; `key` field always `None` | Document as forward-compat, or remove |
+| N25 | `mutation.rs:257,276` | Incorrect audit references in doc comments: `prepare_retry` cites "#19" (about `QueryKey::to_path`); `reset_retry_count` cites "#4" (about `use_query_select` clones) | Correct or remove the audit cross-references |
+| N26 | `page_management.rs:99-101` | `enforce_max_pages_remove_back` does `drain().collect()` then `reverse()` — could be `drain().rev().collect()` | One-pass reverse collect |
+| N27 | `infinite_query/lifecycle.rs:253,257,308,312` | `enforce_max_pages_*` return values (evicted pages) silently dropped in `complete_*` methods — API inconsistency with `append_page`/`prepend_page` | Either return evicted pages from `complete_*`, or add a `_void` variant that doesn't allocate |
+| N28 | `select.rs:80,134` | `SelectTransform` and `MappedQueryResource` missing `PartialEq`/`Eq` (could use `Arc::ptr_eq` like `QuerySignal`) | Manual `PartialEq` via `Arc::ptr_eq`, then derive on `MappedQueryResource` |
+| N29 | `resource.rs:24` | `QueryResource` derives `PartialEq`/`Eq` unconditionally — forces `T: PartialEq + Eq` on all users; the other two resources don't | Use conditional bounds, or add derives to the others for consistency (N7/N8) |
+| N30 | `sanitize.rs:102` | `Redact::replace_regex` fallback `_ => self.to_string()` silently no-ops if pattern string doesn't match any guard | Replace with enum dispatch or add `debug_assert!(false)` in the fallback arm |
 
-3. **Arc-ify large cached data.** Store `T` as `Arc<T>` inside `QueryResource`,
-   `InfiniteQueryResource`, and `MutationResource`. Makes derived views (#4/#20), optimistic
-   updates, and page fetches (#5) cheap to clone. **GPUI-safe** (`Send`/`Sync` preserved).
-   Resolves #88's "can't move into two `Option<T>` fields" problem.
+### Client (8)
 
-4. **Task lifetime management.** Move from "fire and forget" (9 sites — see #6's full
-   inventory) to stored `Task<()>` handles dropped/aborted on replacement and on resource drop.
-   **GPUI-safe** per `gpui-async/SKILL.md` and `gpui-entity` best-practices. Most important
-   correctness improvement after the panic bugs (C1/C2) and dead GC (CL1/CL2).
+| # | File:line | Issue | Fix |
+|---|-----------|-------|-----|
+| L1 | `lifecycle.rs:76-77` | `diagnostics()` allocates `queries`/`mutations` Vecs with no capacity hint despite knowing `bucket.count()` sums | `Vec::with_capacity(bucket.count().sum())` |
+| L2 | `lifecycle.rs:118` | `dehydrate()` allocates `entries` Vec with no capacity hint | `entries.reserve(sum_of_counts)` |
+| L3 | `erased_ops.rs:124-140`; `infinite_bucket.rs:289-308`; `mutation_bucket.rs:299-312` | `collect_diagnostics`/`collect_key_status` return a fresh Vec per bucket, immediately drained by `extend`/push | Add `collect_into(&mut Vec, cx)` sink-based API |
+| L4 | `lifecycle.rs:208-210` | `restore(&self, …)` never reads `self`; should be an associated fn | Make it `pub fn restore(persister: &dyn QueryPersister)` |
+| L5 | `lifecycle.rs:40-50` | `gc_with_time` does not update `last_gc_ms` → manual GC does not debounce the next opportunistic GC | Set `self.last_gc_ms = now_ms` at the top of `gc_with_time` |
+| L6 | `erased_ops.rs:134` vs `infinite_bucket.rs:295-297` | `cache_age_ms` diagnostic inconsistency: `checked_sub`→`None` (query) vs `saturating_sub`→`Some(0)` (infinite) on clock skew | Add `InfiniteQueryResource::cache_age_ms(now_ms)` mirroring `QueryResource`'s |
+| L7 | `lifecycle.rs:270-286,292` | `prepare_fetch_query` computes `started` then immediately `let _ = started;` — useless work | Drop the `match` and `started`; just call `begin_request_with_id` for its side effect |
+| L8 | `observer.rs:33-80,86-129,144-187` | 3 observer types structurally identical (differ in entity type AND status type: `QueryStatus` vs `MutationStatus`) → one generic `Observer<R, S>` | Generic `struct Observer<R, S>` + type aliases |
+| L9 | `erased_ops.rs:54-121` + `infinite_bucket.rs:224-286` | `invalidate`/`reset`/`cancel_matching` triplicated (6 near-identical impls). Overlaps existing audit #10 (generic bucket) but offers a more targeted fix | `for_each_matching_entry` helper on shared trait |
+| L10 | `infinite_mutation_ops.rs:230-276` | 4 bulk-op methods are near-identical pair-of-loops over `buckets`+`infinite_buckets` | `for_each_query_bucket_mut` helper |
+| L11 | `mod.rs:98` | `Default::default()` calls `current_time_ms()` syscall during construction (`new()` and `with_policies` both pay it) | Initialize `last_gc_ms: 0`; op-count gate is the primary debounce anyway |
+| L12 | `mod.rs:300-307` | `get_query_data` returns `Option<T>`, forcing a full `T` clone per call; no Arc/borrow variant | Once `QueryResource` stores `Option<Arc<T>>`, return `Option<Arc<T>>` (or add `with_query_data` taking `FnOnce(&T)`) |
+| L13 | `lifecycle.rs:131-168` | `dehydrate`'s `push_status_queries` closure handles only 2 of 3 loops; mutation loop inlined separately. Overlaps existing audit #94 (dehydrate dup) but critiques the partial fix | Generic `push_status` or `DehydrateKind` enum |
+| L14 | `devtools.rs:84` | `DehydratedEntry::data_json` is always `None` from `dehydrate()`; 24 bytes/entry placeholder. Mentioned in passing in existing audit #9; elevated to standalone here | Remove until typed serialization lands, or box it, or gate behind `persistence` feature |
+| L15 | `erased_ops.rs:110` vs `infinite_bucket.rs:276` | `is_loading()` vs `status().is_loading()` stylistic inconsistency (functionally identical) | Pick one style |
 
-5. **Observer retain/release or remove it.** `observer_count` is dead code (#8). The
-   `ObserverGuard` approach is **GPUI-problematic** (`Drop` has no `cx`). **Recommended:**
-   delete `observer_count` and rely on `WeakEntity::upgrade()` liveness — GPUI-safe.
+### Hook (11)
 
-6. **Persistence cleanup.** `dehydrate()` serializes metadata only (#9) and **skips mutation
-   buckets** (CL9). Decide whether persistence is a real feature; if so, serialize actual
-   cached data and implement typed `hydrate()`. If not, remove the stub.
+| # | File:line | Issue | Fix |
+|---|-----------|-------|-----|
+| H3 | `query_hooks.rs:96-98, 376-378` | Signal read as separate entity read after `begin_request_on_entity` already created it in `entity.update` | Add `signal: QuerySignal` to `QueryBeginResult::Started`/`StaleCacheHit`, or have `begin_request_on_entity` return `(Option<RequestId>, Option<QuerySignal>)` |
+| H4 | `options.rs:163-168, 370-375` | `QueryOptions::new`/`InfiniteQueryOptions::new` use `..Default::default()` which allocates the default key then immediately overwrites it | Construct directly without `Default::default()` |
+| H5 | `fetch_retry.rs:60-67` | `maybe_request_id` (key clone + `update_global` + sequence consumption) computed before knowing if cache hit will discard it | Restructure to mint the ID lazily inside `entity.update` |
+| H6 | `fetch_retry.rs:173-193` | Two sequential `read_entity` calls (`is_current_request` + signal re-read) could be combined into one | Single `read_entity` returning `(bool, QuerySignal)` |
+| H7 | `query_hooks.rs:77` | `opts.retry_policy.clone()` — could move via destructuring (retry_policy not used after) | Destructure `opts` and move `retry_policy` |
+| H8 | `mutation_hooks/hooks.rs:85` | `opts.retry_policy.clone()` — could move via destructuring | Same as H7 |
+| H9 | `mutation_hooks/hooks.rs:394-397, 453-457` | `cx.notify()` after `set_current_task` is unnecessary (no status change; observer callback runs for nothing) | Remove `cx.notify()` from the `set_current_task` update closure |
+| H10 | `use_infinite_query/hook.rs:186-190` | Release-build `eprintln!("WARNING: …")` in observer fallback — inconsistent with audit fix #5 applied to `use_query_manual` | Remove the `eprintln!`, matching `use_query_manual` and `use_mutation` |
+| H11 | `use_infinite_query/hook.rs:168` | `retry_policy.clone()` — could move (not used after this line). **Note:** H13's fix (clone at 168, move at 222) is strictly better and makes this fix moot — apply H13 instead | Move instead of clone (but prefer H13's fix) |
+| H12 | `use_infinite_query/hook.rs:149-156 + 164-170` | `max_pages` set twice on standalone path (in `cx.new` closure AND in the unconditional update) | Remove the `max_pages` block from the `cx.new` closure |
+| H13 | `use_infinite_query/hook.rs:222` | Retry policy re-read from entity (with clone) after just being set at line 168 — could reuse the original local | Clone at 168, move the original at 222 (saves one entity read + one clone) |
+| H14 | `use_infinite_query/fetch_runners.rs:125-137` | Two separate `read_entity` calls (signal cancellation + `is_current_request`) after retry delay could be combined | Single `read_entity` returning `(bool, bool)` |
+| H15 | `options.rs:299` | `MutationCallbacks._phantom: PhantomData<(T,E)>` is unnecessary — T and E are already used through the callback field types | Remove the `_phantom` field |
+| H16 | `options.rs:286` (doc) | `MutationCallbacks` doc says "Not Clone because trait-object callbacks cannot be cloned" — misleading; all fields are `Option<Arc<…>>` which IS `Clone` | Implement `Clone` manually (no `T: Clone` bound needed); fix the doc |
+| H17 | `gpui_compat.rs:18` | `read_entity` shim missing `#[inline]` | Add `#[inline]` |
+| H18 | `mod.rs:164` | `current_time_ms()` missing `#[inline]` despite being `pub` (potentially called cross-crate) | Add `#[inline]` |
 
-7. **Wire GC into production.** (NEW, from CL1/CL2) Without a periodic GC trigger and snapshot
-   refresh, findings #1, #2, #8, #91 are academic — the GC code never runs. This is the
-   highest-leverage architectural change after the panic fixes.
+### Tests / lib.rs (7)
+
+| # | File:line | Issue | Fix |
+|---|-----------|-------|-----|
+| T5 | `lib.rs:33-56` | Missing `#[doc(cfg(feature = "..."))]` on feature-gated modules/re-exports → rustdoc doesn't show feature requirements | Add `#![cfg_attr(docsrs, feature(doc_cfg))]` and annotate each gated module |
+| T6 | `lib.rs:48-49` + `core/mod.rs:37` | `pub use core::*` re-exports the `key_filter` module (only `pub mod` in core; all others are private `mod` + `pub use`) | Make `key_filter` a private `mod` and only `pub use QueryKeyFilter`, for consistency |
+| T7 | `gc_eviction.rs:17-32` | `create_success_with_snapshot` has misleading name (snapshots removed) + unused `_gc_time_ms` parameter (all 7 callers pass `1_000`, ignored) | Rename to `create_success_at_time`; remove the parameter |
+| T8 | `core_mutation/*.rs` (28 declarations) | `MutationResource<String, ...>` forces ~40 `"literal".to_string()` allocations (6 cancellation + 22 lifecycle + 12 retry) where `MutationResource<&'static str, ...>` would avoid all | Change test declarations to `MutationResource<&'static str, ...>` |
+| T9 | `core_infinite_query/*.rs` (10 declarations) | `InfiniteQueryResource<Vec<String>>` forces ~54 `vec![...to_string()...]` allocations (6 stale_and_completion + 28 max_pages + 11 page_fetch + 9 state_transitions) where `Vec<&'static str>` would avoid all | Change helpers to be generic; use `Vec<&'static str>` in tests |
+| T10 | `policy_and_status_types.rs:17` | `assert_serde_roundtrip` is private — 8 duplicate manual roundtrips in `property_based.rs`, `retry_policy.rs`, `query_error.rs` | Move to `test_support.rs` as `pub fn`, adopt in the 8 sites (extends #129) |
+| T11 | `tests/core_select.rs` | Standalone flat file while all peer test groups are in subdirectories — structural inconsistency | Move to `core_select/mod.rs` |
+| T12 | `test_support.rs:429-433` | `Post` struct has `title: String` + `Default` derive — only used as type tag in 1 test, never constructed with data | Replace with `pub struct Post;` (unit struct) |
+| T13 | `test_support.rs:255` | `pub struct DummyView` is `pub` but never imported by any test (6 local `struct DummyView;` remain) | Make private (`pub(crate)`) or adopt the shared one |
+| T14 | `gc_coverage.rs:387-431` | `test_mutation_bucket_evict_oldest_keeps_count_bounded` creates 10 005 entities every test run — heaviest test in suite | Reduce to `MAX_ENTRIES + 2`, or gate with `#[ignore]` (extends #134) |
 
 ---
 
-## Suggested Implementation Order
+## Cross-cutting observations (architectural, not individual findings)
 
-1. **🚨 Panic fixes (#98/#99 = C1/C2)** — `redact_tokens` + `sanitize_message` non-ASCII
-   panics. Small, surgical, prevents production crashes on error paths.
-2. **🚨 Dead GC wiring (#105/#106 = CL1/CL2) + memory bounds (#1, #2, #108)** — wire periodic
-   GC, refresh snapshots, add `max_entries`/`evict_oldest`, evict `Success`/`Cancelled`. Without
-   #105/#106, #1/#2 don't matter.
-3. **Mechanical clippy/idiom fixes** (#22–#45, #56–#60, #75–#80, #96, #97, #136–#139) — safe,
-   fast, removes warning noise. All citations clippy-verified.
-4. **Task cancellation (#6, 9 sites)** + **mutation race (#7)** + **RequestGuard protocol
-   (#86, #87)** + **CL7 deprecated registration** — correctness. Add tests (#131, #132).
-5. **Clone reduction** (#3, #4, #5, #20, #57–#59, #61–#64, #88, #90) — measurable perf wins.
-   Note #88/#90 are "misleading" standalone but resolved by the `Arc<T>` refactor.
-6. **Core state invariants** (#100, #101, #102) — `rollback`/`clear_data`/`stale_cache_hit`
-   status bugs. Add regression tests.
-7. **Bucket/hook deduplication** (#10, #11, #12, #13, #14, #15, #67–#69, #93, #94) —
-   maintainability.
-8. **Test helpers** (#46–#55, #85, #95, #122–#129) + **coverage gaps** (#130–#135) — reduces
-   suite size, flakiness, and fixes the missing-regression-test problem for #1/#2/#6/#7/#8.
-9. **Type design / API cleanup** (#75–#84, #89) — once core behavior is solid.
+1. **The M2/M4/M5/M7 cluster has a common root cause:** the erased-bucket dispatch layer + the lack of a shared `for_each_matching_entry` / generic-bucket abstraction (#10, deferred) is what let the three bucket implementations drift apart (M5 missing `mark_ignored_result`, M7 double-lock, L6 `cache_age_ms` divergence, L15 style drift). Resolving #10 with even a *minimal* shared helper (not full generic `Bucket<K,R>`) would prevent the whole cluster from recurring.
+
+2. **`current_time_ms()` call-site inventory in `src/client/`** (grep-verified): `mod.rs:98,150`, `prepared_fetch.rs:56,67`, `mutation_bucket.rs:167`, `lifecycle.rs:31,75,259,342`. The hot ones are `mutation_bucket.rs:167` (M6, per-insert) and `lifecycle.rs:259` (M3, per-prepare, doubled with `prepared_fetch.rs:56/67`). A `QueryClient`-threaded `now_ms` would collapse M3+M6+the prepared_fetch double-syscall in one pass.
+
+3. **4× `Option<T>` in `QueryResource`**: `data`, `placeholder_data`, `previous_data`, `initial_data` — 4 copies of potentially large `T` per resource. Related to N5 (the latter two are dead). The `Arc<T>` architectural recommendation (audit arch-rec 3) would resolve this and also H1/L12.
+
+4. **`InfiniteQueryResource` struct is very large**: ~20 fields, including 2× `Option<QueryTimestamp>` (48 bytes — N17 would halve this), `VecDeque<Arc<T>>` (24 bytes), `QueryKey` (8 bytes), `CachePolicy` (24 bytes), `RetryPolicy` (24 bytes), `Option<RequestId>` (24 bytes — N16 would save 8), plus bools and counters. Total: ~200+ bytes excluding `T`-dependent fields. For GPUI entity storage, this is copied on every `entity.read_with` clone. Consider boxing rarely-used fields or splitting into hot/cold structs.
+
+5. **`Clone` on resource types shares `QuerySignal`**: all three resource types derive `Clone` and have `signal: Option<QuerySignal>` (which is `Arc<AtomicBool>`). After cloning, both copies share the same signal — cancelling one cancels both. The `CurrentTask` wrapper handles this by returning `Self(None)` on clone (losing the task handle), but `QuerySignal` has no such protection. Potential footgun for concurrent use, though in practice resources are stored in GPUI entities and not cloned for concurrent access.
 
 ---
 
-## Appendix: Files with the Most Findings
+## Recommended next steps (priority order)
 
-| File | Main Concerns |
-|------|---------------|
-| `src/core/error/sanitize.rs` | 🚨 **C1/C2 panic bugs**; #56; #103, #104 |
-| `src/client/lifecycle.rs` | 🚨 **CL1 dead GC**; #9 expensive dehydrate; #16 no-op chain; #92, #93, #94 dup; #113 skips mutations |
-| `src/client/bucket/ops.rs` | 🚨 **CL2 stale snapshot**; #8 dead retain/release; #10 dup; #58 multi-hash; #59, #109 evict_oldest loading bug |
-| `src/client/infinite_bucket.rs` | #1 no success eviction; #18 entity pinning; #107 no Cancelled eviction; #110 stale cache_policy |
-| `src/client/mutation_bucket.rs` | #2 no entry limit; #91 collect-then-remove; #108 no Success eviction; #112 stale updated_at; #114 unused `_cx` |
-| `src/client/mod.rs` | #11 double downcast; #21 Default gc_time inconsistency |
-| `src/hook/mutation_hooks/internals.rs` | #3 variables clone per retry; #15 duplicated mutation loops |
-| `src/hook/mutation_hooks/hooks.rs` | #7 race window; #29 expect; #67 dup; 🚨 **CL7 deprecated unregistered**; #119 unnecessary Clone bound |
-| `src/hook/use_infinite_query/fetch_runners.rs` | #5 page clones; #13 dup; #30/#120 release eprintln; #72 notify on discard; #73 weak signal check; #118 stale page data |
-| `src/hook/use_infinite_query/fetch_helpers.rs` | #13 dup; #97 necessary clones; #6 site 8/9 |
-| `src/hook/fetch_retry.rs` | #14 dup; #24 redundant closure; #27 unused_must_use; #64 👻 already-fixed; #97 necessary clones |
-| `src/hook/use_query_select.rs` | #4 full source clone; ❌ #74 misleading; #96 type complexity; #115, #116 |
-| `src/hook/query_hooks.rs` | #6 sites 1-4; #61 key clones; #27 unused_must_use |
-| `src/core/infinite_query/lifecycle.rs` | #12 four dup begins; #86 guard not consumed; #87 per-direction ignore |
-| `src/core/select.rs` | #20 clones T; ⚠️ #37 variance change; |
-| `src/core/key.rs` | ❌ #19 not O(n²); ⚠️ #90 not a perf win; #31 starts_with (preserve guard) |
-| `src/core/resource/lifecycle.rs` | ❌ #34 fix breaks rollback; #100, #101 status invariants; #88 misleading |
-| `src/core/resource/cache.rs` | #102 stale-cache-hit doc/status mismatch |
-| `src/tests/` | #46-55 (corrected counts); #122-129; #130-135 coverage gaps |
+1. **M2 `evict_oldest` O(n) entity reads** — the single hottest previously-unreported bottleneck. Mirror `last_updated_at_ms` + `loading` hint into `BucketEntry` so eviction scans metadata without `entity.read(cx)`. Requires cross-layer completion-path refresh.
+2. **T1 feature-gate inconsistency** — `cargo test --no-default-features --features core` should compile. Gate `test_support`'s client bits + `integration_client`/`coverage_gaps` modules.
+3. **H1 `use_query_select` per-notification clone** — compare `&T` vs `&T` first, allocate `Arc<T>` only if changed. Biggest perf win for derived-view workloads with unchanged refetches.
+4. **N6 `sanitize_message` 5× full-text scans** — add `contains` early-exit guards or make `replace_regex` return `Cow<str>` so the existing `Cow` actually short-circuits. Saves 5 allocations on clean messages.
+5. **M1 dead `MutationEntry::loading` field** — zero-risk removal, silences a dead branch, saves 1 byte + padding per entry.
+6. **N3 `begin_request_with_id(None)` duplicate `RequestId(1,1)`** — real correctness bug; reachable from `fetch_retry.rs:55-66` when no `QueryClient` global. Store a sequencer in the resource or deprecate `None`.
+7. **N1/N2/M5 diagnostic/state inconsistencies** — `ignored_results` undercount on infinite two-phase, `MutationResource::reset` stale timestamp, infinite `cancel_matching` missing `mark_ignored_result`. All one-liners.
+8. **M3/M4/M6 syscalls + downcast redundancy** — thread `now_ms` from `prepare_fetch_query` through `PreparedFetch`; extract `bucket_or_recreate` helper to kill 5× duplication and the redundant TypeId pre-check.
+9. **N7/N8 `PartialEq`/`Eq` derives** — the implementation status doc is wrong about #78. Add the derives or correct the doc.
+10. **H2 drop `+ Clone` on infinite fetchers** — same fix as #119 for mutators; non-breaking API loosening.
+11. **Stale test docs (T3) + dead helpers (T2) + misleading helper name (T7)** — cosmetic but the stale `StatusSnapshot` docs actively mislead.
+12. **LOW bulk**: `#[inline]` on `current_time_ms`/`read_entity`, `RetryPolicy::new`/`no_retries` as `const fn`, `QueryKeyFilter: Copy`, `NonZero<u64>` for `RequestId.scope_id`, `u64` for `QueryTimestamp`, move-not-clone for `retry_policy` (H7/H8/H11/H13), remove release `eprintln!` (H10), `String::with_capacity` in redact fns (N12).
 
 ---
 
-## Appendix: Verification Report Card
+## Per-area detail
 
-| Area | Findings checked | ✅ Verified | ⚠️ Corrected/Misleading | ❌ Inaccurate | 👻 Already-fixed | New issues |
-|------|------------------|-------------|--------------------------|---------------|------------------|------------|
-| `src/core/*` | 25 | 14 | 8 | 1 (#34) | 0 | 7 (#98–#104) |
-| `src/client/*` | 20 | 19 | 0 | 0 | 0 | 10 (#105–#114) |
-| `src/hook/*` | 30 | 25 | 2 (#74, #97) | 0 | 1 (#64) | 7 (#115–#121) |
-| `src/tests/*` | 15 | 11 | 3 (#46, #47, #54) | 0 | 0 | 8 (#122–#129) + 6 coverage gaps (#130–#135) |
-| Clippy mechanical | 10 (#22-30, #40) | 8 | 2 (#27 list, #30 lines) | 0 | 0 | 4 lint categories (#136–#139) |
-| **Total** | **97 + 10** | **77** | **13** | **1** | **1** | **42 (#98–#139)** |
+<details>
+<summary><b>core (22 new findings: N1–N30)</b></summary>
 
-**Conclusion:** The original audit's findings were directionally sound (77/97 verified correct,
-only 1 genuinely inaccurate (#34), 1 already-fixed (#64)). The biggest gaps were **two
-production-reachable panic bugs** (#98/#99), **a fully-dead GC subsystem** (#105/#106), an
-**incomplete detached-task inventory** (#6: 9 sites not 4), and **6 coverage gaps** that leave
-the highest-impact fixes without regression tests. After applying the corrections and addenda
-above, the audit is bulletproof: every finding cites verified file:line, every proposed fix is
-checked for GPUI/Rust safety, and every "fix this" item has a matching "test this" note where
-coverage is missing.
+- HIGH: 0
+- MED: 7 (N1, N2, N3, N4, N5, N6, N7/N8)
+- LOW: 15 (N9–N30 excluding N7/N8)
+
+Files: `infinite_query/lifecycle.rs`, `infinite_query/resource.rs`, `infinite_query/page_management.rs`, `mutation.rs`, `resource/lifecycle.rs`, `resource.rs`, `resource/accessors.rs`, `resource/cache.rs`, `error/sanitize.rs`, `retry.rs`, `key_filter.rs`, `request.rs`, `key.rs`, `select.rs`.
+
+</details>
+
+<details>
+<summary><b>client (15 new findings: M1–M7, L1–L15)</b></summary>
+
+- HIGH: 1 (M2)
+- MED: 6 (M1, M3, M4, M5, M6, M7)
+- LOW: 8 (L1–L15 — L8/L9/L10/L15 counted once each but span multiple files)
+
+Files: `bucket/ops.rs`, `bucket/erased_ops.rs`, `infinite_bucket.rs`, `mutation_bucket.rs`, `mod.rs`, `infinite_mutation_ops.rs`, `lifecycle.rs`, `observer.rs`, `prepared_fetch.rs`, `devtools.rs`.
+
+</details>
+
+<details>
+<summary><b>hook (14 new findings: H1–H18)</b></summary>
+
+- HIGH: 0
+- MED: 2 (H1, H2)
+- LOW: 12 (H3–H18)
+
+Files: `use_query_select.rs`, `fetch_helpers.rs`, `hook.rs` (infinite), `fetch_runners.rs`, `query_hooks.rs`, `mutation_hooks/hooks.rs`, `options.rs`, `fetch_retry.rs`, `gpui_compat.rs`, `mod.rs`.
+
+</details>
+
+<details>
+<summary><b>tests / lib.rs (14 new findings: T1–T14)</b></summary>
+
+- HIGH: 1 (T1)
+- MED: 3 (T2, T3, T4)
+- LOW: 10 (T5–T14)
+
+Files: `lib.rs`, `tests/mod.rs`, `test_support.rs`, `integration_client/`, `coverage_gaps/gc_eviction.rs`, `integration_client_coverage/`, `hook_tests/regression_tests.rs`, `core_mutation/`, `core_infinite_query/`, `core_policy_types/`, `tests/core_select.rs`.
+
+</details>
+
+---
+
+## Verification methodology
+
+- Four parallel explore subagents read every file in their area (`src/core`, `src/client`, `src/hook`, `src/tests` + `src/lib.rs`).
+- Each finding cross-checked against the indexed finding numbers (#1–#144) in the existing audits to confirm no overlap.
+- Criticals (M2, H1, N7/N8, M1) hand-verified against the live source by reading the cited lines plus supporting core types.
+- All file:line citations resolved against the current tree (post-implementation-pass state).
+- "Definitely real" vs "speculative" distinguished inline where the impact estimate depends on workload (e.g., M2's severity depends on whether the app keeps inserting new unique keys into a full bucket).
+
+### Verification pass results
+
+A second pass with four parallel verification subagents (core / client / hook / tests+lib) checked every cited file:line, cross-reference, and proposed fix against the live source.
+
+**Final tally: 44/51 fully CONFIRMED, 7 PARTIALLY ACCURATE, 0 INACCURATE.**
+
+| Area | Findings | Confirmed | Partially accurate |
+|------|---------:|----------:|-------------------:|
+| Core (N1–N30) | 30 | 30 | 0 |
+| Client (M1–M7, L1–L15) | 22 | 17 | 5 (M7, L8, L9, L13, L14) |
+| Hook (H1–H18) | 18 | 18 | 0 |
+| Tests/Lib (T1–T14) | 14 | 10 | 4 (T3, T8, T9, T13) |
+
+The 7 partially-accurate findings are still real issues — the errors were in specific claims (counts, quotes, wording) rather than in the existence or significance of the findings. All corrections have been applied inline above. Summary of what was corrected:
+
+1. **#112 drift claim**: Replaced a fabricated quote with the actual doc text; noted the doc is internally contradictory (top section says done, detailed tables say not done).
+2. **M7**: Refined the fix — `entity.update` **always notifies** observers regardless of mutation, so the original "no extra notify" claim was wrong; the current 2-lock pattern is intentional to avoid spurious notifications.
+3. **M2**: Corrected "all three byte-identical" — only `QueryBucket`/`InfiniteQueryBucket` are byte-identical; `MutationBucket::evict_oldest` differs (reads `entry.updated_at` directly, uses `*id`).
+4. **T3**: Corrected — `gc_query_operations.rs:44` says `update_status_snapshot`, not `update_query_snapshot()`.
+5. **T8**: Corrected count from 86 to 40.
+6. **T9**: Corrected count from 29 to 54.
+7. **L8**: Changed "byte-identical" to "structurally identical" (observer types differ in status type, not just entity type).
+8. **L9/L13/L14**: Added notes that these overlap existing audit findings #10/#94/#9 respectively but offer more-targeted fixes.
+9. **H11**: Added note that H13's fix is strictly better and makes H11 moot.
+10. **N7/N8**: Corrected the source of the "✅ Verified" quote (main audit `:379`, not impl-status doc `:193`).

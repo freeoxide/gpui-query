@@ -223,17 +223,16 @@ fn test_fetch_query_after_resource_reset(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+    setup_test(cx);
 
     struct H {
         entity: Entity<QueryResource<&'static str, QueryError>>,
     }
 
     // Gate: the first fetcher blocks until the test releases it after the second
-    // fetch_query is issued. Uses AtomicBool + executor.timer() instead of
-    // thread::sleep to avoid blocking the executor thread.
-    use std::sync::atomic::{AtomicBool, Ordering};
-    let gate = Arc::new(AtomicBool::new(false));
+    // fetch_query is issued. Uses the shared `Gate` helper which polls the
+    // executor with 1ms timers instead of thread::sleep.
+    let gate = Gate::new();
     let gate_clone = gate.clone();
     let executor = cx.background_executor.clone();
 
@@ -252,12 +251,9 @@ fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
                 let gate_clone = gate_clone.clone();
                 let executor = executor.clone();
                 async move {
-                    // Wait for the gate using executor-aware yield instead of
-                    // thread::sleep. This allows the second fetch_query to be
-                    // scheduled while we wait.
-                    while !gate_clone.load(Ordering::Acquire) {
-                        executor.timer(std::time::Duration::from_millis(1)).await;
-                    }
+                    // Wait for the gate using the shared helper. This allows
+                    // the second fetch_query to be scheduled while we wait.
+                    gate_clone.wait(&executor).await;
                     Ok::<_, QueryError>("first")
                 }
             },
@@ -274,7 +270,7 @@ fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
     // Release the gate so the first fetcher can proceed — but by now the second
     // fetch_query has already been issued with LatestWins, so the first will be
     // cancelled/replaced.
-    gate.store(true, Ordering::Release);
+    gate.release();
 
     cx.run_until_parked();
 

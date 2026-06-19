@@ -111,7 +111,7 @@ fn test_full_lifecycle_idle_to_loading_to_success_to_gc(cx: &mut TestAppContext)
         cx.update_global::<QueryClient, _>(|client, cx| {
             // 1. Start fetch via the public API
             let key = QueryKey::from(["users", "42"]);
-            let prepared = client
+            let _prepared = client
                 .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
                 .expect("should start fetch");
 
@@ -120,20 +120,14 @@ fn test_full_lifecycle_idle_to_loading_to_success_to_gc(cx: &mut TestAppContext)
                 .expect("entity should exist");
             assert!(entity.read(cx).is_loading());
 
-            // 2. Complete with success
-            prepared.complete_success("Carol".to_string(), cx);
+            // 2. Complete with success at a controlled timestamp (t=1000) so GC
+            //    age is deterministic. GC reads live entity state (audit #CL2),
+            //    so we set `last_updated_at` directly instead of faking a snapshot.
+            entity.update(cx, |r, _| r.apply_success("Carol".to_string(), 1_000));
             assert_eq!(entity.read(cx).status(), QueryStatus::Success);
             assert_eq!(entity.read(cx).data().unwrap(), "Carol");
 
-            // 3. Simulate hook-layer snapshot update: Success at t=1000
-            client.update_query_snapshot::<String, QueryError>(
-                &key,
-                QueryStatus::Success,
-                Some(1_000),
-                CachePolicy::Ttl { ttl_ms: 5_000 },
-            );
-
-            // 4. GC at t=2800: age = 2800 - 1000 = 1800 < success_threshold(10000) -> preserved
+            // 3. GC at t=2800: age = 2800 - 1000 = 1800 < success_threshold(10000) -> preserved
             client.gc_with_time(2_800, cx);
 
             // 5. Unconditional assertion: the resource MUST survive GC
@@ -162,7 +156,7 @@ fn test_full_lifecycle_failure_recovery(cx: &mut TestAppContext) {
                 .next_request_id_for_key::<String, QueryError>(&key)
                 .expect("request id");
             entity.update(cx, |r, _| {
-                r.begin_request_with_id(Some(rid1), 1_000, QueryFetchMode::Normal);
+                let _ = r.begin_request_with_id(Some(rid1), 1_000, QueryFetchMode::Normal);
             });
             entity.update(cx, |r, _| {
                 r.complete_current_failure(rid1, QueryError::response("fail"), 1_100)
@@ -175,7 +169,7 @@ fn test_full_lifecycle_failure_recovery(cx: &mut TestAppContext) {
                 .next_request_id_for_key::<String, QueryError>(&key)
                 .expect("request id 2");
             entity.update(cx, |r, _| {
-                r.begin_request_with_id(Some(rid2), 1_200, QueryFetchMode::Normal);
+                let _ = r.begin_request_with_id(Some(rid2), 1_200, QueryFetchMode::Normal);
             });
             entity.update(cx, |r, _| {
                 r.complete_current_success(rid2, "recovered".to_string(), 1_300)
@@ -214,7 +208,7 @@ fn test_optimistic_update_and_rollback_lifecycle(cx: &mut TestAppContext) {
                 .next_request_id_for_key::<String, QueryError>(&key)
                 .expect("request id");
             entity.update(cx, |r, _| {
-                r.begin_request_with_id(Some(rid), 1_100, QueryFetchMode::Force);
+                let _ = r.begin_request_with_id(Some(rid), 1_100, QueryFetchMode::Force);
             });
             assert!(entity.read(cx).is_loading());
 
@@ -251,7 +245,7 @@ fn test_optimistic_update_rollback_on_failure(cx: &mut TestAppContext) {
                 .next_request_id_for_key::<String, QueryError>(&key)
                 .expect("request id");
             entity.update(cx, |r, _| {
-                r.begin_request_with_id(Some(rid), 1_100, QueryFetchMode::Force);
+                let _ = r.begin_request_with_id(Some(rid), 1_100, QueryFetchMode::Force);
             });
             entity.update(cx, |r, _| {
                 r.complete_current_failure(

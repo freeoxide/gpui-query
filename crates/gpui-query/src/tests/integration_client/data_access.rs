@@ -4,7 +4,7 @@
 
 use std::sync::Mutex;
 
-use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
+use gpui::{BorrowAppContext as _, TestAppContext};
 
 use crate::client::QueryClient;
 use crate::core::*;
@@ -25,7 +25,7 @@ fn test_cancel_queries_cancels_loading_requests(cx: &mut TestAppContext) {
                 .next_request_id_for_key::<String, QueryError>(&key)
                 .expect("should get request id");
             entity.update(cx, |r, _| {
-                r.begin_request_with_id(
+                let _ = r.begin_request_with_id(
                     Some(request_id),
                     1_000,
                     QueryFetchMode::Normal,
@@ -415,7 +415,7 @@ fn test_persist_and_restore_cycle(cx: &mut TestAppContext) {
             client.persist(&persister, cx);
 
             // Restore
-            let loaded = client.restore(&persister);
+            let loaded = QueryClient::restore(&persister);
             assert_eq!(loaded.len(), 1, "should have one persisted entry");
             assert_eq!(loaded[0].key, "persist_me");
         });

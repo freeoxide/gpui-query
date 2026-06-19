@@ -32,7 +32,7 @@ pub fn err_str(r: &QueryResource<&'static str>) -> Option<String> {
 pub fn begin(
     r: &mut QueryResource<&'static str>,
     seq: &mut RequestSequencer,
-    now_ms: u128,
+    now_ms: u64,
 ) -> (RequestId, QueryStatus) {
     let result = r.begin_request(seq, now_ms, QueryFetchMode::Normal);
     match &result {

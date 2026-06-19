@@ -29,7 +29,7 @@ fn make_resource(cache: CachePolicy) -> QueryResource<String, QueryError> {
 fn begin_request_with_seq(
     resource: &mut QueryResource<String, QueryError>,
     seq: &mut RequestSequencer,
-    now_ms: u128,
+    now_ms: u64,
 ) -> QueryBeginResult {
     resource.begin_request(seq, now_ms, gpui_query::core::QueryFetchMode::Normal)
 }
@@ -38,7 +38,7 @@ fn complete_success(
     resource: &mut QueryResource<String, QueryError>,
     request_id: gpui_query::core::RequestId,
     data: &str,
-    now_ms: u128,
+    now_ms: u64,
 ) -> bool {
     resource.complete_current_success(request_id, data.to_string(), now_ms)
 }
@@ -102,7 +102,7 @@ fn ttl_max_data_is_always_fresh() {
     }
 
     // Even a very large age should still be fresh under u64::MAX TTL.
-    let result2 = begin_request_with_seq(&mut resource, &mut seq, u64::MAX as u128);
+    let result2 = begin_request_with_seq(&mut resource, &mut seq, u64::MAX);
     assert!(matches!(result2, QueryBeginResult::CacheHit));
 }
 
@@ -135,9 +135,9 @@ fn three_concurrent_requests_latest_wins_only_last_completes() {
     let r2 = begin_request_with_seq(&mut resource, &mut seq, 2_000);
     let r3 = begin_request_with_seq(&mut resource, &mut seq, 3_000);
 
-    if let QueryBeginResult::Started { request_id: id1, .. } = r1 {
-        if let QueryBeginResult::Started { request_id: id2, .. } = r2 {
-            if let QueryBeginResult::Started { request_id: id3, .. } = r3 {
+    if let QueryBeginResult::Started { request_id: id1, .. } = r1
+        && let QueryBeginResult::Started { request_id: id2, .. } = r2
+            && let QueryBeginResult::Started { request_id: id3, .. } = r3 {
                 // Only id3 is current; id1 and id2 are stale.
                 assert!(!complete_success(&mut resource, id1, "old1", 4_000));
                 assert!(!complete_success(&mut resource, id2, "old2", 4_000));
@@ -146,8 +146,6 @@ fn three_concurrent_requests_latest_wins_only_last_completes() {
                 assert_eq!(resource.cancelled_count(), 2);
                 assert_eq!(resource.ignored_results(), 2);
             }
-        }
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

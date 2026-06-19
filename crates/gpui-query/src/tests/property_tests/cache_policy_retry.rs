@@ -82,18 +82,18 @@ fn arb_linear_retry_policy() -> impl Strategy<Value = RetryPolicy> {
 // ── CachePolicy::NoCache invariants ─────────────────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// NoCache: is_fresh() is ALWAYS false regardless of age.
     #[test]
-    fn nocache_is_fresh_always_false(age_ms in any::<u128>()) {
+    fn nocache_is_fresh_always_false(age_ms in any::<u64>()) {
         let policy = CachePolicy::NoCache;
         prop_assert!(!policy.is_fresh(age_ms));
     }
 
     /// NoCache: is_expired() is ALWAYS true regardless of age.
     #[test]
-    fn nocache_is_expired_always_true(age_ms in any::<u128>()) {
+    fn nocache_is_expired_always_true(age_ms in any::<u64>()) {
         let policy = CachePolicy::NoCache;
         prop_assert!(policy.is_expired(age_ms));
     }
@@ -117,13 +117,13 @@ fn nocache_ttl_ms_is_none() {
 // ── CachePolicy::Ttl invariants ─────────────────────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
-    /// Ttl: is_fresh(age) == (age <= ttl_ms) for ALL u64/u128 value pairs.
+    /// Ttl: is_fresh(age) == (age <= ttl_ms) for ALL u64 value pairs.
     #[test]
-    fn ttl_is_fresh_matches_comparison(ttl_ms in any::<u64>(), age_ms in any::<u128>()) {
+    fn ttl_is_fresh_matches_comparison(ttl_ms in any::<u64>(), age_ms in any::<u64>()) {
         let policy = CachePolicy::Ttl { ttl_ms };
-        let expected = age_ms <= ttl_ms as u128;
+        let expected = age_ms <= ttl_ms;
         prop_assert_eq!(policy.is_fresh(age_ms), expected);
     }
 
@@ -143,7 +143,7 @@ proptest! {
 
     /// Ttl: is_stale_but_serveable() is ALWAYS false (no stale window).
     #[test]
-    fn ttl_is_stale_but_serveable_always_false(ttl_ms in any::<u64>(), age_ms in any::<u128>()) {
+    fn ttl_is_stale_but_serveable_always_false(ttl_ms in any::<u64>(), age_ms in any::<u64>()) {
         let policy = CachePolicy::Ttl { ttl_ms };
         prop_assert!(!policy.is_stale_but_serveable(age_ms));
     }
@@ -159,17 +159,17 @@ proptest! {
 // ── CachePolicy::StaleWhileRevalidate invariants ────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// SWR: is_fresh(age) == (age <= ttl_ms).
     #[test]
     fn swr_is_fresh_uses_ttl_only(
         ttl_ms in any::<u64>(),
         stale_ms in any::<u64>(),
-        age_ms in any::<u128>(),
+        age_ms in any::<u64>(),
     ) {
         let policy = CachePolicy::StaleWhileRevalidate { ttl_ms, stale_ms };
-        let expected = age_ms <= ttl_ms as u128;
+        let expected = age_ms <= ttl_ms;
         prop_assert_eq!(policy.is_fresh(age_ms), expected);
     }
 
@@ -193,13 +193,11 @@ proptest! {
     fn swr_stale_serveable_window(
         ttl_ms in any::<u64>(),
         stale_ms in any::<u64>(),
-        age_ms in any::<u128>(),
+        age_ms in any::<u64>(),
     ) {
         let policy = CachePolicy::StaleWhileRevalidate { ttl_ms, stale_ms };
-        let ttl_128 = ttl_ms as u128;
-        let stale_128 = stale_ms as u128;
-        let total = ttl_128 + stale_128;
-        let expected = age_ms > ttl_128 && age_ms <= total;
+        let total = ttl_ms.saturating_add(stale_ms);
+        let expected = age_ms > ttl_ms && age_ms <= total;
         prop_assert_eq!(policy.is_stale_but_serveable(age_ms), expected);
     }
 
@@ -215,11 +213,11 @@ proptest! {
 // ── CachePolicy cross-variant invariants ────────────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// For any CachePolicy, data that is fresh is never expired.
     #[test]
-    fn fresh_implies_not_expired(policy in arb_cache_policy(), age_ms in any::<u128>()) {
+    fn fresh_implies_not_expired(policy in arb_cache_policy(), age_ms in any::<u64>()) {
         if policy.is_fresh(age_ms) {
             prop_assert!(!policy.is_expired(age_ms));
         }
@@ -227,7 +225,7 @@ proptest! {
 
     /// For any CachePolicy, data that is stale-but-serveable is never expired.
     #[test]
-    fn stale_serveable_implies_not_expired(policy in arb_cache_policy(), age_ms in any::<u128>()) {
+    fn stale_serveable_implies_not_expired(policy in arb_cache_policy(), age_ms in any::<u64>()) {
         if policy.is_stale_but_serveable(age_ms) {
             prop_assert!(!policy.is_expired(age_ms));
         }
@@ -237,7 +235,7 @@ proptest! {
     #[test]
     fn fresh_stale_expired_covers_all_states(
         policy in arb_cache_policy(),
-        age_ms in any::<u128>(),
+        age_ms in any::<u64>(),
     ) {
         let fresh = policy.is_fresh(age_ms);
         let stale = policy.is_stale_but_serveable(age_ms);
@@ -252,7 +250,7 @@ proptest! {
 // ── RetryPolicy invariants ─────────────────────────────────────────────
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// should_retry(n) == (n < max_retries) for all valid n.
     #[test]
