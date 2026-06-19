@@ -96,7 +96,11 @@ pub(super) mod vec_deque_serde {
     {
         let mut seq = serializer.serialize_seq(Some(deque.len()))?;
         for item in deque {
-            seq.serialize_element(item)?;
+            // Serialize the inner `T` directly (`&**item`) rather than the
+            // `Arc<T>`. This avoids requiring `Arc<T>: Serialize` (which is only
+            // available with serde's `rc` feature / certain configs) and keeps
+            // the wire format identical to the old `Vec<T>` representation.
+            seq.serialize_element(&**item)?;
         }
         seq.end()
     }
