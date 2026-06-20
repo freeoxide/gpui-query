@@ -111,14 +111,12 @@ fn test_dehydrated_state_default_and_construction(_cx: &mut TestAppContext) {
         key: "users".to_string(),
         type_id: std::any::TypeId::of::<(String, QueryError)>(),
         kind: "query",
-        data_json: Some(r#""hello""#.to_string()),
     };
     let state = DehydratedState {
         entries: vec![entry],
     };
     assert_eq!(state.entries.len(), 1);
     assert_eq!(state.entries[0].key, "users");
-    assert_eq!(state.entries[0].data_json.as_deref(), Some(r#""hello""#));
 }
 
 // -- 28. Hydrate is a no-op (placeholder API) --------------------------------
@@ -133,7 +131,6 @@ fn test_hydrate_is_noop(cx: &mut TestAppContext) {
                     key: "test".to_string(),
                     type_id: std::any::TypeId::of::<(String, QueryError)>(),
                     kind: "query",
-                    data_json: None,
                 }],
             };
             // hydrate is a placeholder — should not panic

@@ -35,7 +35,7 @@ pub use devtools::{
 pub use erased::{current_time_ms, QueryPersister};
 pub use infinite_bucket::InfiniteQueryBucket;
 pub use mutation_bucket::MutationBucket;
-pub use observer::{InfiniteQueryObserver, MutationObserver, ObserverConfig, QueryObserver};
+pub use observer::{InfiniteQueryObserver, MutationObserver, ObservableResource, Observer, ObserverConfig, QueryObserver};
 pub use prepared_fetch::PreparedFetch;
 
 use std::any::TypeId;
@@ -312,6 +312,35 @@ impl QueryClient {
     ) -> Option<T> {
         let entity = self.query::<T, E>(key)?;
         entity.read_with(cx, |resource, _| resource.data().cloned())
+    }
+
+    /// Read the cached data for a query key via a borrow callback, with NO
+    /// clone of `T` (audit fix #L12).
+    ///
+    /// This is the zero-clone counterpart to [`get_query_data`](Self::get_query_data):
+    /// instead of returning `Option<T>` (which clones the value out of the
+    /// resource), it hands `f` a `&T` for the duration of the call. Use this
+    /// when the caller only needs to *inspect* the cached data (e.g. compute a
+    /// derived value, render a summary) and would otherwise pay for a full
+    /// `T::clone()` it discards immediately.
+    ///
+    /// Returns `None` if no resource exists for the key, the entity was
+    /// collected, or the resource has no data. Returns `Some(R)` (the value
+    /// produced by `f`) otherwise. `T` and `E` are unchanged from
+    /// `get_query_data`; `R` is the closure's return type and is independent of
+    /// `T`, so it does not shadow the crate's `T`/`E` conventions.
+    pub fn with_query_data<
+        T: Clone + Send + Sync + 'static,
+        E: Clone + Send + Sync + 'static,
+        R,
+    >(
+        &self,
+        key: &QueryKey,
+        cx: &App,
+        f: impl FnOnce(&T) -> R,
+    ) -> Option<R> {
+        let entity = self.query::<T, E>(key)?;
+        entity.read_with(cx, |resource, _| resource.data().map(f))
     }
 
     /// Write data directly into the cache for a query key, creating the resource

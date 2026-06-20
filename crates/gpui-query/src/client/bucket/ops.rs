@@ -194,6 +194,40 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         self.entries.get_mut(key).map(|e| &mut e.sequencer)
     }
 
+    /// **L9**: shared "collect matching keys -> upgrade weak ref -> per-entry
+    /// action" driver used by `invalidate_matching` / `reset_matching` /
+    /// `cancel_matching` (the erased-trait impls in `erased_ops.rs`).
+    ///
+    /// `remove_matching` is *not* routed through here — it is just
+    /// `HashMap::retain`, with no upgrade or `update`.
+    ///
+    /// The `action` closure receives the upgraded strong entity and the `cx`,
+    /// so each caller chooses its own lock pattern: `invalidate`/`reset` do a
+    /// single unconditional `entity.update`, while `cancel` does a
+    /// `read_with`-then-`update`-only-if-loading (see M7). Semantics are
+    /// byte-identical to the prior inlined loops: same filter, same per-key
+    /// `get` + `upgrade`, same per-entry closure body.
+    pub(crate) fn for_each_matching_entry(
+        &mut self,
+        filter: &crate::core::QueryKeyFilter,
+        cx: &mut App,
+        mut action: impl FnMut(&gpui::Entity<QueryResource<T, E>>, &mut App),
+    ) {
+        let keys: Vec<QueryKey> = self
+            .entries
+            .keys()
+            .filter(|key| filter.matches(key))
+            .cloned()
+            .collect();
+
+        for key in keys {
+            if let Some(entry) = self.entries.get(&key)
+                && let Some(entity) = entry.entity.upgrade() {
+                    action(&entity, cx);
+                }
+        }
+    }
+
     /// Run garbage collection on this bucket.
     ///
     /// Reads entity state directly via `entity.read(cx)` (CL2/#106) rather

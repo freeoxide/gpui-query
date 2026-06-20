@@ -32,6 +32,14 @@ use super::{current_time_ms, read_entity};
 /// Audit fix #2: Accepts an optional `known_key` so callers that already hold
 /// the key avoid re-reading it from the entity; otherwise it is read once here.
 ///
+/// Audit H3: the result now also carries the `Option<QuerySignal>` that
+/// `begin_request` just created, read from the SAME `entity.update` closure.
+/// Callers previously did a SEPARATE `entity.read_with(|r, _| r.signal()…)`
+/// afterwards — this fuses those two reads into one. The returned signal is the
+/// one `begin_request` just created (Started/StaleCacheHit); `CacheHit` /
+/// `IgnoredWhileLoading` return `None` for both slots, matching the prior
+/// "skip the fetch" semantics.
+///
 /// `RequestId` source: when a `QueryClient` global is available, the bucket's
 /// co-located sequencer mints a monotonic `RequestId` (shared with the
 /// imperative `prepare_fetch_query` path, so the two never collide); otherwise
@@ -52,7 +60,7 @@ pub(crate) fn begin_request_on_entity<T, E, C>(
     cx: &mut Context<C>,
     fetch_mode: QueryFetchMode,
     known_key: Option<QueryKey>,
-) -> Option<RequestId>
+) -> (Option<RequestId>, Option<QuerySignal>)
 where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + 'static,
@@ -77,12 +85,27 @@ where
     // Loading transition happen atomically inside this single `entity.update`
     // closure, so a concurrent caller cannot slip a state mutation in between
     // the check and the begin.
+    //
+    // Audit H3: ALSO read `resource.signal().cloned()` inside the SAME closure
+    // for the Started / StaleCacheHit branches (the ones that return a real
+    // `RequestId`), so callers do not need a second read pass to obtain the
+    // signal. For `Started` this is the signal `begin_request` just created;
+    // for the `IgnoreWhileLoading`-active `StaleCacheHit` sub-branch
+    // `begin_request` returns early and reuses the active request, so this is
+    // that existing signal — in both cases the correct one for the caller to
+    // poll for cancellation.
     entity.update(cx, |resource, _cx| {
         match resource.begin_request_with_id(maybe_request_id, now_ms, fetch_mode) {
-            QueryBeginResult::Started { request_id, .. } => Some(request_id),
-            QueryBeginResult::StaleCacheHit { request_id, .. } => Some(request_id),
-            QueryBeginResult::CacheHit => None,
-            QueryBeginResult::IgnoredWhileLoading { .. } => None,
+            QueryBeginResult::Started { request_id, .. } => {
+                let signal = resource.signal().cloned();
+                (Some(request_id), signal)
+            }
+            QueryBeginResult::StaleCacheHit { request_id, .. } => {
+                let signal = resource.signal().cloned();
+                (Some(request_id), signal)
+            }
+            QueryBeginResult::CacheHit => (None, None),
+            QueryBeginResult::IgnoredWhileLoading { .. } => (None, None),
         }
     })
 }

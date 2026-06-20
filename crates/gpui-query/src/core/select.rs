@@ -205,6 +205,18 @@ impl<T, U, E> MappedQueryResource<T, U, E> {
         self.source_data.as_ref().map(|arc| arc.as_ref())
     }
 
+    /// Cheaply hand out the cached source `Arc<T>` as an owned value.
+    ///
+    /// Returns `Option<Arc<T>>` via a refcount bump (`Arc::clone`) — no `T`
+    /// clone. Audit H1: the hook layer uses this to compare the cached source
+    /// against a fresh read WITHOUT cloning `T` on unchanged notifications.
+    /// Because the returned `Arc<T>` is owned, the mapped borrow ends with
+    /// this call, so a subsequent `entity.read_with` does not create the
+    /// nested borrow that audit #115 removed.
+    pub fn source_arc(&self) -> Option<Arc<T>> {
+        self.source_data.clone()
+    }
+
     /// Update the source data from the underlying query resource.
     ///
     /// Call this when the source `QueryResource` changes (fetch completes,

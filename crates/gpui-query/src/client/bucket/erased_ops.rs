@@ -8,7 +8,7 @@ use gpui::App;
 
 use crate::client::devtools::QueryDiagnostic;
 use crate::client::erased::ErasedBucket;
-use crate::core::{QueryKey, QueryKeyFilter, QueryStatus};
+use crate::core::{QueryKeyFilter, QueryStatus};
 
 use super::ops::QueryBucket;
 
@@ -52,39 +52,15 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
     /// the `upgrade()` cost and avoiding upgrades for entities that may have
     /// been collected between collection and update.
     fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        let keys: Vec<QueryKey> = self
-            .entries
-            .keys()
-            .filter(|key| filter.matches(key))
-            .cloned()
-            .collect();
-
-        for key in keys {
-            if let Some(entry) = self.entries.get(&key)
-                && let Some(entity) = entry.entity.upgrade() {
-                    entity.update(cx, |resource, _| {
-                        resource.invalidate();
-                    });
-                }
-        }
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            entity.update(cx, |resource, _| resource.invalidate());
+        });
     }
 
     fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        let keys: Vec<QueryKey> = self
-            .entries
-            .keys()
-            .filter(|key| filter.matches(key))
-            .cloned()
-            .collect();
-
-        for key in keys {
-            if let Some(entry) = self.entries.get(&key)
-                && let Some(entity) = entry.entity.upgrade() {
-                    entity.update(cx, |resource, _| {
-                        resource.reset();
-                    });
-                }
-        }
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            entity.update(cx, |resource, _| resource.reset());
+        });
     }
 
     fn remove_matching(&mut self, filter: &QueryKeyFilter) {
@@ -93,63 +69,56 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
 
     /// Cancel in-flight requests for entries matching the filter.
     ///
-    /// Uses the collect-keys-then-update pattern to avoid mutating the
-    /// `HashMap` during iteration. Only cancels entries that have an
-    /// active request (status is loading).
+    /// **M7 (deliberate trade-off, documented)**: this does a
+    /// `read_with`-then-`update` (two entity lock acquisitions) per match rather
+    /// than a single unconditional `update`. The reason is that
+    /// `entity.update` *always* notifies observers even when the closure mutates
+    /// nothing, so updating every matching entry would spam observers with
+    /// no-op notifications for entries that aren't loading. Instead we read the
+    /// authoritative `is_loading()` flag (the M2 entry `loading` mirror is
+    /// *intentionally not consulted here* — a stale mirror could skip an
+    /// in-flight cancel) and only pay for the `update` when we will actually
+    /// mutate. This is the accepted form of the audit's refined fix (option a/b).
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        let keys: Vec<QueryKey> = self
-            .entries
-            .keys()
-            .filter(|key| filter.matches(key))
-            .cloned()
-            .collect();
-
-        for key in keys {
-            if let Some(entry) = self.entries.get(&key)
-                && let Some(entity) = entry.entity.upgrade() {
-                    let is_loading = entity.read_with(cx, |r, _| r.is_loading());
-                    if is_loading {
-                        entity.update(cx, |resource, _| {
-                            if let Some(signal) = resource.signal() {
-                                signal.cancel();
-                            }
-                            resource.mark_ignored_result();
-                        });
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            let is_loading = entity.read_with(cx, |r, _| r.is_loading());
+            if is_loading {
+                entity.update(cx, |resource, _| {
+                    if let Some(signal) = resource.signal() {
+                        signal.cancel();
                     }
-                }
+                    resource.mark_ignored_result();
+                });
+            }
+        });
+    }
+
+    /// Push each live entry's diagnostic into `out` instead of allocating a
+    /// fresh `Vec`.
+    fn collect_diagnostics_into(&self, now_ms: u64, cx: &App, out: &mut Vec<QueryDiagnostic>) {
+        for (key, entry) in self.entries.iter() {
+            let Some(entity) = entry.entity.upgrade() else { continue };
+            let resource = entity.read(cx);
+            out.push(QueryDiagnostic {
+                key: key.to_path(),
+                status: resource.status(),
+                cache_policy: resource.cache_policy().label(),
+                cache_age_ms: resource.cache_age_ms(now_ms),
+                cache_hits: resource.cache_hits(),
+                retry_count: resource.retry_count(),
+            });
         }
     }
 
-    /// Collect per-resource diagnostic details for all live entries.
-    fn collect_diagnostics(&self, now_ms: u64, cx: &App) -> Vec<QueryDiagnostic> {
-        self.entries
-            .iter()
-            .filter_map(|(key, entry)| {
-                let entity = entry.entity.upgrade()?;
-                let resource = entity.read(cx);
-                Some(QueryDiagnostic {
-                    key: key.to_path(),
-                    status: resource.status(),
-                    cache_policy: resource.cache_policy().label(),
-                    cache_age_ms: resource.cache_age_ms(now_ms),
-                    cache_hits: resource.cache_hits(),
-                    retry_count: resource.retry_count(),
-                })
-            })
-            .collect()
-    }
-
-    /// Lightweight key/status pairs (#9). Avoids the `String` allocations of
+    /// Lightweight key/status pairs (#9). Pushes each live entry's `(key,
+    /// status)` pair into `out`, avoiding the `String` allocations of
     /// `cache_policy`/`retry_count` and the `now_ms` syscall for callers that
     /// only need the key and status (e.g. `dehydrate`).
-    fn collect_key_status(&self, cx: &App) -> Vec<(String, QueryStatus)> {
-        self.entries
-            .iter()
-            .filter_map(|(key, entry)| {
-                let entity = entry.entity.upgrade()?;
-                let resource = entity.read(cx);
-                Some((key.to_path(), resource.status()))
-            })
-            .collect()
+    fn collect_key_status_into(&self, cx: &App, out: &mut Vec<(String, QueryStatus)>) {
+        for (key, entry) in self.entries.iter() {
+            let Some(entity) = entry.entity.upgrade() else { continue };
+            let resource = entity.read(cx);
+            out.push((key.to_path(), resource.status()));
+        }
     }
 }

@@ -343,31 +343,32 @@ impl<
     ///
     /// Iterates all entries, upgrades weak references, reads entity state,
     /// and constructs a `MutationDiagnostic` for each live resource.
-    /// Dead entries (collected entities) are skipped.
-    fn collect_diagnostics(&self, cx: &App) -> Vec<MutationDiagnostic> {
-        self.resources
-            .values()
-            .filter_map(|entry| {
-                let entity = entry.entity.upgrade()?;
-                let resource = entity.read(cx);
-                Some(MutationDiagnostic {
-                    key: resource.key().map(|k| k.to_path()),
-                    status: resource.status(),
-                    retry_count: resource.retry_count(),
-                })
-            })
-            .collect()
+    /// Dead entries (collected entities) are skipped. Pushes each live entry's
+    /// `MutationDiagnostic` into `out` instead of allocating a fresh `Vec`.
+    fn collect_diagnostics_into(&self, cx: &App, out: &mut Vec<MutationDiagnostic>) {
+        for entry in self.resources.values() {
+            let Some(entity) = entry.entity.upgrade() else { continue };
+            let resource = entity.read(cx);
+            out.push(MutationDiagnostic {
+                key: resource.key().map(|k| k.to_path()),
+                status: resource.status(),
+                retry_count: resource.retry_count(),
+            });
+        }
     }
 
-    /// Lightweight key/status pairs (#9). `key` is `None` for keyless mutations.
-    fn collect_key_status(&self, cx: &App) -> Vec<(Option<String>, MutationStatus)> {
-        self.resources
-            .values()
-            .filter_map(|entry| {
-                let entity = entry.entity.upgrade()?;
-                let resource = entity.read(cx);
-                Some((resource.key().map(|k| k.to_path()), resource.status()))
-            })
-            .collect()
+    /// Lightweight key/status pairs (#9). `key` is `None` for keyless
+    /// mutations. Pushes each live entry's `(Option<String>, MutationStatus)`
+    /// pair into `out`.
+    fn collect_key_status_into(
+        &self,
+        cx: &App,
+        out: &mut Vec<(Option<String>, MutationStatus)>,
+    ) {
+        for entry in self.resources.values() {
+            let Some(entity) = entry.entity.upgrade() else { continue };
+            let resource = entity.read(cx);
+            out.push((resource.key().map(|k| k.to_path()), resource.status()));
+        }
     }
 }

@@ -44,11 +44,17 @@ pub(crate) trait ErasedBucket {
     fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
     fn remove_matching(&mut self, filter: &QueryKeyFilter);
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
-    fn collect_diagnostics(&self, now_ms: u64, cx: &gpui::App) -> Vec<QueryDiagnostic>;
-    /// Yield only `(key, status)` pairs for live entries without building full
-    /// `QueryDiagnostic`s (#9). Used by `dehydrate`, which only needs the key
-    /// and status, avoiding the per-entry allocations of `collect_diagnostics`.
-    fn collect_key_status(&self, cx: &gpui::App) -> Vec<(String, QueryStatus)>;
+    /// Push each live entry's diagnostic into the caller-supplied `out` Vec
+    /// instead of allocating a fresh `Vec` per bucket. Callers
+    /// (`QueryClient::diagnostics`) can pre-size a single destination Vec and
+    /// let every bucket push into it, avoiding the per-bucket allocation +
+    /// `extend` a returning variant would force.
+    fn collect_diagnostics_into(&self, now_ms: u64, cx: &gpui::App, out: &mut Vec<QueryDiagnostic>);
+    /// Push each live entry's `(key, status)` pair into `out` without building
+    /// full `QueryDiagnostic`s (#9). Used by `dehydrate`, which only needs the
+    /// key and status, avoiding the per-entry allocations of
+    /// [`collect_diagnostics_into`](ErasedBucket::collect_diagnostics_into).
+    fn collect_key_status_into(&self, cx: &gpui::App, out: &mut Vec<(String, QueryStatus)>);
 }
 
 /// Type-erased infinite query bucket trait.
@@ -61,10 +67,13 @@ pub(crate) trait ErasedInfiniteBucket {
     fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
     fn remove_matching(&mut self, filter: &QueryKeyFilter);
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
-    fn collect_diagnostics(&self, now_ms: u64, cx: &gpui::App) -> Vec<QueryDiagnostic>;
-    /// Yield only `(key, status)` pairs for live entries without building full
-    /// `QueryDiagnostic`s (#9). See [`ErasedBucket::collect_key_status`].
-    fn collect_key_status(&self, cx: &gpui::App) -> Vec<(String, QueryStatus)>;
+    /// Push each live entry's diagnostic into `out`. See
+    /// [`ErasedBucket::collect_diagnostics_into`].
+    fn collect_diagnostics_into(&self, now_ms: u64, cx: &gpui::App, out: &mut Vec<QueryDiagnostic>);
+    /// Push each live entry's `(key, status)` pair into `out` without building
+    /// full `QueryDiagnostic`s (#9). See
+    /// [`ErasedBucket::collect_key_status_into`].
+    fn collect_key_status_into(&self, cx: &gpui::App, out: &mut Vec<(String, QueryStatus)>);
 }
 
 /// Type-erased mutation bucket trait.
@@ -73,11 +82,18 @@ pub(crate) trait ErasedMutationBucket {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &gpui::App);
     fn count(&self) -> usize;
-    fn collect_diagnostics(&self, cx: &gpui::App) -> Vec<MutationDiagnostic>;
-    /// Yield only `(key, status)` pairs for live entries without building full
-    /// `MutationDiagnostic`s (#9). `key` is `None` for keyless mutations,
+    /// Push each live entry's `MutationDiagnostic` into `out` instead of
+    /// allocating a fresh `Vec` per bucket. See
+    /// [`ErasedBucket::collect_diagnostics_into`] for the rationale.
+    fn collect_diagnostics_into(&self, cx: &gpui::App, out: &mut Vec<MutationDiagnostic>);
+    /// Push each live entry's `(key, status)` pair into `out` without building
+    /// full `MutationDiagnostic`s (#9). `key` is `None` for keyless mutations,
     /// mirroring [`MutationDiagnostic::key`]. Used by `dehydrate`.
-    fn collect_key_status(&self, cx: &gpui::App) -> Vec<(Option<String>, MutationStatus)>;
+    fn collect_key_status_into(
+        &self,
+        cx: &gpui::App,
+        out: &mut Vec<(Option<String>, MutationStatus)>,
+    );
 }
 
 /// Persistence adapter trait for query cache persistence across app restarts.
