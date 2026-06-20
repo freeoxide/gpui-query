@@ -1,5 +1,9 @@
 import { type ComponentType } from "react";
 
+import WhyGpuiQueryPost from "../content/blog/why-gpui-query";
+import CooperativeCancellationPost from "../content/blog/cooperative-cancellation";
+import CachePoliciesExplainedPost from "../content/blog/cache-policies-explained";
+
 /* ─── Frontmatter schema ────────────────────────────────────────────── */
 
 export interface BlogFrontmatter {
@@ -17,50 +21,67 @@ export interface BlogPost {
   frontmatter: BlogFrontmatter;
 }
 
-/* ─── Loader ────────────────────────────────────────────────────────── */
+/* ─── Post registry ─────────────────────────────────────────────────── */
 
 /**
- * Eagerly import every blog MDX file. The MDX plugin
- * (remark-mdx-frontmatter) exposes frontmatter keys as named exports,
- * so each module carries `default` (the React component) plus the
- * frontmatter fields directly on the module object.
+ * Static post registry. Blog bodies are authored as TSX components (see
+ * `src/content/blog/*.tsx`) so they prerender cleanly under TanStack Start's
+ * SSR environment. MDX + `import.meta.glob` did not resolve module exports
+ * during prerender, leaving posts empty — TSX components do not have that
+ * problem. Frontmatter lives here alongside the component import.
  */
-const modules = import.meta.glob("../content/blog/*.mdx", { eager: true }) as Record<
-  string,
-  BlogFrontmatter & { default: ComponentType }
->;
-
-function toSlug(path: string): string {
-  return path
-    .split("/")
-    .pop()!
-    .replace(/\.mdx$/, "");
-}
-
-function toPost(key: string, mod: BlogFrontmatter & { default: ComponentType }): BlogPost {
-  const { default: Content, ...frontmatter } = mod;
-  return {
-    slug: toSlug(key),
-    Content,
-    frontmatter: frontmatter as BlogFrontmatter,
-  };
-}
+const POSTS: BlogPost[] = [
+  {
+    slug: "why-gpui-query",
+    Content: WhyGpuiQueryPost,
+    frontmatter: {
+      title: "Why gpui-query",
+      description:
+        "Bringing TanStack Query's battle-tested async state patterns to GPUI and Rust — without the boilerplate.",
+      date: "2026-03-12",
+      author: "hmziqrs",
+      tags: ["gpui", "rust", "async", "introduction"],
+    },
+  },
+  {
+    slug: "cooperative-cancellation",
+    Content: CooperativeCancellationPost,
+    frontmatter: {
+      title: "Cooperative Cancellation in gpui-query",
+      description:
+        "How QuerySignal uses Arc<AtomicBool> to cancel in-flight queries cleanly when components unmount.",
+      date: "2026-04-08",
+      author: "hmziqrs",
+      tags: ["gpui", "rust", "concurrency", "cancellation"],
+    },
+  },
+  {
+    slug: "cache-policies-explained",
+    Content: CachePoliciesExplainedPost,
+    frontmatter: {
+      title: "Cache Policies, Explained",
+      description:
+        "NoCache vs Ttl vs StaleWhileRevalidate — when each CachePolicy variant is the right choice, and how they interact with retries and observers.",
+      date: "2026-05-02",
+      author: "hmziqrs",
+      tags: ["gpui", "rust", "caching", "performance"],
+    },
+  },
+];
 
 /** All blog posts, sorted by date descending. */
 export function getAllBlogPosts(): BlogPost[] {
-  return Object.entries(modules)
-    .map(([key, mod]) => toPost(key, mod))
-    .sort(
-      (a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime(),
-    );
+  return [...POSTS].sort(
+    (a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime(),
+  );
 }
 
 /** Look up a single post by its slug (filename without extension). */
 export function getBlogBySlug(slug: string): BlogPost | undefined {
-  return getAllBlogPosts().find((post) => post.slug === slug);
+  return POSTS.find((post) => post.slug === slug);
 }
 
 /** Slugs only — handy for prerendering and feeds. */
 export function getBlogSlugs(): string[] {
-  return getAllBlogPosts().map((post) => post.slug);
+  return POSTS.map((post) => post.slug);
 }

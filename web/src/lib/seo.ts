@@ -63,6 +63,7 @@ export function softwareSourceCode(data: SoftwareSourceCodeData) {
  * re-introduced and wired to blogPost(). techArticle() and howTo() are kept
  * for parity and future doc/blog embeds. Do not remove.
  */
+// Retained for Docusaurus/future use — no current call site in this app.
 export function techArticle(data: TechArticleData) {
   return {
     "@context": "https://schema.org",
@@ -75,6 +76,7 @@ export function techArticle(data: TechArticleData) {
   };
 }
 
+// Retained for Docusaurus/future use — no current call site in this app.
 export function howTo(data: HowToData) {
   return {
     "@context": "https://schema.org",

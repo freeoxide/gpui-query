@@ -2,13 +2,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { getAllBlogPosts, getBlogBySlug, type BlogPost } from "#/lib/blog";
+import { getAllBlogPosts, getBlogBySlug, type BlogFrontmatter } from "#/lib/blog";
+import { blogPost } from "#/lib/seo";
 
 /* ─── Route ─────────────────────────────────────────────────────────── */
 
 export const Route = createFileRoute("/blog/$slug")({
   head: ({ loaderData }) => {
-    const post = loaderData as BlogPost | undefined;
+    const post = loaderData as { slug: string; frontmatter: BlogFrontmatter } | undefined;
     const siteUrl = "https://gpui-query.hmziq.xyz";
     if (!post) {
       return {
@@ -33,9 +34,31 @@ export const Route = createFileRoute("/blog/$slug")({
         { name: "twitter:description", content: fm.description },
       ],
       links: [{ rel: "canonical", href: url }],
+      scripts: [
+        {
+          type: "application/ld+json",
+          children: JSON.stringify(
+            blogPost({
+              headline: fm.title,
+              description: fm.description,
+              author: fm.author,
+              datePublished: fm.date,
+              url,
+              image: `${siteUrl}/og-image.png`,
+            }),
+          ),
+        },
+      ],
     };
   },
-  loader: async ({ params }) => getBlogBySlug(params.slug),
+  // Loader returns ONLY serializable data (slug + frontmatter). The MDX
+  // `Content` component is non-serializable, so passing it through the loader
+  // corrupts loaderData during prerender dehydrate/rehydrate (empty render +
+  // hydration invariant). The component resolves `Content` itself below.
+  loader: async ({ params }) => {
+    const post = getBlogBySlug(params.slug);
+    return post ? { slug: post.slug, frontmatter: post.frontmatter } : undefined;
+  },
   component: BlogPostPage,
   notFoundComponent: PostNotFound,
 });
@@ -51,7 +74,10 @@ function formatDate(iso: string): string {
 /* ─── Page ──────────────────────────────────────────────────────────── */
 
 function BlogPostPage() {
-  const post = Route.useLoaderData() as BlogPost | undefined;
+  const data = Route.useLoaderData() as { slug: string; frontmatter: BlogFrontmatter } | undefined;
+  if (!data) return <PostNotFound />;
+  // Resolve the (non-serializable) MDX component at render time.
+  const post = getBlogBySlug(data.slug);
   if (!post) return <PostNotFound />;
 
   const { Content, frontmatter } = post;
