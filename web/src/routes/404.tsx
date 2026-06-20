@@ -10,7 +10,23 @@ export const Route = createFileRoute("/404")({
         name: "description",
         content: "The page you are looking for does not exist.",
       },
+      { property: "og:title", content: "Page Not Found - gpui-query" },
+      {
+        property: "og:description",
+        content: "The page you are looking for does not exist.",
+      },
+      { property: "og:type", content: "website" },
+      { property: "og:url", content: "https://gpui-query.hmziq.xyz/404" },
+      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { name: "robots", content: "noindex" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "Page Not Found - gpui-query" },
+      {
+        name: "twitter:description",
+        content: "The page you are looking for does not exist.",
+      },
     ],
+    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/404" }],
   }),
   component: NotFoundPage,
 });

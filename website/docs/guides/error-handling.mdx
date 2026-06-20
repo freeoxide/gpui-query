@@ -1,11 +1,170 @@
 ---
 sidebar_position: 2
 title: Error Handling
-description: Patterns for handling errors in queries and mutations
+description: QueryError, QueryErrorKind, retry, and how to sanitize errors before they reach logs
 ---
 
-This page is coming soon. Check back when GPUI Curie is ready for documentation.
+gpui-query treats errors as first-class state. A failed fetch does not throw — the error is stored on the resource alongside the data, surfaced through `error()`, and matched by kind. The default error type `QueryError` implements `Display + Error` so it composes with `?` and libraries like `anyhow`.
 
-:::tip
-Discover how gpui-query surfaces errors and the patterns for graceful degradation.
+## Where errors live
+
+Every `QueryResource<T, E>` (and every `InfiniteQueryResource<T, E>` / `MutationResource<V, T, E>`) is generic over an error type `E`. You choose `E` when you call the hook:
+
+```rust
+use gpui_query::QueryError;          // the built-in error type
+use gpui_query::hook::use_query;
+
+# fn _doc(cx: &mut gpui::Context<()>) {
+let (users, _) = use_query::<Vec<String>, QueryError, _, _, _>(
+    "users",
+    |_signal| async move {
+        // Return Err(QueryError::...) here.
+        Ok(vec![])
+    },
+    cx,
+);
+# }
+```
+
+Read the current error and status from the entity:
+
+```rust
+# use gpui_query::QueryError;
+# fn doc(users: &gpui::Entity<gpui_query::QueryResource<Vec<String>, QueryError>>, cx: &gpui::App) {
+let r = users.read(cx);
+match (r.status(), r.error()) {
+    (gpui_query::QueryStatus::Failure, Some(e)) => { /* show e */ }
+    _ => { /* loading or success */ }
+}
+# }
+```
+
+When a query transitions to `Failure`, previously loaded data is **not** discarded — `data()` may still return the last successful value. This lets you render stale data alongside the error, the same way [infinite queries](/api/infinite-queries) keep their pages on a failed page fetch.
+
+## QueryError
+
+`QueryError` is the recommended default. It is `Clone` (the message is an `Arc<str>`, so cloning is cheap — suitable for high-retry scenarios), `PartialEq`, `Eq`, and `Debug`. It implements `std::error::Error`:
+
+```rust
+use gpui_query::QueryError;
+
+let err = QueryError::response("not found");
+assert_eq!(err.to_string(), "response error: not found");
+
+// Works with `?` and anyhow.
+fn do_thing() -> Result<(), QueryError> {
+    Err(QueryError::transport("connection refused"))
+}
+```
+
+Four constructors give you a typed error in one call:
+
+| Constructor       | Kind           | Use for                                   |
+| ----------------- | -------------- | ---------------------------------------- |
+| `QueryError::response(msg)`   | `Response`  | The server returned an error (4xx/5xx).  |
+| `QueryError::transport(msg)`  | `Transport` | Network failure, timeout, DNS.           |
+| `QueryError::cancelled(msg)`  | `Cancelled` | The request was cooperatively cancelled.  |
+| `QueryError::unknown(msg)`    | `Unknown`   | Anything that does not fit above.        |
+
+## QueryErrorKind
+
+Each `QueryError` carries a `QueryErrorKind` so callers can branch on the category without parsing the message:
+
+```rust
+use gpui_query::{QueryError, QueryErrorKind};
+
+match err.kind() {
+    QueryErrorKind::Cancelled => { /* request was superseded; ignore */ }
+    QueryErrorKind::Transport => { /* show "network error, retry" */ }
+    QueryErrorKind::Response  => { /* show the server's message */ }
+    QueryErrorKind::Unknown   => { /* generic failure UI */ }
+}
+```
+
+`QueryErrorKind` is `Serialize + Deserialize`, so the kind survives a dehydrate/hydrate round-trip (see [Persistence](/guides/persistence)).
+
+## Cancellation
+
+gpui-query uses cooperative cancellation: every fetcher receives a `QuerySignal`, and when a newer request supersedes an in-flight one (`RequestPolicy::LatestWins`), the old signal is cancelled. Cancellation surfaces as a `QueryErrorKind::Cancelled` error and a `QueryStatus::Cancelled` status — not a panic.
+
+The two-phase completion protocol (`accept_current_request` + guard) is the authoritative protection against stale writes. You do **not** need to check `signal.is_cancelled()` after your fetcher returns; the resource will reject the result of a superseded request automatically. See the [Quick start](/getting-started/quick-start) for the signal's role in fetchers.
+
+:::note
+`Cancelled` is usually a status you can ignore in the UI. It means "a newer request replaced this one," not "the user's request failed." Branch on it and render the loading state instead of an error.
 :::
+
+## Retry
+
+Failures are retried automatically according to the resource's [`RetryPolicy`](/guides/retry). The default is **3 retries with exponential backoff** (1s base, 30s cap). The retry counter increments between attempts, but the status stays `Loading` during retries — so the [`Observer`](/advanced/observers) does not trigger a re-render on every retry tick, only on the terminal status change.
+
+Configure retry per-query through options:
+
+```rust
+use gpui_query::{QueryOptions, RetryPolicy};
+use gpui_query::hook::use_query;
+
+# fn _doc(cx: &mut gpui::Context<()>) {
+let (_entity, _) = use_query(
+    QueryOptions::new("flaky")
+        .retry_policy(RetryPolicy::new(5).with_delay(500).with_exponential_backoff()),
+    |_signal| async move { Ok::<_, gpui_query::QueryError>(vec![]) },
+    cx,
+);
+# }
+```
+
+Mutations default to **no retries** — destructive operations should not fire repeatedly without explicit opt-in. Set a retry policy via `MutationOptions::retry_policy` when you need one.
+
+## Sanitizing errors
+
+`QueryError` stores its message verbatim. That message may appear in logs, [DevTools](/advanced/devtools) diagnostics, and serialized output. If you build a `QueryError` from a server response, sanitize it first — server messages routinely leak connection strings, bearer tokens, file paths, and emails.
+
+`QueryError::sanitized()` returns a copy with known sensitive patterns redacted and the message truncated to a safe length:
+
+```rust
+use gpui_query::QueryError;
+
+let raw = QueryError::transport("connect postgres://user:s3cret@host/db failed");
+let clean = raw.sanitized();
+
+assert!(!clean.message().contains("s3cret"));
+assert!(clean.message().contains("[REDACTED_CONNECTION]"));
+```
+
+It redacts:
+
+- Database connection strings (`postgres://`, `mysql://`, …)
+- Bearer / token headers (`Bearer …`, `token=…`)
+- File paths (`/home/…`, `/Users/…`, `/etc/…`)
+- Email-like strings
+- Long hex runs (likely API keys)
+
+and preserves the `kind()` across the redaction.
+
+:::warning
+Call `sanitized()` at the boundary where you convert a server response into a `QueryError`. Once the raw message is on the resource, it can flow into diagnostics, dehydrate snapshots, and observers before you have a chance to redact.
+:::
+
+## Mapping server errors
+
+A common pattern is to map your HTTP client's error into a `QueryError` inside the fetcher, sanitizing on the way in:
+
+```rust
+use gpui_query::QueryError;
+
+async fn fetch_users() -> Result<Vec<String>, QueryError> {
+    match my_http_client::get("/users").await {
+        Ok(resp) if resp.status.is_success() => Ok(resp.body),
+        Ok(resp) => Err(QueryError::response("request failed").sanitized()),
+        Err(e)   => Err(QueryError::transport(e.to_string()).sanitized()),
+    }
+}
+```
+
+You can also keep your own error type for `E` — the only bounds are `Clone + Send + Sync + Debug + 'static`. Use `QueryError` when you want built-in sanitization and ecosystem interop; use a custom type when you need structured fields your UI matches on directly.
+
+## Next steps
+
+- [Retry](/guides/retry) — `RetryPolicy` in depth.
+- [Persistence](/guides/persistence) — how errors round-trip through dehydrate/hydrate.
+- [DevTools](/advanced/devtools) — `QueryDiagnostic` surfaces the retry count and status.

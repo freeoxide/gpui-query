@@ -56,7 +56,6 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
       try {
         // Dynamic non-literal path to bypass Vite import analysis
         const pagefindPath = ["/pagefind", "pagefind.js"].join("/");
-        // @ts-expect-error Pagefind is loaded at runtime
         const pf = await import(/* @vite-ignore */ pagefindPath);
         await pf.init();
         setPagefind(pf);

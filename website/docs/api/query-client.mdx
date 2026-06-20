@@ -1,11 +1,171 @@
 ---
 sidebar_position: 4
 title: QueryClient
-description: API reference for the QueryClient singleton
+description: The global registry for queries, mutations, and bulk cache operations
 ---
 
-This page is coming soon. Check back when GPUI Curie is ready for documentation.
+`QueryClient` is the central coordinator. It is a GPUI `Global` that holds type-partitioned buckets for queries, infinite queries, and mutations, and exposes the bulk operations (`invalidate`, `cancel`, `reset`, `remove`), garbage collection, diagnostics, and serialization.
 
-:::tip
-The QueryClient is the central coordinator that manages caches, queries, and mutations.
-:::
+## Setting it up
+
+Set the client once during app setup. From then on, the hooks route resource creation through it for shared caching, deduplication, and GC:
+
+```rust
+cx.set_global(gpui_query::QueryClient::new());
+```
+
+Customize the default policies and the GC window with builders:
+
+```rust
+use gpui_query::{QueryClient, CachePolicy};
+use gpui_query::core::RequestPolicy;
+
+let client = QueryClient::with_policies(
+    CachePolicy::Ttl { ttl_ms: 120_000 },
+    RequestPolicy::LatestWins,
+)
+.with_gc_time(600_000); // 10 minutes
+```
+
+If a hook runs without a `QueryClient` set, it falls back to a standalone entity (no shared caching, no GC) and prints a debug-mode warning.
+
+## Resource access
+
+Get or create a resource for a key. Resources are partitioned by `TypeId` of `(T, E)`, so the same key with different type pairs is a different resource:
+
+```rust
+use gpui_query::QueryClient;
+# fn _doc(client: &mut QueryClient, cx: &mut gpui::App) {
+# use gpui_query::QueryResource;
+# #[derive(Clone)] struct User;
+# #[derive(Clone, Debug)] struct E;
+
+// Get or create with default policies.
+let entity = client.resource::<User, E>("users/42", cx);
+
+// Or with explicit policies.
+let entity = client.resource_with_policies::<User, E>(
+    "users/42",
+    gpui_query::CachePolicy::Ttl { ttl_ms: 60_000 },
+    gpui_query::core::RequestPolicy::LatestWins,
+    cx,
+);
+
+// Read an existing resource without creating one.
+let existing = client.query::<User, E>(&"users/42".into());
+# }
+```
+
+## Reading and seeding data
+
+Direct cache access for optimistic updates and manual cache manipulation:
+
+```rust
+use gpui_query::QueryClient;
+# fn _doc(client: &mut QueryClient, cx: &mut gpui::App) {
+# #[derive(Clone)] struct User;
+# #[derive(Clone, Debug)] struct E;
+
+// Read cached data (returns a clone of T).
+let cached: Option<User> = client.get_query_data::<User, E>(&"users/42".into(), cx);
+
+// Inspect without cloning — f gets &T for the duration of the call.
+let count = client.with_query_data::<Vec<User>, E, _>(
+    &"users".into(),
+    cx,
+    |users| users.len(),
+);
+
+// Seed the cache directly (for optimistic updates / hydration).
+client.set_query_data::<User, E>("users/42", User, cx);
+# }
+```
+
+`set_query_data` writes data directly, creating the resource if needed. The previous data is saved for `rollback_to_previous()`; status and timestamp are not changed.
+
+## Bulk operations
+
+All bulk operations take a [`QueryKeyFilter`](/guides/query-keys):
+
+| Method                | Effect                                                              |
+| --------------------- | ------------------------------------------------------------------ |
+| `invalidate_queries`  | Mark matching queries stale so they refetch on next access.        |
+| `cancel_queries`      | Cancel in-flight requests for matching keys with a `Cancelled` error. |
+| `reset_queries`       | Clear data **and** cancel in-flight requests for matching keys.    |
+| `remove_queries`      | Remove matching resources from the cache entirely.                 |
+
+```rust
+use gpui_query::QueryClient;
+use gpui_query::core::{QueryKey, QueryKeyFilter};
+# fn _doc(client: &mut QueryClient, cx: &mut gpui::App) {
+let users = QueryKey::from(["users"]);
+
+client.invalidate_queries(&QueryKeyFilter::Prefix(&users), cx);
+client.cancel_queries(&QueryKeyFilter::Prefix(&users), cx);
+client.reset_queries(&QueryKeyFilter::All, cx);     // logout: clear + cancel everything
+client.remove_queries(&QueryKeyFilter::All);        // logout: drop cache entirely
+# }
+```
+
+## Imperative fetch and prefetch
+
+When you need to fetch without subscribing (cache warming, background refresh):
+
+```rust
+use gpui_query::QueryClient;
+use gpui_query::core::QueryKey;
+use gpui_query::{CachePolicy, core::RequestPolicy};
+# fn _doc(client: &mut QueryClient, cx: &mut gpui::App) {
+# #[derive(Clone)] struct User;
+# #[derive(Clone, Debug)] struct E;
+
+// fetchQuery — forced fetch, ignores cache freshness.
+if let Some(prepared) = client.prepare_fetch_query::<User, E>(
+    QueryKey::from("users/42"),
+    cx,
+) {
+    // prepared.entity, prepared.signal, prepared.request_id are set.
+    // Run your fetcher in cx.spawn, then call prepared.complete_success / complete_failure.
+}
+
+// prefetchQuery — respects cache policy, skips if fresh.
+if let Some(prepared) = client.prepare_prefetch_query::<User, E>(
+    QueryKey::from("users/42"),
+    CachePolicy::Ttl { ttl_ms: 60_000 },
+    RequestPolicy::LatestWins,
+    cx,
+) {
+    // As above: run the fetcher and complete the prepared request.
+}
+# }
+```
+
+Both return `Option<PreparedFetch<T, E>>` — `None` means no fetch is needed (cache hit on prefetch, or the resource could not be created). The caller is responsible for running the fetcher and completing the request, so these compose with whatever async runtime your fetcher uses.
+
+## Garbage collection
+
+GC runs opportunistically — every `GC_INTERVAL` operations, debounced by a minimum wall-clock gap — so dead entries are evicted without manual calls. For a forced sweep:
+
+```rust
+use gpui_query::client::QueryPersister;
+# fn _doc(client: &mut gpui_query::QueryClient, cx: &gpui::App) {
+client.gc(cx);
+
+// Avoid a syscall if you already have the time:
+let now_ms = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+client.gc_with_time(now_ms, cx);
+# }
+```
+
+Resources in `Idle` or `Failure` state with no live observers are eligible for eviction once `gc_time_ms` has elapsed. Loading and Success resources with live observers are retained.
+
+## Diagnostics and serialization
+
+See [DevTools](/advanced/devtools) for `diagnostics()`, and [Persistence](/guides/persistence) for `dehydrate()` / `hydrate()` / `persist()` / `restore()` and the `QueryPersister` trait.
+
+## Next steps
+
+- [Query keys](/guides/query-keys) — `QueryKeyFilter` in depth.
+- [DevTools](/advanced/devtools) — `ClientDiagnostic` / `QueryDiagnostic`.
+- [Persistence](/guides/persistence) — `QueryPersister` and dehydrate/hydrate.

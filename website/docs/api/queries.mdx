@@ -1,11 +1,156 @@
 ---
 sidebar_position: 1
 title: Queries
-description: API reference for defining and using queries
+description: Define and subscribe to queries with use_query
 ---
 
-This page is coming soon. Check back when GPUI Curie is ready for documentation.
+Queries are the core primitive of gpui-query. A query describes how to fetch some data and is cached, deduplicated, and retried automatically. This page covers `use_query` — the primary hook — and the `QueryResource` it returns.
 
-:::tip
-Queries are the core primitive of gpui-query. They describe how to fetch data and are cached automatically.
-:::
+## use_query
+
+`use_query` takes options (or just a key), a fetcher, and the view context. It returns a `(Entity<QueryResource<T, E>>, Subscription)` tuple. Store both: the entity is your handle to the data, the subscription keeps the observation alive.
+
+```rust
+use gpui_query::hook::use_query;
+use gpui_query::QueryError;
+# #[derive(Clone)]
+# struct User;
+# struct MyView {
+#     users: gpui::Entity<gpui_query::QueryResource<Vec<User>, QueryError>>,
+#     _sub: gpui::Subscription,
+# }
+
+impl MyView {
+    fn new(cx: &mut gpui::Context<Self>) -> Self {
+        let (users, sub) = use_query(
+            "users",
+            |_signal| async move { Ok::<_, QueryError>(vec![]) },
+            cx,
+        );
+        Self { users, _sub: sub }
+    }
+}
+```
+
+### Fetcher signature
+
+The fetcher receives a `QuerySignal` for cooperative cancellation and returns `Result<T, E>`:
+
+```rust
+|signal: QuerySignal| async move {
+    // Check signal.is_cancelled() in long-running fetches
+    // if you want to bail out early. The two-phase completion
+    // protocol also rejects stale results automatically.
+    Ok::<T, E>(value)
+}
+```
+
+The signal is the v2 "signal-always" design: every fetcher gets one. A newer fetch that supersedes this one cancels the old signal, and the resource's `accept_current_request` guard discards the old result. You do not need to check the signal manually unless your fetch is long-running and you want to abort early.
+
+### Options-first
+
+Pass a bare string for the simple case, or `QueryOptions` to configure caching, retry, and request behavior:
+
+```rust
+use gpui_query::{QueryOptions, CachePolicy, RetryPolicy};
+use gpui_query::core::RequestPolicy;
+
+// Just a key:
+let (a, _) = use_query("users", |_s| async { Ok::<_, QueryError>(vec![]) }, cx);
+
+// Full options:
+let (b, _) = use_query(
+    QueryOptions::new("users")
+        .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
+        .retry_policy(RetryPolicy::new(5).with_exponential_backoff())
+        .request_policy(RequestPolicy::LatestWins),
+    |_s| async { Ok::<_, QueryError>(vec![]) },
+    cx,
+);
+```
+
+See [Caching](/guides/caching), [Retry](/guides/retry), and [Error handling](/guides/error-handling) for the policy details.
+
+## Reading the resource
+
+A `QueryResource<T, E>` is a GPUI entity. Read it inside render or event handlers via `entity.read(cx)`:
+
+```rust
+# use gpui_query::{QueryResource, QueryStatus, QueryError};
+# fn doc(users: &gpui::Entity<QueryResource<Vec<String>, QueryError>>, cx: &gpui::App) {
+let r = users.read(cx);
+
+match r.status() {
+    QueryStatus::Idle | QueryStatus::LoadingEmpty => { /* spinner */ }
+    QueryStatus::Success => {
+        if let Some(data) = r.data() { /* render data */ }
+    }
+    QueryStatus::Failure => {
+        if let Some(e) = r.error() { /* render error */ }
+    }
+    _ => {}
+}
+
+// Convenience predicates:
+let _loading = r.is_loading();   // LoadingEmpty | LoadingWithData
+let _pending = r.is_pending();   // Idle | LoadingEmpty
+# }
+```
+
+Common accessors:
+
+| Method              | Returns             | Notes                                      |
+| ------------------- | ------------------- | ----------------------------------------- |
+| `status()`          | `QueryStatus`       | The lifecycle state.                      |
+| `data()`            | `Option<&T>`        | Current data, borrowed.                   |
+| `error()`           | `Option<&E>`        | Current error, borrowed.                  |
+| `is_loading()`      | `bool`              | First fetch or refetch.                   |
+| `is_pending()`      | `bool`              | No data yet and loading (TanStack `isPending`). |
+| `key()`             | `&QueryKey`         | The cache key.                            |
+| `cache_policy()`    | `CachePolicy`       | The active cache policy.                  |
+| `retry_count()`     | `u32`               | Retries on the current/last fetch.        |
+| `last_updated_at_ms()` | `Option<u64>`    | When data was last written.               |
+
+## Refetching
+
+Call `fetch_query` to refetch on demand — from a button, a timer, or a pull-to-refresh gesture. It respects the resource's retry policy and is a no-op if the cache is fresh:
+
+```rust
+use gpui_query::hook::fetch_query;
+# fn doc(users: &gpui::Entity<gpui_query::QueryResource<Vec<String>, gpui_query::QueryError>>, cx: &mut gpui::Context<()>) {
+fetch_query(users, || async { Ok::<_, gpui_query::QueryError>(vec![]) }, cx);
+# }
+```
+
+Use `fetch_query_with_signal` when the fetcher needs the cancellation signal.
+
+## Manual / unsignalled variants
+
+Two lower-level entry points exist for cases where the options-first hook does not fit:
+
+- `use_query_manual` / `use_query_manual_opts` — accept the key, cache policy, and request policy as separate parameters, with explicit signal handling.
+- `use_query_unsignalled` / `use_query_unsignalled_opts` — the fetcher signature is `Fn() -> Fut` (no signal). Provided for backward compatibility; the signal-accepting `use_query` is the recommended default.
+
+## Lifecycle
+
+A query transitions through these statuses:
+
+```
+Idle → LoadingEmpty → Success
+                    ↘ Failure
+Success → LoadingWithData → Success
+                            ↘ Failure
+any → Cancelled (cooperative cancellation)
+```
+
+The [`QueryObserver`](/advanced/observers) deduplicates re-renders by status, so your view re-renders only on these transitions — not on internal mutations like `increment_retry()`.
+
+## What is not yet wired
+
+A few `QueryOptions` fields are reserved for forward-compatibility and have **no effect today**: `keep_previous` (keepPreviousData), `refetch_on_mount`, `refetch_on_window_focus`, and `refetch_on_reconnect`. The GPUI event-system integration for automatic refetching is not yet implemented; setting these builders is harmless but does not change behavior. The `gc_time(ms)` per-query builder is likewise stored but not consumed — GC currently runs off the global `QueryClient::with_gc_time`.
+
+## Next steps
+
+- [Mutations](/api/mutations) — create/update/delete with cache invalidation.
+- [Infinite queries](/api/infinite-queries) — pagination and load-more.
+- [Query keys](/guides/query-keys) — how resources are addressed.

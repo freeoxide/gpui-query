@@ -6,6 +6,6 @@
   "main": "@tanstack/react-start/server-entry",
   "assets": {
     "directory": "./dist/client",
-    "binding": "ASSETS"
-  }
+    "binding": "ASSETS",
+  },
 }

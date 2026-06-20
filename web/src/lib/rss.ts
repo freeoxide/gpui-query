@@ -1,11 +1,11 @@
-import { getBlogPosts } from "./content";
+import { getAllBlogPosts, type BlogPost } from "./blog";
 
 export function generateRssFeed(): string {
-  const posts = getBlogPosts();
+  // getAllBlogPosts() is already sorted by date descending.
+  const posts: BlogPost[] = getAllBlogPosts();
   const siteUrl = "https://gpui-query.hmziq.xyz";
 
   const items = posts
-    .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime())
     .map(
       (post) => `    <item>
       <title><![CDATA[${post.frontmatter.title}]]></title>
@@ -24,6 +24,7 @@ export function generateRssFeed(): string {
     <link>${siteUrl}/blog</link>
     <description>Async state management for GPUI</description>
     <language>en-us</language>
+    <atom:link href="${siteUrl}/rss.xml" rel="self" type="application/rss+xml" />
     <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
     <ttl>60</ttl>
 ${items}

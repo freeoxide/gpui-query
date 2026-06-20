@@ -1,11 +1,154 @@
 ---
 sidebar_position: 2
 title: Mutations
-description: API reference for creating and dispatching mutations
+description: Create, update, and delete data with use_mutation and mutate
 ---
 
-This page is coming soon. Check back when GPUI Curie is ready for documentation.
+Mutations handle side effects — creating, updating, deleting data. Unlike a query, a mutation is an imperative action you trigger on demand (a button click, a form submit). gpui-query tracks the mutation's lifecycle, retries it on failure when you opt in, and fires lifecycle callbacks on the terminal outcome.
 
-:::tip
-Mutations handle side effects like creating, updating, and deleting data with automatic cache invalidation.
+## use_mutation
+
+`use_mutation` creates a `MutationResource<V, T, E>` entity and subscribes to it. `V` is the variables you pass in, `T` is the success result, `E` the error. It returns the entity and the subscription to store.
+
+```rust
+use gpui_query::hook::{use_mutation, mutate};
+use gpui_query::{MutationResource, MutationOptions};
+# #[derive(Clone)] struct NewUser { name: String }
+# #[derive(Clone)] struct User;
+# #[derive(Clone, Debug)] struct MyError;
+
+struct MyView {
+    create_user: gpui::Entity<MutationResource<NewUser, User, MyError>>,
+    _sub: gpui::Subscription,
+}
+
+impl MyView {
+    fn new(cx: &mut gpui::Context<Self>) -> Self {
+        // () desugars to MutationOptions::default() (no retries).
+        let (entity, sub) = use_mutation((), cx);
+        Self { create_user: entity, _sub: sub }
+    }
+
+    fn handle_submit(&mut self, name: String, cx: &mut gpui::Context<Self>) {
+        mutate(
+            &self.create_user,
+            NewUser { name },
+            |vars| async move { Ok::<_, MyError>(User) },
+            cx,
+        );
+    }
+}
+```
+
+## Triggering: mutate and friends
+
+Four functions trigger a mutation, differing in how variables are passed and whether callbacks are supplied:
+
+| Function                | Mutator signature     | Notes                                                |
+| ----------------------- | --------------------- | --------------------------------------------------- |
+| `mutate`                | `Fn(V) -> Fut`        | The primary entry point. Owns `V` per attempt.      |
+| `mutate_with_callbacks` | `Fn(V) -> Fut`        | Adds `on_success` / `on_error` / `on_settled`.       |
+| `mutate_by_ref`         | `Fn(&V) -> Fut`       | Borrows `V` on retries — no per-attempt clone.       |
+| `mutate_arc`            | `Fn(&V) -> Fut`       | Accepts `Arc<V>` to share variables across callers.   |
+
+```rust
+use gpui_query::hook::{mutate, mutate_with_callbacks};
+use gpui_query::MutationCallbacks;
+
+// With lifecycle callbacks.
+mutate_with_callbacks(
+    &self.create_user,
+    NewUser { name },
+    |vars| async move { Ok::<_, MyError>(User) },
+    MutationCallbacks::new()
+        .on_success(|_user: &User| { /* e.g. navigate away */ })
+        .on_error(|e: &MyError| { /* show toast */ }),
+    cx,
+);
+```
+
+Callbacks fire on the **terminal** outcome (after all retries exhausted or first success), not on intermediate retry attempts. They receive cloned data/error and run outside any entity borrow, so they may safely call `entity.update()`.
+
+:::note
+If the entity is dropped during the mutation, `on_error` and `on_settled` are still invoked — callers always get a terminal callback. (A dropped owning component mid-mutation is the one case where `on_success` will not fire, since there is nowhere to deliver the success result.)
 :::
+
+## MutationOptions
+
+`MutationOptions` carries the retry policy and GC time. It defaults to **no retries** — destructive operations should not fire repeatedly without explicit opt-in. Pass an explicit options value when you want retries:
+
+```rust
+use gpui_query::hook::use_mutation;
+use gpui_query::{MutationOptions, RetryPolicy};
+
+let (entity, sub) = use_mutation(
+    MutationOptions::default().retry_policy(RetryPolicy::new(2).with_exponential_backoff()),
+    cx,
+);
+```
+
+| Field           | Default        | Notes                                       |
+| --------------- | -------------- | ------------------------------------------- |
+| `retry_policy`  | `no_retries()` | Override to opt into retry.                 |
+| `gc_time_ms`    | `300_000`      | 5 minutes; how long a settled mutation is retained. |
+
+## MutationStatus
+
+A mutation transitions through a simpler set of statuses than a query:
+
+```
+Idle → Loading → Success
+                ↘ Failure
+```
+
+Read it via `entity.read(cx).status()`. The [`MutationObserver`](/advanced/observers) deduplicates re-renders by status, so retry ticks (status stays `Loading`) do not re-render your view.
+
+```rust
+# use gpui_query::{MutationResource, MutationStatus};
+# fn doc(m: &gpui::Entity<MutationResource<(), (), ()>>, cx: &gpui::App) {
+let r = m.read(cx);
+match r.status() {
+    MutationStatus::Idle => { /* show submit button */ }
+    MutationStatus::Loading => { /* disable button, show spinner */ }
+    MutationStatus::Success => { /* confirm */ }
+    MutationStatus::Failure => { /* retry button */ }
+}
+# }
+```
+
+## use_mutation_state
+
+`use_mutation_state::<V, T, E, _>(cx)` returns a snapshot of every mutation entity of that type triple registered with the global `QueryClient`. Use it for a global "any mutation in flight?" indicator, a mutations log, or a DevTools panel.
+
+```rust
+use gpui_query::hook::use_mutation_state;
+# fn doc(cx: &mut gpui::Context<()>) {
+let any_loading = use_mutation_state::<(), (), ()>(cx)
+    .iter()
+    .any(|m| m.read(cx).is_loading());
+# }
+```
+
+## Cache invalidation
+
+A mutation that changes server state usually means cached queries are now stale. After a successful mutation, invalidate the affected keys so the relevant queries refetch:
+
+```rust
+use gpui_query::client::QueryClient;
+use gpui_query::core::{QueryKey, QueryKeyFilter};
+# fn doc(cx: &mut gpui::App) {
+# let client = cx.global::<QueryClient>();
+
+// After creating a user, refresh the whole users subtree.
+let users = QueryKey::from(["users"]);
+client.invalidate_queries(&QueryKeyFilter::Prefix(&users), cx);
+# }
+```
+
+See [Query keys](/guides/query-keys) for `Exact` vs `Prefix` vs `All`.
+
+## Next steps
+
+- [Queries](/api/queries) — what mutations usually invalidate.
+- [Query keys](/guides/query-keys) — invalidation scope.
+- [Retry](/guides/retry) — `RetryPolicy` shared with queries.

@@ -1,11 +1,163 @@
 ---
 sidebar_position: 3
 title: Infinite Queries
-description: API reference for paginated and infinite-scroll data
+description: Paginated and infinite-scroll data with use_infinite_query
 ---
 
-This page is coming soon. Check back when GPUI Curie is ready for documentation.
+Infinite queries extend the query primitive to support pagination and load-more patterns — feeds, activity logs, anywhere you render a growing list. An `InfiniteQueryResource` holds an ordered collection of pages and exposes `fetch_next` / `fetch_previous` to grow it in either direction.
 
-:::tip
-Infinite queries extend the query primitive to support pagination and load-more patterns.
+Unlike a plain query, the fetcher does not just return data. It returns `Result<(T, bool), E>` where `T` is the new page and the `bool` tells gpui-query whether more pages exist. It also receives `Option<&T>` — the last (or first) page already loaded — so you can use it as a cursor.
+
+## use_infinite_query
+
+The hook creates an `InfiniteQueryResource<T, E>` entity, subscribes to it, and starts the initial fetch. It returns the entity and the subscription you must store:
+
+```rust
+use gpui_query::hook::{use_infinite_query, InfiniteQueryOptions};
+use gpui_query::QueryKey;
+# #[derive(Clone)]
+# struct Post { id: u64 }
+# #[derive(Clone, Debug)]
+# struct MyError;
+
+struct FeedView {
+    feed: gpui::Entity<gpui_query::InfiniteQueryResource<Vec<Post>, MyError>>,
+    _subscription: gpui::Subscription,
+}
+
+impl FeedView {
+    fn new(cx: &mut gpui::Context<Self>) -> Self {
+        let (feed, subscription) = use_infinite_query(
+            InfiniteQueryOptions::new(QueryKey::from(["feed"])),
+            |last_page| async move {
+                // Use `last_page` as a cursor. Return the page and whether
+                // more pages exist.
+                Ok::<_, MyError>((vec![], false))
+            },
+            cx,
+        );
+        Self { feed, _subscription: subscription }
+    }
+}
+```
+
+### Fetcher contract
+
+The fetcher signature is `Fn(Option<&T>) -> Fut` where `Fut: Future<Output = Result<(T, bool), E>>`.
+
+- `Option<&T>` is `None` on the initial fetch and `Some(last_page)` / `Some(first_page)` on subsequent fetches.
+- `T` is the new page to append.
+- The `bool` is the "has more" flag. When it is `false`, `has_next_page()` / `has_previous_page()` report `false` and you should stop calling fetch.
+
+## Loading more pages
+
+`fetch_next_page_infinite` and `fetch_previous_page_infinite` grow the resource in either direction. They take the same fetcher shape as the hook and the entity to act on:
+
+```rust
+use gpui_query::hook::fetch_next_page_infinite;
+# use gpui_query::InfiniteQueryResource;
+# #[derive(Clone)] struct Post;
+# #[derive(Clone, Debug)] struct MyError;
+
+impl FeedView {
+    fn on_scroll_to_bottom(&mut self, cx: &mut gpui::Context<Self>) {
+        fetch_next_page_infinite(
+            &self.feed,
+            |last_page| async move {
+                // fetcher for the next page
+                Ok::<_, MyError>((vec![], false))
+            },
+            cx,
+        );
+    }
+}
+```
+
+The fetcher for the previous direction receives `Some(first_page)` so you can paginate backwards.
+
+## InfiniteQueryOptions
+
+`InfiniteQueryOptions` mirrors `QueryOptions` and adds `max_pages`. It converts `From<&str>`, `From<String>`, and `From<QueryKey>` for the simple case.
+
+```rust
+use gpui_query::hook::InfiniteQueryOptions;
+use gpui_query::core::{CachePolicy, RetryPolicy};
+
+let opts = InfiniteQueryOptions::new("feed")
+    .cache_policy(CachePolicy::Ttl { ttl_ms: 60_000 })
+    .retry_policy(RetryPolicy::new(3))
+    .max_pages(20); // cap retained pages at 20
+```
+
+| Field           | Default            | Notes                                                              |
+| --------------- | ------------------ | ----------------------------------------------------------------- |
+| `key`           | `"default"`        | Set via `::new`. See [Query keys](/guides/query-keys).            |
+| `cache_policy`  | `Ttl { 60_000 }`   | Same as plain queries.                                            |
+| `request_policy`| `LatestWins`       | New fetches replace in-flight ones.                               |
+| `max_pages`     | `Some(50)`         | Bounds retained pages. Use `unbounded_pages()` to allow `None`.   |
+| `retry_policy`  | 3, exponential     | Applied to every page fetch.                                      |
+| `gc_time_ms`    | `300_000`          | 5 minutes.                                                        |
+
+### max_pages
+
+`max_pages` caps the number of pages retained in memory, evicting the oldest when the bound is exceeded. The default of `50` prevents unbounded memory growth from deep scrolling. Two builders control it:
+
+```rust
+use gpui_query::hook::InfiniteQueryOptions;
+
+// Cap at a specific number.
+let capped = InfiniteQueryOptions::new("feed").max_pages(20);
+
+// Disable the cap entirely (use with care).
+let unbounded = InfiniteQueryOptions::new("feed").unbounded_pages();
+```
+
+:::warning
+`unbounded_pages()` sets `max_pages` to `None`. Page storage then grows without limit if the user scrolls far enough. Only use it when you evict pages yourself or the dataset is small.
 :::
+
+## Reading page data
+
+`InfiniteQueryResource` exposes its pages as an ordered `VecDeque<Arc<T>>`. Pages are stored in `Arc` so handing them to the next fetcher is a cheap ref-count bump.
+
+```rust
+# use gpui_query::InfiniteQueryResource;
+# #[derive(Clone)] struct Post;
+# fn doc(feed: &gpui::Entity<InfiniteQueryResource<Vec<Post>, ()>>, cx: &gpui::App) {
+let r = feed.read(cx);
+
+let n_pages = r.page_count();               // usize
+let all_pages: &VecDeque<_> = r.pages();    // first..last order
+let last: Option<&Vec<Post>> = r.last_page();
+let first: Option<&Vec<Post>> = r.first_page();
+
+let loading_more = r.is_fetching_next_page();
+let has_more = r.has_next_page();
+# }
+```
+
+:::note
+When `status()` is `Failure`, previously loaded pages are still present and valid — the failure applies only to the most recent page fetch. Keep rendering the pages you have and let the user retry.
+:::
+
+## Lifecycle
+
+An infinite query transitions through the same `QueryStatus` values as a plain query (`Idle` → `LoadingEmpty` → `Success`, `Success` → `LoadingWithData` on refetch, etc.), but the per-direction flags `is_fetching_next_page()` / `is_fetching_previous_page()` give you finer-grained loading indicators for the "load more" button.
+
+The hook uses an [`InfiniteQueryObserver`](/advanced/observers) for status deduplication, so your view re-renders only when the status actually changes — not on every retry tick. The retry policy from options is stored on the entity and applied consistently to every page fetch, including the initial one.
+
+## Registration with QueryClient
+
+When a global `QueryClient` is set, `use_infinite_query` routes entity creation through the client so the resource participates in shared caching, [GC](/guides/caching), and bulk operations ([`invalidate_queries`](/guides/query-keys), `cancel_queries`, `reset_queries`, `remove_queries`).
+
+If no client is set, the hook falls back to a standalone entity with a debug-mode warning. Set the client in your app setup to get shared caching:
+
+```rust
+cx.set_global(gpui_query::QueryClient::new());
+```
+
+## Next steps
+
+- [Queries](/api/queries) — the non-paginated primitive.
+- [Query keys](/guides/query-keys) — paginating under a shared prefix makes invalidation clean.
+- [Observers](/advanced/observers) — how `InfiniteQueryObserver` deduplicates re-renders.

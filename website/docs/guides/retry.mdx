@@ -1,11 +1,116 @@
 ---
 sidebar_position: 3
 title: Retry
-description: Configuring automatic retry behavior for failed requests
+description: Configuring automatic retry behavior for failed queries and mutations
 ---
 
-This page is coming soon. Check back when GPUI Curie is ready for documentation.
+Failed fetches are retried automatically. A `RetryPolicy` says how many times to retry, how long to wait between attempts, and whether to back off exponentially. Queries and mutations share the same policy type but start from different defaults.
 
-:::tip
-Configure retry counts, delays, and backoff strategies for resilient data fetching.
-:::
+## Defaults
+
+| Resource  | Default retry policy                            |
+| --------- | ---------------------------------------------- |
+| Query     | 3 retries, exponential backoff, 1s base, 30s cap |
+| Mutation  | No retries                                     |
+
+Queries default to retry because transient network failures are common and the user did not ask for the fetch — silently retrying is the friendlier behavior. Mutations default to **no retries** because they are user-initiated and often destructive — silently re-running a "create" or "delete" on failure can duplicate or destroy data. Opt into mutation retry explicitly when you know it is safe.
+
+## RetryPolicy
+
+`RetryPolicy` is `Clone + Debug + Serialize + Deserialize`. Build one with the constructor and the chained builders:
+
+```rust
+use gpui_query::RetryPolicy;
+
+// The query default: 3 retries, exponential, 1s base, 30s cap.
+let default = RetryPolicy::default();
+
+// Never retry (the mutation default).
+let never = RetryPolicy::no_retries();
+
+// A custom policy: 5 retries, 500ms base, exponential, capped at 10s.
+let custom = RetryPolicy::new(5)
+    .with_delay(500)
+    .with_exponential_backoff()
+    .with_max_delay(10_000);
+```
+
+| Field                | `new(n)` default | `no_retries()` | Notes                                       |
+| -------------------- | ---------------- | -------------- | ------------------------------------------- |
+| `max_retries`        | `n`              | `0`            | 0 means no retries.                         |
+| `retry_delay_ms`     | `1000`           | `0`            | Base delay between attempts.                |
+| `exponential_backoff`| `false`          | `false`        | Enable for `delay * 2^attempt`.             |
+| `max_retry_delay_ms` | `30_000`         | `0`            | Cap on the exponential delay.               |
+
+## Applying a policy
+
+On a query, set it through `QueryOptions::retry_policy`:
+
+```rust
+use gpui_query::{QueryOptions, RetryPolicy};
+# use gpui_query::hook::use_query;
+
+let (_e, _) = use_query(
+    QueryOptions::new("flaky-endpoint")
+        .retry_policy(RetryPolicy::new(5).with_exponential_backoff()),
+    |_s| async { Ok::<_, gpui_query::QueryError>(vec![]) },
+    cx,
+);
+```
+
+On a mutation, set it through `MutationOptions::retry_policy`:
+
+```rust
+use gpui_query::{MutationOptions, RetryPolicy};
+# use gpui_query::hook::use_mutation;
+
+let (entity, _sub) = use_mutation(
+    MutationOptions::default().retry_policy(RetryPolicy::new(2)),
+    cx,
+);
+```
+
+You can also change a policy on an existing `QueryResource` at runtime via `set_retry_policy`, or read the active one with `retry_policy()`.
+
+## How delays are computed
+
+`delay_for_attempt(attempt)` returns the delay before the attempt at the given 0-based index:
+
+- **Without exponential backoff:** every delay is `retry_delay_ms`. Five retries at 500ms wait 500ms each.
+- **With exponential backoff:** delay is `retry_delay_ms * 2^attempt`, capped first by `max_retry_delay_ms` and then by a hard ceiling of one hour. The shift is itself capped at 62 so the factor never overflows.
+
+```rust
+use gpui_query::RetryPolicy;
+
+let p = RetryPolicy::new(5).with_delay(1_000).with_exponential_backoff().with_max_delay(30_000);
+assert_eq!(p.delay_for_attempt(0), 1_000);   // 1s
+assert_eq!(p.delay_for_attempt(1), 2_000);   // 2s
+assert_eq!(p.delay_for_attempt(2), 4_000);   // 4s
+assert_eq!(p.delay_for_attempt(5), 30_000);  // capped
+```
+
+`should_retry(current_retries)` returns `true` while `current_retries < max_retries` — the loop the resource uses to decide whether to schedule another attempt.
+
+## Status during retries
+
+While the resource is between the initial failure and either a successful retry or exhausted retries, the status stays `Loading` (specifically `LoadingEmpty` on first load or `LoadingWithData` on a refetch). The retry counter increments via `increment_retry()`, but because the [`QueryObserver`](/advanced/observers) deduplicates by status, **your view does not re-render on every retry tick** — only on the terminal outcome (`Success` or `Failure`).
+
+This is the reason retry can be aggressive by default without thrashing the UI: three retries with exponential backoff look like one loading state to the user, with the spinner shown until the request either succeeds or the policy is exhausted.
+
+## Cancellation during retry
+
+A retry in progress is cancelled if a newer request supersedes it (`LatestWins`) or the resource is reset/unmounted. The signal is checked after the retry delay, so a cancelled fetch does not waste an attempt. See [Error handling — Cancellation](/guides/error-handling#cancellation) for how cancelled requests surface (`QueryStatus::Cancelled`, `QueryErrorKind::Cancelled`).
+
+## When not to retry
+
+- **Non-idempotent mutations.** A `POST /charge` that fails after the request was sent but before the response arrived may have already charged the card. Retrying can double-charge. Keep the `no_retries` default for these.
+- **4xx errors.** A 400 or 401 will not succeed on retry — it just burns the retry budget and delays surfacing the real error. Map these to `QueryError::response` and consider a policy with fewer retries.
+- **User-visible destructive actions.** Let the user decide whether to retry, so they stay in control of side effects.
+
+Retry shines for transient failures: network blips, 5xx responses, timeouts. For these, exponential backoff with a sensible cap is usually the right call.
+
+## Next steps
+
+- [Error handling](/guides/error-handling) — how retries and `QueryError` interact.
+- [Caching](/guides/caching) — what triggers a fetch in the first place.
+- [Queries](/api/queries) / [Mutations](/api/mutations) — where retry policies attach.

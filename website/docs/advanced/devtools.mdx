@@ -1,11 +1,116 @@
 ---
-sidebar_position: 2
-title: Devtools
-description: Debugging and inspecting query state
+sidebar_position: 1
+title: DevTools & Diagnostics
+description: Inspect the query cache, read diagnostics, and snapshot state with dehydrate/hydrate
 ---
 
-This page is coming soon. Check back when GPUI Curie is ready for documentation.
+gpui-query does not ship a dedicated DevTools UI panel — GPUI applications build their own. Instead it exposes the data a DevTools panel needs: a `ClientDiagnostic` snapshot of the whole client, per-resource `QueryDiagnostic` / `MutationDiagnostic`, and `dehydrate()` / `hydrate()` for serializing cache state across restarts.
 
-:::tip
-Devtools provide visibility into your query cache, active subscriptions, and request lifecycles.
+## ClientDiagnostic
+
+`QueryClient::diagnostics(cx)` returns a `ClientDiagnostic` — aggregate counts plus a per-resource diagnostic for every live query and mutation. Dead entries (collected entities) are skipped automatically.
+
+```rust
+use gpui_query::client::QueryClient;
+# fn _doc(cx: &gpui::App) {
+# let client = cx.global::<QueryClient>();
+
+let diag = client.diagnostics(cx);
+println!("{} queries, {} mutations", diag.query_count, diag.mutation_count);
+
+for q in &diag.queries {
+    println!(
+        "  {} — {} (hits={}, retries={})",
+        q.key, q.status.label(), q.cache_hits, q.retry_count
+    );
+}
+# }
+```
+
+### QueryDiagnostic
+
+Each entry describes one live query resource:
+
+| Field            | Type             | Notes                                                        |
+| ---------------- | ---------------- | ----------------------------------------------------------- |
+| `key`            | `String`         | Full key path via `to_path()` (e.g. `users::42::posts`).    |
+| `status`         | `QueryStatus`    | Current status.                                             |
+| `cache_policy`   | `String`         | Human-readable cache policy label.                          |
+| `cache_age_ms`   | `Option<u64>`    | Age of the cached data, if any.                             |
+| `cache_hits`     | `u64`            | Number of cache hits.                                       |
+| `retry_count`    | `u32`            | Retries on the most recent fetch.                           |
+
+### MutationDiagnostic
+
+Each entry describes one live mutation resource:
+
+| Field         | Type              | Notes                                  |
+| ------------- | ----------------- | ------------------------------------- |
+| `key`         | `Option<String>`  | Optional key (mutations may be keyless). |
+| `status`      | `MutationStatus`  | Current status.                       |
+| `retry_count` | `u32`             | Retries on the most recent attempt.   |
+
+## Building a panel
+
+A typical DevTools panel reads `diagnostics()` on a timer (or on demand) and renders the result. Because diagnostics iterate the same `WeakEntity` handles the rest of the system uses, the snapshot reflects whatever is currently alive — you do not need to register resources with a separate registry.
+
+```rust
+use gpui_query::client::QueryClient;
+
+struct DevToolsView;
+
+impl DevToolsView {
+    fn refresh(&mut self, cx: &mut gpui::Context<Self>) -> Vec<String> {
+        cx.read_global::<QueryClient, _>(|client, cx| {
+            client.diagnostics(cx).queries
+                .into_iter()
+                .map(|q| format!("{} — {} (retries {})", q.key, q.status.label(), q.retry_count))
+                .collect()
+        })
+    }
+}
+```
+
+`QueryStatus::label()` and `CachePolicy`'s `Display` impl give you ready-made display strings, so you can avoid rebuilding status-to-string mappings in your panel.
+
+## dehydrate / hydrate
+
+`dehydrate()` produces a portable snapshot of the cache — every resource in a `Success` state is recorded with its key, type id, and kind (`"query"`, `"infinite"`, or `"mutation"`). `hydrate()` is the inverse entry point.
+
+```rust
+use gpui_query::client::QueryClient;
+# fn _doc(cx: &mut gpui::App) {
+# let client = cx.global::<QueryClient>();
+
+let state = client.dehydrate(cx);
+for entry in &state.entries {
+    println!("{} ({})", entry.key, entry.kind);
+}
+# }
+```
+
+:::note
+Full data serialization is type-specific. `DehydratedState` records the `TypeId` of each entry's `(T, E)` pair and its key, but downcasting the payload back to a concrete type requires knowing the type at the call site. The intended flow is: iterate `state.entries`, and for each key you recognize, restore the value with [`QueryClient::set_query_data`](/api/query-client). See [Persistence](/guides/persistence) for a complete worked example.
 :::
+
+`DehydratedEntry` deliberately does not carry a `data_json` field — typed serialization is added at the call site where the concrete `T` is known, rather than stored as a permanently-`None` placeholder on every entry.
+
+## GC and diagnostics
+
+The same bookkeeping that powers diagnostics also drives garbage collection. `QueryClient` runs GC opportunistically — every `GC_INTERVAL` resource/mutation operations, debounced by a minimum wall-clock gap — so dead entries are evicted without you calling `gc()` yourself. The diagnostic snapshot you read reflects the post-GC live set.
+
+If you need a hard sweep (for example, on logout), call `gc()` explicitly:
+
+```rust
+use gpui_query::client::QueryClient;
+# fn _doc(cx: &mut gpui::App) {
+# let mut client = cx.global::<QueryClient>();
+client.gc(cx); // or gc_with_time(now_ms, cx) to avoid a syscall
+# }
+```
+
+## Next steps
+
+- [Persistence](/guides/persistence) — turn a `DehydratedState` into a `QueryPersister` backend.
+- [Query keys](/guides/query-keys) — the `to_path()` strings you see in `QueryDiagnostic.key`.
+- [Observers](/advanced/observers) — the status-deduplication primitive that keeps the diagnostic view from churning.

@@ -1,5 +1,9 @@
 allowBuilds:
-  esbuild: set this to true or false
-  msw: false
-  sharp: set this to true or false
-  workerd: set this to true or false
+  esbuild: true
+  sharp: true
+  workerd: true
+onlyBuiltDependencies:
+  - esbuild
+  - lightningcss
+  - sharp
+  - workerd

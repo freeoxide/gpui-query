@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vp dev --port 3000",
     "build:docs": "cd ../website && npm run build && mkdir -p ../web/public/docs && cp -r build/* ../web/public/docs/",
-    "build": "npm run build:docs && vp build && npx pagefind --site dist/client && node scripts/generate-rss.mjs --output dist/client && node scripts/generate-llms-txt.mjs --output dist/client && node scripts/generate-md-alt.mjs",
+    "build": "npm run build:docs && vp build && node scripts/generate-og-image.mjs --output dist/client && npx pagefind --site dist/client && node scripts/generate-rss.mjs --output dist/client && node scripts/generate-llms-txt.mjs --output dist/client && node scripts/generate-md-alt.mjs",
     "preview": "vp preview",
     "test": "vp test run",
     "deploy": "pnpm run build && npx wrangler pages deploy dist/client --project-name=gpui-query",
@@ -57,6 +57,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "jsdom": "^28.1.0",
     "pagefind": "^1.5.2",
+    "sharp": "^0.34.5",
     "typescript": "^6.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@latest",
     "vite-plus": "latest",
@@ -67,7 +68,9 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
-      "lightningcss"
+      "lightningcss",
+      "sharp",
+      "workerd"
     ],
     "overrides": {
       "vite": "npm:@voidzero-dev/vite-plus-core@latest",

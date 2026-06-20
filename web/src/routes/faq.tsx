@@ -113,7 +113,9 @@ export const Route = createFileRoute("/faq")({
         content: "Frequently asked questions about gpui-query — async state management for GPUI.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:url", content: "https://gpui-query.hmziq.xyz/faq" },
+      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "FAQ - gpui-query" },
       {
         name: "twitter:description",

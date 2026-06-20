@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge";
+import { changelogPage } from "#/lib/seo";
 
 /* ─── Changelog Data ────────────────────────────────────────────── */
 
@@ -89,7 +90,9 @@ export const Route = createFileRoute("/changelog")({
         content: "Release history and changelog for gpui-query.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:url", content: "https://gpui-query.hmziq.xyz/changelog" },
+      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Changelog - gpui-query" },
       {
         name: "twitter:description",
@@ -97,6 +100,21 @@ export const Route = createFileRoute("/changelog")({
       },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/changelog" }],
+    scripts: [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify(
+          changelogPage({
+            name: "Changelog - gpui-query",
+            description: "Release history and changelog for gpui-query.",
+            url: "https://gpui-query.hmziq.xyz/changelog",
+            softwareVersion: changelogEntries[0]?.version,
+            datePublished: changelogEntries[changelogEntries.length - 1]?.date,
+            dateModified: changelogEntries[0]?.date,
+          }),
+        ),
+      },
+    ],
   }),
   component: ChangelogPage,
 });

@@ -2,7 +2,11 @@
 /**
  * Generate RSS 2.0 feed (rss.xml) from blog MDX frontmatter.
  *
- * Usage: node scripts/generate-rss.mjs [--output dist/client]
+ * This build-time script mirrors the runtime feed in src/lib/rss.ts (which
+ * uses getAllBlogPosts() from src/lib/blog.ts). It reads the MDX files
+ * directly because it runs outside the Vite/MDX bundler context.
+ *
+ * Usage: node scripts/generate-rss.mjs [--output .output/public]
  */
 
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
@@ -14,6 +18,28 @@ const outputDir = process.argv.includes("--output")
 
 const contentDir = resolve("src/content/blog");
 const siteUrl = "https://gpui-query.hmziq.xyz";
+
+/** Parse a YAML frontmatter block into a flat object (sufficient for blog FM). */
+function parseFrontmatter(block) {
+  const fm = {};
+  for (const line of block.split("\n")) {
+    const m = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/);
+    if (!m) continue;
+    const [, key, raw] = m;
+    const value = raw.trim();
+    // Inline array: ["a", "b", "c"]
+    const arr = value.match(/^\[(.*)\]$/);
+    if (arr) {
+      fm[key] = arr[1]
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean);
+    } else {
+      fm[key] = value.replace(/^["']|["']$/g, "");
+    }
+  }
+  return fm;
+}
 
 async function main() {
   let files;
@@ -32,35 +58,29 @@ async function main() {
     const slug = file.replace(/\.mdx$/, "");
 
     const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    const frontmatter = {};
-    if (fmMatch) {
-      for (const line of fmMatch[1].split("\n")) {
-        const [key, ...rest] = line.split(":");
-        if (key && rest.length) {
-          frontmatter[key.trim()] = rest
-            .join(":")
-            .trim()
-            .replace(/^["']|["']$/g, "");
-        }
-      }
-    }
+    const frontmatter = fmMatch ? parseFrontmatter(fmMatch[1]) : {};
 
     posts.push({ slug, frontmatter });
   }
 
-  // Sort by date descending
+  // Sort by date descending — same ordering as getAllBlogPosts() in blog.ts.
   posts.sort((a, b) => new Date(b.frontmatter.date) - new Date(a.frontmatter.date));
 
   const items = posts
-    .map(
-      (post) => `    <item>
+    .map((post) => {
+      const categories = (post.frontmatter.tags || [])
+        .map((t) => `      <category>${t}</category>`)
+        .join("\n");
+      return `    <item>
       <title><![CDATA[${post.frontmatter.title}]]></title>
       <link>${siteUrl}/blog/${post.slug}</link>
       <guid isPermaLink="true">${siteUrl}/blog/${post.slug}</guid>
       <description><![CDATA[${post.frontmatter.description}]]></description>
-      <pubDate>${new Date(post.frontmatter.date).toUTCString()}</pubDate>
-    </item>`,
-    )
+      <pubDate>${new Date(post.frontmatter.date).toUTCString()}</pubDate>${
+        categories ? `\n${categories}` : ""
+      }
+    </item>`;
+    })
     .join("\n");
 
   const rss = `<?xml version="1.0" encoding="UTF-8"?>
@@ -70,6 +90,7 @@ async function main() {
     <link>${siteUrl}/blog</link>
     <description>Async state management for GPUI</description>
     <language>en-us</language>
+    <atom:link href="${siteUrl}/rss.xml" rel="self" type="application/rss+xml" />
     <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
     <ttl>60</ttl>
 ${items}

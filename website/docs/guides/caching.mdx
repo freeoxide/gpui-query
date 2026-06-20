@@ -1,11 +1,154 @@
 ---
 sidebar_position: 1
 title: Caching
-description: Understanding and configuring query caching
+description: CachePolicy, freshness, request deduplication, and garbage collection
 ---
 
-This page is coming soon. Check back when GPUI Curie is ready for documentation.
+Caching is the reason gpui-query exists. Every query result is stored under its [key](/guides/query-keys) in the [`QueryClient`](/api/query-client), so a second view that needs the same data reads from the cache instead of refetching. This page covers how cache freshness is decided, how concurrent requests are deduplicated, and how stale entries are evicted.
 
-:::tip
-Learn how gpui-query caches responses, deduplicates requests, and manages cache lifetimes.
+## CachePolicy
+
+`CachePolicy` controls how long cached data is considered fresh. Set it per-query via `QueryOptions::cache_policy`:
+
+```rust
+use gpui_query::{QueryOptions, CachePolicy};
+# use gpui_query::hook::use_query;
+# fn _doc(cx: &mut gpui::Context<()>) {
+let (_e, _) = use_query(
+    QueryOptions::new("users").cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 }),
+    |_s| async { Ok::<_, gpui_query::QueryError>(vec![]) },
+    cx,
+);
+# }
+```
+
+There are three variants:
+
+### NoCache
+
+```rust
+CachePolicy::NoCache
+```
+
+Never serve cached data — every access triggers a fresh fetch. Use this for data that must always be current and where staleness is unacceptable (live counters, admin dashboards).
+
+### Ttl
+
+```rust
+CachePolicy::Ttl { ttl_ms: 60_000 } // 1 minute (also the default)
+```
+
+Data is fresh within `ttl_ms` of being written. Within the window, an access is a cache hit — no fetch, no loading state, data is served immediately. Past the window, the data is stale and the next access triggers a fetch.
+
+:::note
+A `ttl_ms` of `0` behaves like `NoCache` — data is only "fresh" at the instant it is stored, so every access fetches. This is not validated at runtime in release builds, but a `debug_assert` fires in debug builds.
 :::
+
+### StaleWhileRevalidate
+
+```rust
+CachePolicy::StaleWhileRevalidate { ttl_ms: 60_000, stale_ms: 240_000 }
+```
+
+The most nuanced policy. Data within `ttl_ms` is a fresh cache hit (no fetch). Data between `ttl_ms` and `ttl_ms + stale_ms` is served as stale data **and** a background revalidation is triggered — the consumer gets the old data immediately while the fresh data loads. Past `ttl_ms + stale_ms`, data is expired and a normal fetch runs.
+
+This is the policy to reach for when you want the app to feel instant (stale data renders immediately) while still staying reasonably current.
+
+## Freshness, in plain words
+
+Given a `CachePolicy` and the age of the cached data, the resource classifies each access:
+
+| State                  | Condition                              | What happens                                  |
+| ---------------------- | -------------------------------------- | --------------------------------------------- |
+| Fresh                  | age ≤ `ttl_ms`                          | Cache hit — serve data, no fetch.             |
+| Stale-but-serveable    | SWR policy, `ttl_ms` < age ≤ `ttl_ms + stale_ms` | Serve stale data now, refetch in background. |
+| Expired                | age > total valid window               | Fetch — no data served until it completes.    |
+
+Boundary: data at exactly `ttl_ms` old is **fresh** (`age <= ttl_ms`). This makes the fresh/stale partition total — every age is one or the other.
+
+You can query these states directly on a `QueryResource`:
+
+```rust
+# use gpui_query::QueryResource;
+# fn doc(r: &QueryResource<Vec<String>, ()>, now_ms: u64) {
+r.is_cache_fresh(now_ms);              // within TTL
+r.is_stale_but_serveable(now_ms);      // SWR stale window
+r.is_cache_expired(now_ms);            // past total valid window
+r.should_short_circuit_cache(now_ms);  // can serve without fetching
+r.should_serve_stale_and_revalidate(now_ms);
+# }
+```
+
+## Forcing a fetch
+
+Bypass the cache freshness check with `QueryOptions::force()`:
+
+```rust
+use gpui_query::QueryOptions;
+
+let (_e, _) = use_query(
+    QueryOptions::new("users").force(),
+    |_s| async { Ok::<_, gpui_query::QueryError>(vec![]) },
+    cx,
+);
+```
+
+A forced fetch always starts a new request, ignoring whether the cache is fresh. This is how pull-to-refresh and explicit "refresh" buttons work on top of an otherwise-cached query.
+
+## Request deduplication
+
+`RequestPolicy` controls what happens when a fetch starts while another is already in flight on the same resource:
+
+| Policy                | Behavior                                                        |
+| --------------------- | --------------------------------------------------------------- |
+| `LatestWins` (default)| The new request cancels the in-flight one and replaces it.      |
+| `IgnoreWhileLoading`  | The new request is ignored — the in-flight one is allowed to finish. |
+
+`LatestWins` is right for search-as-you-type: each keystroke supersedes the last. `IgnoreWhileLoading` is right when duplicate work is wasteful and the user can wait (a button mash, periodic polling).
+
+When `LatestWins` cancels an in-flight request, the old fetcher's signal is cancelled and its result is discarded by the two-phase `accept_current_request` guard — there is no stale-write window.
+
+## Garbage collection
+
+Cached entries do not live forever. The `QueryClient` runs GC opportunistically — every `GC_INTERVAL` operations, debounced by a minimum wall-clock gap — so dead resources are evicted without you calling `gc()` yourself.
+
+What GC collects:
+
+- Resources in `Idle` or `Failure` state whose age exceeds `gc_time_ms` **and** have no live observers.
+- Mutation entities past their `gc_time_ms`.
+
+What GC retains:
+
+- Loading and Success resources with live observers (someone is watching them).
+- Anything younger than `gc_time_ms`.
+
+The global GC time defaults to **5 minutes** (`300_000` ms). Change it on the client:
+
+```rust
+use gpui_query::QueryClient;
+
+let client = QueryClient::new().with_gc_time(600_000); // 10 minutes
+```
+
+:::note
+The per-query `QueryOptions::gc_time(ms)` builder is stored but **not yet consumed** — GC currently runs off the global `with_gc_time` value. The per-query field exists so a future release can honor it without a breaking API change. Setting it has no effect today.
+:::
+
+For a forced sweep (logout, workspace switch), call `gc()` directly:
+
+```rust
+use gpui_query::QueryClient;
+# fn _doc(client: &mut QueryClient, cx: &gpui::App) {
+client.gc(cx);
+# }
+```
+
+## Cache hits and metrics
+
+Every `QueryResource` tracks `cache_hits()`, `cancelled_count()`, and `ignored_results()`. These power the [DevTools](/advanced/devtools) diagnostics and are useful for verifying that your caching strategy is actually working — a query with many cache hits and few fetches is doing its job.
+
+## Next steps
+
+- [Query keys](/guides/query-keys) — the keys data is cached under.
+- [Retry](/guides/retry) — what happens when a cache miss fetch fails.
+- [Persistence](/guides/persistence) — save the cache across restarts.
