@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { getAllPosts } from "#/lib/blog";
+import { getAllBlogPosts } from "#/lib/blog";
 import { Badge } from "#/components/ui/badge";
 import { ArrowRight, CalendarIcon, UserIcon } from "lucide-react";
 
@@ -32,7 +32,7 @@ export const Route = createFileRoute("/blog/")({
 });
 
 function BlogPage() {
-  const posts = getAllPosts();
+  const posts = getAllBlogPosts();
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-16 lg:px-8">
@@ -64,18 +64,18 @@ function BlogPage() {
                 <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                   <span className="inline-flex items-center gap-1.5">
                     <CalendarIcon className="h-3.5 w-3.5" />
-                    <time dateTime={post.date}>
-                      {new Date(post.date).toLocaleDateString("en-US", {
+                    <time dateTime={post.frontmatter.date}>
+                      {new Date(post.frontmatter.date).toLocaleDateString("en-US", {
                         year: "numeric",
                         month: "long",
                         day: "numeric",
                       })}
                     </time>
                   </span>
-                  {post.author && (
+                  {post.frontmatter.author && (
                     <span className="inline-flex items-center gap-1.5">
                       <UserIcon className="h-3.5 w-3.5" />
-                      {post.author}
+                      {post.frontmatter.author}
                     </span>
                   )}
                   {index === 0 && (
@@ -88,13 +88,15 @@ function BlogPage() {
                 {/* Title */}
                 <h2 className="mt-3 text-xl font-semibold tracking-tight transition-colors group-hover:text-primary sm:text-2xl">
                   <Link to="/blog/$slug" params={{ slug: post.slug }}>
-                    {post.title}
+                    {post.frontmatter.title}
                   </Link>
                 </h2>
 
                 {/* Excerpt */}
-                {post.excerpt && (
-                  <p className="mt-2 leading-relaxed text-muted-foreground">{post.excerpt}</p>
+                {post.frontmatter.description && (
+                  <p className="mt-2 leading-relaxed text-muted-foreground">
+                    {post.frontmatter.description}
+                  </p>
                 )}
 
                 {/* Read more */}

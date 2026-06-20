@@ -1,77 +1,61 @@
-/**
- * Blog post utilities — load and parse MDX posts from src/content/blog/
- *
- * Each MDX file should have frontmatter with:
- *   title, date (YYYY-MM-DD), excerpt, author (optional)
- *
- * Example:
- *   ---
- *   title: "Hello World"
- *   date: "2024-06-12"
- *   excerpt: "First post"
- *   ---
- */
+import { type ComponentType } from "react";
 
-export interface BlogPostMeta {
-  slug: string;
+import IntroducingGpuiQueryPost from "../content/blog/introducing-gpui-query";
+
+/* ─── Frontmatter schema ────────────────────────────────────────────── */
+
+export interface BlogFrontmatter {
   title: string;
+  description: string;
+  /** ISO date, YYYY-MM-DD */
   date: string;
-  excerpt: string;
-  author?: string;
+  author: string;
+  tags?: string[];
 }
 
-export interface BlogPost extends BlogPostMeta {
-  Content: React.ComponentType;
+export interface BlogPost {
+  slug: string;
+  Content: ComponentType;
+  frontmatter: BlogFrontmatter;
 }
+
+/* ─── Post registry ─────────────────────────────────────────────────── */
 
 /**
- * Import all MDX files from the blog content directory.
- * remarkMdxFrontmatter exposes frontmatter fields as named exports.
+ * Static post registry. Blog bodies are authored as TSX components (see
+ * `src/content/blog/*.tsx`) so they prerender cleanly under TanStack Start's
+ * SSR environment. MDX + `import.meta.glob` did not resolve module exports
+ * during prerender, leaving posts empty — TSX components do not have that
+ * problem. Frontmatter lives here alongside the component import.
  */
-const modules = import.meta.glob<{
-  default: React.ComponentType;
-  title?: string;
-  date?: string;
-  excerpt?: string;
-  author?: string;
-}>("/src/content/blog/*.mdx", { eager: true });
+const POSTS: BlogPost[] = [
+  {
+    slug: "introducing-gpui-query",
+    Content: IntroducingGpuiQueryPost,
+    frontmatter: {
+      title: "Introducing gpui-query",
+      description:
+        "Zero-boilerplate async state management for GPUI — inspired by TanStack Query, built for Rust.",
+      date: "2026-03-10",
+      author: "hmziqrs",
+      tags: ["gpui", "rust", "async", "introduction"],
+    },
+  },
+];
 
-function slugFromPath(path: string): string {
-  const filename = path.split("/").pop() ?? "";
-  return filename.replace(/\.mdx$/, "");
+/** All blog posts, sorted by date descending. */
+export function getAllBlogPosts(): BlogPost[] {
+  return [...POSTS].sort(
+    (a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime(),
+  );
 }
 
-/** Return metadata for all posts, sorted newest-first. */
-export function getAllPosts(): BlogPostMeta[] {
-  const posts: BlogPostMeta[] = [];
-
-  for (const [path, mod] of Object.entries(modules)) {
-    if (!mod.title || !mod.date) continue;
-    posts.push({
-      slug: slugFromPath(path),
-      title: mod.title,
-      date: mod.date,
-      excerpt: mod.excerpt ?? "",
-      author: mod.author,
-    });
-  }
-
-  return posts.sort((a, b) => (a.date > b.date ? -1 : 1));
+/** Look up a single post by its slug (filename without extension). */
+export function getBlogBySlug(slug: string): BlogPost | undefined {
+  return POSTS.find((post) => post.slug === slug);
 }
 
-/** Return a single post by slug (including the rendered Content component). */
-export function getPost(slug: string): BlogPost | null {
-  for (const [path, mod] of Object.entries(modules)) {
-    if (!mod.title || !mod.date) continue;
-    if (slugFromPath(path) !== slug) continue;
-    return {
-      slug,
-      title: mod.title,
-      date: mod.date,
-      excerpt: mod.excerpt ?? "",
-      author: mod.author,
-      Content: mod.default,
-    };
-  }
-  return null;
+/** Slugs only — handy for prerendering and feeds. */
+export function getBlogSlugs(): string[] {
+  return POSTS.map((post) => post.slug);
 }
