@@ -15,3 +15,5 @@ web/public/docs/
 # OS
 .DS_Store
 Thumbs.db
+
+.commandcode
