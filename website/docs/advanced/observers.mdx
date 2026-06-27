@@ -1,116 +1,122 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 title: Observers
-description: Fine-grained reactivity with query observers
+description: Reactive subscriptions with status deduplication for queries, infinite queries, and mutations
 ---
 
-Every time a [QueryClient](/api/query-client) updates a query's internal state, something has to decide whether your view re-renders. That decision is the observer's job.
+Observers bridge gpui-query's resources to GPUI's reactivity. An observer attaches to a resource entity and calls `cx.notify()` to trigger a re-render — but only when the resource's **status** actually changes. This is the primitive that keeps `use_query`, `use_infinite_query`, and `use_mutation` from re-rendering your view on every internal state mutation.
 
-A `QueryResource` tracks a lot of state: status, data, error, fetch timestamp, cache age. Most of those fields change constantly in the background. A cache age ticking from 1001ms to 1002ms does not affect what the user sees. Without filtering, every one of those updates calls `cx.notify()` on your view, and GPUI re-renders the entire component tree.
+## The Observer type
 
-Observers sit between the entity and your view. They subscribe to changes, compare what matters, and only call `cx.notify()` when something visible has actually changed.
-
-## QueryObserver
-
-`QueryObserver` wraps a query entity and watches its status field. When the status transitions (for example, `Loading` to `Success`, or `Success` to `Error`), it calls `cx.notify()`. When the status stays the same, it stays silent.
+There is a single generic implementation, `Observer<R>`, parameterized over the resource kind. Three type aliases name the concrete observers you will use:
 
 ```rust
-use gpui_query::{QueryObserver, ObserverConfig};
+// All three are Observer<R> with a different R / Status pair.
+use gpui_query::client::{
+    QueryObserver, InfiniteQueryObserver, MutationObserver,
+};
 
-let config = ObserverConfig::default(); // notify_on_status_change_only: true
-let subscription = QueryObserver::new(entity, config, cx);
+type QueryObserver<T, E>          = Observer<QueryResource<T, E>>;          // Status: QueryStatus
+type InfiniteQueryObserver<T, E>  = Observer<InfiniteQueryResource<T, E>>;  // Status: QueryStatus
+type MutationObserver<V, T, E>    = Observer<MutationResource<V, T, E>>;    // Status: MutationStatus
 ```
 
-The constructor subscribes immediately. You don't call a separate `subscribe` method.
+Each resource exposes its status via an inherent `status()` method; the `ObservableResource` trait (pub-crate) surfaces it generically so `Observer<R>` can deduplicate notifications for any resource kind.
 
-## InfiniteQueryObserver
+## Status deduplication
 
-Same idea, different shape. `InfiniteQueryObserver` watches an infinite query entity. It notifies when the overall status changes, or when the page set changes in a way that affects rendering (like a new page being appended).
+This is the whole point of the observer. Without it, a raw `cx.observe` would call `cx.notify()` on **every** entity mutation — including intermediate ones like `increment_retry()` that leave the status at `Loading`. A query retrying three times would re-render the view two or three extra times for nothing.
+
+`Observer` tracks the last status it saw and notifies only on change:
 
 ```rust
-use gpui_query::{InfiniteQueryObserver, ObserverConfig};
+// (sketch of the dedup logic inside Observer::observe)
+let last_status: Cell<Option<R::Status>> = Cell::new(None);
 
-let config = ObserverConfig::default();
-let subscription = InfiniteQueryObserver::new(entity, config, cx);
+cx.observe(&upgraded, move |_, entity, cx| {
+    let current = entity.read(cx).observable_status();
+    if notify_on_change {
+        if last_status.get() != Some(current) {
+            last_status.set(Some(current));
+            cx.notify(); // status actually changed
+        }
+    } else {
+        cx.notify(); // unconditional mode
+    }
+});
 ```
 
-## MutationObserver
+The result: `increment_retry()` / `prepare_retry()` calls (status stays `Loading`) no longer trigger re-renders. Your view re-renders on the transitions that matter — `Idle → LoadingEmpty → Success`, `Success → LoadingWithData → Success`, `Loading → Failure`, and so on.
 
-`MutationObserver` applies the observer pattern to mutations. A mutation transitions through `Idle`, `Loading`, and `Success` or `Error`. The observer only triggers a re-render at those boundaries.
+## Creating and observing
+
+Build an observer from an entity, then call `observe(cx)` to start watching. `observe` returns `Option<Subscription>` — `None` if the entity was already dropped. **Store the returned subscription**; dropping it ends the observation.
 
 ```rust
-use gpui_query::{MutationObserver, ObserverConfig};
+use gpui_query::client::QueryObserver;
+# use gpui_query::QueryResource;
+# #[derive(Clone)] struct T;
+# #[derive(Clone, Debug)] struct E;
 
-let config = ObserverConfig::default();
-let subscription = MutationObserver::new(entity, config, cx);
+struct MyView {
+    users: gpui::Entity<QueryResource<T, E>>,
+    _subscription: gpui::Subscription,
+}
+
+impl MyView {
+    fn new(users: gpui::Entity<QueryResource<T, E>>, cx: &mut gpui::Context<Self>) -> Self {
+        let observer = QueryObserver::<T, E>::new(&users);
+        let subscription = observer.observe(cx)
+            .expect("entity was just created; cannot be dropped");
+        Self { users, _subscription: subscription }
+    }
+}
 ```
+
+:::note
+The hooks (`use_query`, `use_infinite_query`, `use_mutation`) already construct the observer and return the subscription for you. You only need to create an observer yourself when you are subscribing to a resource you obtained another way — for example, one you pulled out of the `QueryClient` with `query::<T, E>(key)`.
+:::
 
 ## ObserverConfig
 
-`ObserverConfig` has one field:
+`ObserverConfig::notify_on_status_change_only` controls the dedup behavior. It defaults to `true`, which is what you almost always want. Set it to `false` to get unconditional notifications on every entity mutation:
 
 ```rust
-pub struct ObserverConfig {
-    pub notify_on_status_change_only: bool, // default: true
-}
+use gpui_query::client::{Observer, ObserverConfig};
+# use gpui_query::QueryResource;
+# #[derive(Clone)] struct T;
+# #[derive(Clone, Debug)] struct E;
+# fn doc(entity: gpui::Entity<QueryResource<T, E>>) {
+# let cx: &mut gpui::Context<()> = unimplemented!();
+
+let sub = Observer::new(&entity)
+    .with_config(ObserverConfig { notify_on_status_change_only: false })
+    .observe(cx);
+# }
 ```
 
-When `true` (the default), the observer only calls `cx.notify()` when the query status changes. Loading to Success. Success to Error. Those transitions. The data itself changing does not trigger a re-render.
+Use unconditional mode only when you genuinely need to react to non-status fields (a custom retry counter you display inline, for example). It is strictly more re-renders.
 
-When `false`, any change to the entity's observable state triggers `cx.notify()`. This includes new data arriving, cache metadata updating, and background refetches completing. Use this when your view displays data that updates in real time and you need every revision.
+## `Option<Subscription>`
 
-```rust
-let config = ObserverConfig {
-    notify_on_status_change_only: false,
-};
-```
+`observe()` returns `Option<Subscription>` rather than panicking. In debug builds the hooks `panic!` if this is `None` right after creating an entity (it would indicate a GPUI internal regression); in release builds they fall back to a no-op subscription so a misbehaving observer cannot crash the app. When you construct an observer yourself, decide explicitly: `.expect(...)` if a `None` is impossible in your context, or `match` / `let else` to handle it gracefully.
 
-## Returns `Option<Subscription>`
+## How the hooks use it
 
-In v2, all observer constructors return `Option<Subscription>` instead of panicking when the entity cannot be found. This happens when the query was garbage collected between the time you obtained the entity handle and the time you created the observer.
+| Hook                  | Observer                   | Status type     |
+| --------------------- | -------------------------- | --------------- |
+| `use_query`           | `QueryObserver<T, E>`      | `QueryStatus`   |
+| `use_infinite_query`  | `InfiniteQueryObserver<T, E>` | `QueryStatus` |
+| `use_mutation`        | `MutationObserver<V, T, E>`| `MutationStatus`|
 
-Handle the `None` case:
+Each hook creates its observer, calls `observe(cx)`, and returns the subscription as the second element of its tuple. The status-dedup is what makes a retrying mutation or a refetching query cheap to render — only terminal status changes reach your view.
 
-```rust
-let subscription = match QueryObserver::new(entity, config, cx) {
-    Some(sub) => sub,
-    None => {
-        // Entity was evicted from cache. Create a fresh query or show fallback UI.
-        return;
-    }
-};
-```
+## ObservableResource
 
-Dropping the `Subscription` unsubscribes the observer. Keep it alive as long as you want updates.
+`ObservableResource` is the pub(crate) trait that lets `Observer<R>` read a status generically. It is not part of the public API, but it is why the three resource kinds share one observer implementation: each resource exposes `status()` with its own associated `Status` type, and `Observer` deduplicates on that. If you write your own resource type that should be observable, it will need the same `status()` method shape — but for application code, the three built-in observers cover every resource the hooks produce.
 
-## How hooks use observers
+## Next steps
 
-The hooks you interact with daily ([`use_query`](/api/queries), [`use_mutation`](/api/queries), [`use_infinite_query`](/api/queries)) all create observers internally. Each hook spawns the appropriate observer, passes a default `ObserverConfig`, and holds the subscription for the lifetime of the component.
-
-You don't need to set up observers manually unless you're building a custom abstraction on top of the query system. Maybe you're writing a hook that composes multiple queries, or you need a non-standard `ObserverConfig`. That's when you reach for the observer types directly.
-
-## Custom observer usage
-
-Here is a practical example of wiring up an observer with a non-default config:
-
-```rust
-use gpui_query::{QueryObserver, ObserverConfig};
-
-fn setup_custom_observer(
-    entity: Entity<QueryResource<MyData, MyError>>,
-    cx: &mut ViewContext<MyView>,
-) -> Option<Subscription> {
-    let config = ObserverConfig {
-        notify_on_status_change_only: false, // re-render on any data change
-    };
-    QueryObserver::new(entity, config, cx)
-}
-```
-
-The observer auto-subscribes on creation. When `MyData` changes in the cache, your view re-renders. When you drop the returned `Subscription`, the observer stops listening.
-
-## Why this matters
-
-Without observers, a single query updating its internal timestamp every millisecond would re-render your view 1000 times per second. With observers and the default config, that same query re-renders your view once when it finishes loading. That is the difference between a sluggish UI and one that feels responsive.
-
-For debugging what triggers re-renders, see [Devtools](/advanced/devtools).
+- [Queries](/api/queries) / [Infinite queries](/api/infinite-queries) / [Mutations](/api/mutations) — the hooks that build observers for you.
+- [DevTools](/advanced/devtools) — diagnostics read the same live entities observers watch.
+- [Error handling](/guides/error-handling) — why `Cancelled` rarely reaches your UI (it is a status, deduplicated like any other).

@@ -1,0 +1,150 @@
+---
+sidebar_position: 3
+title: gpui-query vs. raw async
+description: What you stop writing when you move from cx.spawn and manual caching to gpui-query
+---
+
+GPUI already lets you run async work with `cx.spawn` and store the result on an entity. So why reach for gpui-query? This page is a side-by-side: the same feature implemented with raw `cx.spawn` + manual state, then with gpui-query, so you can see exactly what the library takes off your plate.
+
+## The core problem
+
+Fetching data in a GPUI view without a library means you end up reimplementing the same machinery every time:
+
+- A loading flag on the view.
+- A spawned task handle so a re-fetch or unmount cancels the old one.
+- A way to ignore the result of a stale request after the user typed again.
+- A cache somewhere so navigating back doesn't refetch.
+- Retry on transient failures.
+- Re-rendering only when something the user can see actually changed.
+
+Each one is small. Together they are the bulk of the code in a typical data-fetching view, and each is a place to introduce a subtle bug.
+
+## Example: fetching a user
+
+### Raw `cx.spawn`
+
+```rust
+struct UserView {
+    user: Option<User>,
+    loading: bool,
+    error: Option<String>,
+    // Must be stored so unmount / re-fetch can cancel the in-flight task.
+    _task: Option<gpui::Task<()>>,
+}
+
+impl UserView {
+    fn new(user_id: u64, cx: &mut gpui::Context<Self>) -> Self {
+        let mut view = Self { user: None, loading: true, error: None, _task: None };
+        view.load(user_id, cx);
+        view
+    }
+
+    fn load(&mut self, id: u64, cx: &mut gpui::Context<Self>) {
+        // Cancel the previous fetch if one is in flight.
+        self._task = None;
+        self.loading = true;
+        self.error = None;
+        cx.notify();
+
+        let task = cx.spawn(async move |this, cx| {
+            let result = fetch_user(id).await;
+            // If the view was unmounted, this is a no-op.
+            // If a newer fetch started, this write still lands — stale-write bug
+            // unless you also thread a request id and check it here.
+            this.update(cx, |view, cx| {
+                view.loading = false;
+                match result {
+                    Ok(user) => view.user = Some(user),
+                    Err(e) => view.error = Some(e.to_string()),
+                }
+                cx.notify();
+            }).ok();
+        });
+        self._task = Some(task);
+    }
+}
+# struct User;
+# async fn fetch_user(_: u64) -> Result<User, std::convert::Infallible> { Ok(User) }
+```
+
+That is one resource, one view, no cache, no retry, and it already has a latent stale-write bug. Add a second view that needs the same user and you are either refetching or hand-rolling a shared cache.
+
+### gpui-query
+
+```rust
+use gpui_query::hook::use_query;
+use gpui_query::{QueryOptions, QueryKey, QueryError};
+# struct User;
+
+struct UserView {
+    user: gpui::Entity<gpui_query::QueryResource<User, QueryError>>,
+    _subscription: gpui::Subscription,
+}
+
+impl UserView {
+    fn new(user_id: u64, cx: &mut gpui::Context<Self>) -> Self {
+        let (user, subscription) = use_query(
+            QueryKey::from(["users", &user_id.to_string()]),
+            |_signal| async move { fetch_user(user_id).await.map_err(QueryError::from) },
+            cx,
+        );
+        Self { user, _subscription: subscription }
+    }
+}
+# async fn fetch_user(_: u64) -> Result<User, QueryError> { Ok(User) }
+```
+
+What you got for free:
+
+| Concern                | Raw `cx.spawn`              | gpui-query                                        |
+| ---------------------- | --------------------------- | ------------------------------------------------- |
+| Loading state          | Manual flag + `cx.notify`   | `QueryStatus::LoadingEmpty` on the resource        |
+| Error state            | Manual `Option<String>`     | `E` on the resource, typed, `QueryError` default  |
+| Stale-write protection | Hand-rolled request id      | Two-phase `accept_current_request` guard           |
+| Cancellation on re-fetch | Store + drop the task     | Signal-always; `LatestWins` cancels the old signal |
+| Cache                  | None / hand-rolled          | `QueryClient` + `CachePolicy`, shared across views |
+| Dedup of identical in-flight requests | None        | `IgnoreWhileLoading` request policy                |
+| Retry on failure       | Hand-rolled loop            | `RetryPolicy` (3 retries, exponential, default)    |
+| Re-render on status change only | Every `cx.notify` counts | `QueryObserver` status dedup                  |
+| Navigating back        | Refetch                     | Cache hit within TTL                               |
+
+## When the raw approach is enough
+
+gpui-query is not free — it is a dependency and a mental model. The raw approach is genuinely fine when:
+
+- You have **one** async operation that does not need to be cached or shared.
+- The result is not something a second view will ever want.
+- There is no retry, no dedup, and no stale-write concern (a fire-and-forget side effect, for example).
+
+For those cases `cx.spawn` plus a field on the view is the right tool. gpui-query earns its keep the moment a second view needs the same data, the user can trigger a re-fetch while one is in flight, or you want the app to feel instant because data is already cached.
+
+## Caching is the big win
+
+The single largest difference is shared caching. With `QueryClient` set as a global, every `use_query` call with the same key resolves to the **same** resource entity. Two views that both need `["users", "42"]` get one fetch, one cache entry, and consistent state — and a third view mounted later reads straight from the cache.
+
+```rust
+// Set once, in app setup:
+cx.set_global(gpui_query::QueryClient::new());
+```
+
+That cache is also what makes bulk operations possible: `invalidate_queries(Prefix(&["users"]))` refreshes the whole users subtree in one call, and `remove_queries(All)` clears the cache on logout. With raw `cx.spawn` you have no central registry, so there is nothing to invalidate or clear.
+
+## Imperative control without the boilerplate
+
+gpui-query still gives you the imperative escape hatches you would write by hand:
+
+- [`fetch_query`](/api/queries) — refetch on demand (button click, timer).
+- `QueryClient::prepare_fetch_query` / `prepare_prefetch_query` — fetch or prefetch without subscribing, the equivalent of `queryClient.fetchQuery` / `prefetchQuery`.
+- `get_query_data` / `set_query_data` — read or seed the cache directly for optimistic updates.
+
+The difference is that these operate on the shared, deduplicated, GC'd cache rather than on ad-hoc fields scattered across your views.
+
+## Summary
+
+Reach for raw `cx.spawn` for one-off fire-and-forget work. Reach for gpui-query the moment you are caching, sharing, retrying, or guarding against stale writes — which, for anything that talks to a server, is usually the first feature you need.
+
+## Next steps
+
+- [Quick start](/getting-started/quick-start) — your first query.
+- [Caching](/guides/caching) — the `CachePolicy` that makes navigation feel instant.
+- [Query keys](/guides/query-keys) — how shared caching keys resources.

@@ -1,117 +1,191 @@
 ---
 sidebar_position: 2
 title: Quick Start
-description: Get up and running with gpui-query in minutes
+description: Your first query and mutation with gpui-query
 ---
 
-This walks through installing gpui-query and making your first query. You need a GPUI project already set up. If you don't have one, follow the [installation](/getting-started/installation) page first.
+This page walks through a minimal end-to-end query: define a fetcher, subscribe to it with `use_query`, read the status and data, and render. Then a tiny `use_mutation` example so you can see the full loop.
 
-## Add the dependency
+It assumes you have already [installed gpui-query and set up a `QueryClient` global](/getting-started/installation).
 
-Put this in your `Cargo.toml`:
+## The mental model
 
-```toml
-[dependencies]
-gpui-query = { version = "0.1.0", features = ["hook"] }
-```
+gpui-query is built around three pieces:
 
-The `hook` feature pulls in `use_query`, `use_mutation`, and the rest of the declarative API. Without it you get the raw client layer, which is useful but more manual.
+- A **fetcher** — an async function that knows how to load some data. gpui-query owns everything else: caching, deduplication, retries.
+- `use_query` — a hook you call from a view's constructor (not in `render`). It fetches the first time, subscribes the view to the result, and returns an [`Entity`](/api/queries) you read during render.
+- The `QueryClient` — a global registry that shares results across views so the same key is only ever fetched once.
 
-## Set up the query client
+Data is cached under a `QueryKey`. Two views asking for the same key read from the same cached entity.
 
-`QueryClient` manages all cached state. It needs to live as a GPUI global so any view can access it. Create it once during app startup:
+## Your first query
 
-```rust
-use gpui::App;
-use gpui_query::QueryClient;
+### 1. Model your data and error
 
-App::new().run(|cx| {
-    cx.set_global(QueryClient::new());
-    // ... your views
-});
-```
-
-That is the entire setup. One line. The client handles garbage collection, cache eviction, and request deduplication internally.
-
-## Make your first query
-
-Call `use_query` from inside a view. It takes a key, a fetcher closure, and the view context. It returns an `Entity<QueryResource<T, E>>` and a `Subscription`.
+Both the data type `T` and the error type `E` must be `Clone + Send + Sync + 'static`, and `E` must be `Debug`. A cheap stand-in for the error is the crate's `QueryError`, but you can use your own.
 
 ```rust
-use gpui_query::use_query;
-use gpui::Entity;
+#[derive(Clone, Debug)]
+pub struct Todo {
+    pub id: u32,
+    pub title: String,
+    pub done: bool,
+}
+```
 
-struct MyView {
-    query_entity: Entity<QueryResource<Vec<User>, MyError>>,
-    _subscription: Subscription,
+### 2. Define a fetcher
+
+A fetcher is a `Fn() -> Future<Output = Result<T, E>>`. It takes no arguments and returns the data or an error. The real networking is up to you (`reqwest`, an LSP transport, a local file) — here we return a fixed list so the example compiles without a server.
+
+```rust
+use gpui_query::QueryError;
+
+async fn fetch_todos() -> Result<Vec<Todo>, QueryError> {
+    // Replace this with a real request.
+    Ok(vec![
+        Todo { id: 1, title: "Write the docs".into(), done: false },
+        Todo { id: 2, title: "Ship it".into(), done: true },
+    ])
+}
+```
+
+### 3. Subscribe with use_query
+
+Call `use_query` in your view's `new`. It returns a tuple: the resource entity (store it on the view to read during render) and a `Subscription` (store it too — dropping it stops the view from re-rendering on changes).
+
+```rust
+use gpui_query::hook::use_query;
+use gpui_query::{CachePolicy, QueryError, QueryResource, core::RequestPolicy};
+
+pub struct TodosView {
+    todos: gpui::Entity<QueryResource<Vec<Todo>, QueryError>>,
+    _sub: gpui::Subscription,
 }
 
-impl MyView {
-    fn new(cx: &mut ViewContext<Self>) -> Self {
-        let (entity, sub) = use_query(
-            "users",
-            |signal| async move {
-                let users = fetch_users().await?;
-                Ok::<Vec<User>, MyError>(users)
-            },
+impl TodosView {
+    pub fn new(cx: &mut gpui::Context<Self>) -> Self {
+        let (todos, sub) = use_query(
+            "todos",                                  // cache key
+            CachePolicy::Ttl { ttl_ms: 60_000 },      // fresh for 1 minute
+            RequestPolicy::LatestWins,                // supersede in-flight fetches
+            || async { fetch_todos().await },         // fetcher: Fn() -> Fut
             cx,
         );
+        Self { todos, _sub: sub }
+    }
+}
+```
 
-        Self {
-            query_entity: entity,
-            _subscription: sub,
+`use_query` starts a fetch the first time the resource is seen, and reuses the cached entity on every subsequent access for the same key. Pass a fresh `QueryKey` (`QueryKey::from(["todos"])` for a multi-segment key) when you want hierarchical keys for invalidation.
+
+### 4. Read status and data, then render
+
+A `QueryResource<T, E>` is a normal GPUI entity. Read it with `entity.read(cx)` and branch on `status()`:
+
+```rust
+impl gpui::Render for TodosView {
+    fn render(&mut self, _window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> impl gpui::IntoElement {
+        let r = self.todos.read(cx);
+
+        match r.status() {
+            gpui_query::QueryStatus::Idle
+            | gpui_query::QueryStatus::LoadingEmpty => {
+                // First load, no data yet.
+                gpui::div().child("Loading…")
+            }
+            gpui_query::QueryStatus::Success => {
+                let list = r.data().cloned().unwrap_or_default();
+                gpui::div().children(
+                    list.into_iter().map(|t| gpui::div().child(t.title)),
+                )
+            }
+            gpui_query::QueryStatus::Failure => {
+                let msg = r.error().map(|e| format!("{e:?}")).unwrap_or_default();
+                gpui::div().child(format!("Failed: {msg}"))
+            }
+            _ => gpui::div(),
         }
     }
 }
 ```
 
-The string `"users"` is the cache key. Two views calling `use_query` with the same key share the same cached data. The fetcher only runs once, not twice.
+Useful predicates on the resource:
 
-The `signal` argument inside the closure is a `QuerySignal`. Call `signal.is_cancelled()` to check if the request was invalidated and you should bail early. For simple cases you can ignore it.
+- `r.is_loading()` — true during the first fetch or any refetch.
+- `r.is_pending()` — true when there is no data yet and a fetch is in flight.
+- `r.data()` / `r.error()` — `Option<&T>` / `Option<&E>`, borrowed for the duration of the read.
 
-## Read the state in render
+That is the whole query loop: define a fetcher, subscribe with `use_query`, branch on status, render. gpui-query handles caching, deduplication, and re-rendering on every status transition.
 
-`QueryResource<T, E>` tracks the full lifecycle of a request: idle, loading, success, failure. Read it from `render` with `read_with`:
+## A tiny mutation
+
+Mutations are imperative: you trigger them on demand (a button, a form submit). `use_mutation` creates a `MutationResource<V, T, E>` entity — `V` is the variables you pass in, `T` the success result, `E` the error. Trigger it with the `mutate` helper.
 
 ```rust
-use gpui_query::QueryStatus;
+use gpui_query::hook::{use_mutation, mutate};
+use gpui_query::{MutationResource, MutationStatus, QueryError};
 
-impl Render for MyView {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let entity = self.query_entity.clone();
-        entity.read_with(cx, |resource| {
-            match resource.status() {
-                QueryStatus::LoadingEmpty => "Loading...",
-                QueryStatus::Success => "Got data",
-                QueryStatus::Failure => "Error",
-                _ => "Idle",
-            }
-        })
+#[derive(Clone)]
+pub struct ToggleTodo { pub id: u32 }
+
+pub struct TodoActions {
+    toggle: gpui::Entity<MutationResource<ToggleTodo, Todo, QueryError>>,
+}
+
+impl TodoActions {
+    pub fn new(cx: &mut gpui::Context<Self>) -> Self {
+        // use_mutation returns the entity; turbofish fixes the (V, T, E, C) quadruple.
+        let toggle = use_mutation::<ToggleTodo, Todo, QueryError, Self>(cx);
+        Self { toggle }
+    }
+
+    pub fn on_toggle(&mut self, id: u32, cx: &mut gpui::Context<Self>) {
+        mutate(
+            &self.toggle,
+            ToggleTodo { id },                  // variables
+            |vars| async move {                 // mutator: Fn(V) -> Fut
+                // Replace with a real PATCH/POST.
+                Ok(Todo { id: vars.id, title: "Toggled".into(), done: true })
+            },
+            cx,
+        );
     }
 }
 ```
 
-The `status()` method returns one of `Idle`, `LoadingEmpty`, `LoadingHasData`, `Success`, `Failure`, or `Cancelled`. When data arrives, `resource.data()` returns `Some(&T)`. On failure, `resource.error()` returns `Some(&E)`.
-
-## Mutations
-
-Queries fetch data. Mutations change it. `use_mutation` gives you an entity that starts idle and only runs when you explicitly trigger it:
+Read the mutation's status the same way as a query:
 
 ```rust
-use gpui_query::{use_mutation, mutate};
-
-let (entity, sub) = use_mutation((), cx);
-
-// Trigger it later, on a button click or form submit
-mutate(&entity, NewUser { name: "Alice" }, |vars| async move {
-    Ok::<User, MyError>(create_user(vars).await)
-}, cx);
+# use gpui_query::{MutationResource, MutationStatus, QueryError};
+# #[derive(Clone)] struct ToggleTodo { id: u32 }
+# #[derive(Clone)] struct Todo { id: u32, title: String, done: bool }
+# fn doc(m: &gpui::Entity<MutationResource<ToggleTodo, Todo, QueryError>>, cx: &gpui::App) {
+match m.read(cx).status() {
+    MutationStatus::Idle => { /* render a button */ }
+    MutationStatus::Loading => { /* disable the button, show a spinner */ }
+    MutationStatus::Success => { /* confirm */ }
+    MutationStatus::Failure => { /* render a retry button */ }
+}
+# }
 ```
 
-Mutations do not touch the query cache on their own. To refresh the user list after creating a user, call `invalidate_queries` in a success callback. See [Mutations](/api/mutations) for the full API.
+Mutations default to **no retries**. After a mutation that changes server state, invalidate the affected queries so they refetch:
+
+```rust
+# use gpui_query::client::QueryClient;
+# use gpui_query::core::{QueryKey, QueryKeyFilter};
+# fn doc(cx: &mut gpui::App) {
+# let mut client = cx.global::<QueryClient>().clone();
+let todos = QueryKey::from(["todos"]);
+client.invalidate_queries(&QueryKeyFilter::Prefix(&todos), cx);
+# }
+```
 
 ## Where to go next
 
-- [Queries](/api/queries) covers `QueryOptions`, cache policies, retry, manual fetch mode, and `use_query_select`.
-- [Mutations](/api/mutations) covers `use_mutation`, `mutate_with_callbacks`, and `MutationCallbacks`.
-- [Caching](/guides/caching) explains TTL, stale-while-revalidate, garbage collection, and bulk invalidation.
+You now have a query that caches and a mutation that triggers. From here:
+
+- [Queries](/api/queries) — the full `use_query` surface, the fetcher signal, and refetching.
+- [Mutations](/api/mutations) — lifecycle callbacks and the `mutate` variants.
+- [Caching](/guides/caching) — `CachePolicy`, request deduplication, and GC.
+- [Query keys](/guides/query-keys) — hierarchical keys and invalidation scope.

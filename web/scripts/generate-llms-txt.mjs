@@ -3,26 +3,28 @@
  * Generate llms.txt and llms-full.txt for AI agent optimization.
  * Follows the llmstxt.org specification.
  *
- * Reads docs from the Docusaurus source at ../../website/docs/
- * and blog posts from src/content/blog/
+ * Source: Docusaurus docs at ../website/docs (all .md and .mdx files).
+ * Previously read src/content/, which no longer exists.
  *
- * Usage: node scripts/generate-llms-txt.mjs [--output dist/client]
+ * Usage: node scripts/generate-llms-txt.mjs [--output .output/public]
  */
 
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 
 const outputDir = process.argv.includes("--output")
   ? process.argv[process.argv.indexOf("--output") + 1]
   : ".output/public";
 
-const blogDir = resolve("src/content/blog");
-const docusaurusDocsDir = resolve("../website/docs");
+// Scripts run from web/, so the Docusaurus docs live one level up.
+const docsRoot = resolve("..", "website", "docs");
+const siteUrl = "https://gpui-query.hmziq.xyz";
 
 /**
- * Recursively collect all .mdx files from a directory tree.
+ * Recursively collect every .md and .mdx file under `dir`.
+ * Returns absolute paths.
  */
-async function collectMdxFiles(dir) {
+async function collectDocs(dir) {
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -30,72 +32,134 @@ async function collectMdxFiles(dir) {
     return [];
   }
 
-  const results = [];
-
+  const files = [];
   for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
+    const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      const nested = await collectMdxFiles(fullPath);
-      results.push(...nested);
-    } else if (entry.name.endsWith(".mdx")) {
-      results.push(fullPath);
+      files.push(...(await collectDocs(full)));
+    } else if (entry.name.endsWith(".mdx") || entry.name.endsWith(".md")) {
+      files.push(full);
     }
   }
-
-  return results;
+  return files;
 }
 
-function parseMdx(filePath, baseDir) {
-  return async () => {
-    const content = await readFile(filePath, "utf-8");
-    // slug is the relative path from baseDir, without .mdx extension
-    const slug = filePath.slice(baseDir.length + 1).replace(/\.mdx$/, "");
+/**
+ * Parse a YAML frontmatter block delimited by leading `---` fences.
+ * Only handles the flat `key: value` shape used by the docs.
+ */
+function parseFrontmatter(text) {
+  const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const frontmatter = {};
+  if (!fmMatch) return { frontmatter, body: text.replace(/^﻿/, "") };
 
-    // Extract frontmatter
-    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    const frontmatter = {};
-    if (fmMatch) {
-      for (const line of fmMatch[1].split("\n")) {
-        const [key, ...rest] = line.split(":");
-        if (key && rest.length) {
-          frontmatter[key.trim()] = rest
-            .join(":")
-            .trim()
-            .replace(/^["']|["']$/g, "");
-        }
-      }
-    }
+  for (const line of fmMatch[1].split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf(":");
+    if (idx === -1) continue;
+    const key = trimmed.slice(0, idx).trim();
+    let value = trimmed
+      .slice(idx + 1)
+      .trim()
+      .replace(/^["']|["']$/g, "");
+    frontmatter[key] = value;
+  }
 
-    // Strip frontmatter and JSX for plain text
-    const body = content
-      .replace(/^---\n[\s\S]*?\n---\n*/, "")
-      .replace(/<Callout[^>]*>/g, "> ")
-      .replace(/<\/Callout>/g, "")
-      .replace(/<[^>]+>/g, "")
-      .trim();
+  const body = text.slice(fmMatch[0].length).replace(/^\r?\n/, "");
+  return { frontmatter, body };
+}
 
-    return { slug, frontmatter, body };
-  };
+/**
+ * Resolve the Docusaurus route for a doc file.
+ * Mirrors Docusaurus' default routing: the route is the file path relative
+ * to docs/, without extension, using forward slashes, with index.* -> "" and
+ * honoring an explicit `slug:` frontmatter override.
+ */
+function resolveRoute(relPath, frontmatter) {
+  if (frontmatter.slug) {
+    // slug: / -> "" (root); otherwise strip leading slash.
+    if (frontmatter.slug === "/") return "";
+    return frontmatter.slug.replace(/^\/+/, "");
+  }
+
+  let route = relPath
+    .replace(/\.(mdx?|md)$/, "")
+    .split(sep)
+    .join("/");
+  // index files map to their directory route.
+  if (route.endsWith("/index")) route = route.slice(0, -"/index".length);
+  // Top-level intro.mdx has no slug override by default; keep as "intro".
+  return route;
+}
+
+/**
+ * Strip frontmatter and Docusaurus/MDX-specific syntax down to prose
+ * markdown suitable for llms-full.txt.
+ */
+function toPlainMarkdown(body) {
+  return (
+    body
+      // Drop ES import / export statements (MDX).
+      .replace(/^\s*import\s+.*$/gm, "")
+      .replace(/^\s*export\s+.*$/gm, "")
+      // Docusaurus admonitions :::type[title] {props} ... :::
+      // -> keep inner content as a blockquote.
+      .replace(
+        /:::[A-Za-z]+(?:\[([^\]]*)\])?(?:\s*\{[^}]*\})?\r?\n([\s\S]*?):::/g,
+        (_m, title, inner) => {
+          const header = title ? `> **${title.trim()}**\n>\n` : "";
+          const quoted = String(inner)
+            .replace(/\r?\n$/, "")
+            .split(/\r?\n/)
+            .map((line) => `> ${line}`)
+            .join("\n");
+          return `${header}${quoted}`;
+        },
+      )
+      // Any stray admonition fences (opening/closing) without a body.
+      .replace(/:::[A-Za-z]+(?:\[([^\]]*)\])?(?:\s*\{[^}]*\})?\s*(\r?\n)?/g, "")
+      .replace(/^:::\s*$/gm, "")
+      // JSX self-closing and paired tags -> remove (children kept for paired).
+      .replace(/<[A-Z][A-Za-z0-9]*[^>]*\/>/g, "")
+      .replace(/<\/?[A-Z][A-Za-z0-9]*[^>]*>/g, "")
+      // Remove remaining inline JSX expressions like {variable} (best effort).
+      .replace(/^\s*\{[^}]*\}\s*$/gm, "")
+      // Collapse 3+ blank lines.
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
 }
 
 async function main() {
+  const files = await collectDocs(docsRoot);
+  if (files.length === 0) {
+    console.log("No Docusaurus docs found, skipping llms.txt generation");
+    return;
+  }
+
+  const docs = [];
+  for (const file of files) {
+    const raw = await readFile(file, "utf-8");
+    const { frontmatter, body } = parseFrontmatter(raw);
+    const relPath = relative(docsRoot, file);
+    const route = resolveRoute(relPath, frontmatter);
+    docs.push({
+      relPath,
+      route,
+      title: frontmatter.title || route || "Home",
+      description: frontmatter.description || "",
+      order: Number(frontmatter.sidebar_position ?? 0),
+      plain: toPlainMarkdown(body),
+    });
+  }
+
+  // Stable ordering: by sidebar_position, then route.
+  docs.sort((a, b) => a.order - b.order || a.route.localeCompare(b.route));
+
   await mkdir(outputDir, { recursive: true });
 
-  // Collect docs from Docusaurus source
-  const docFiles = await collectMdxFiles(docusaurusDocsDir);
-  const docs = await Promise.all(docFiles.map((f) => parseMdx(f, docusaurusDocsDir)()));
-
-  // Collect blog posts from TanStack Start source
-  const blogFiles = await collectMdxFiles(blogDir);
-  const blogPosts = await Promise.all(blogFiles.map((f) => parseMdx(f, blogDir)()));
-
-  // Sort docs by slug for consistent ordering
-  docs.sort((a, b) => a.slug.localeCompare(b.slug));
-
-  // Sort blog posts by date descending
-  blogPosts.sort((a, b) => (b.frontmatter.date || "").localeCompare(a.frontmatter.date || ""));
-
-  // Generate llms.txt (summary)
+  // --- llms.txt (summary, llmstxt.org) ---
   const llmsLines = [
     "# gpui-query",
     "",
@@ -106,22 +170,11 @@ async function main() {
   ];
 
   for (const doc of docs) {
-    const title = doc.frontmatter.title || doc.slug;
-    const desc = doc.frontmatter.description || doc.frontmatter.excerpt || "";
-    const url = `https://gpui-query.hmziq.xyz/docs/${doc.slug}`;
-    llmsLines.push(`- [${title}](${url})${desc ? ": " + desc : ""}`);
-  }
-
-  if (blogPosts.length > 0) {
-    llmsLines.push("");
-    llmsLines.push("## Blog");
-    llmsLines.push("");
-    for (const post of blogPosts) {
-      const title = post.frontmatter.title || post.slug;
-      const desc = post.frontmatter.excerpt || post.frontmatter.description || "";
-      const url = `https://gpui-query.hmziq.xyz/blog/${post.slug}`;
-      llmsLines.push(`- [${title}](${url})${desc ? ": " + desc : ""}`);
-    }
+    const url = `${siteUrl}/docs/${doc.route}`;
+    const title = doc.title;
+    const desc = doc.description ? `: ${doc.description}` : "";
+    // llmstxt.org: `- [Title](URL): Optional description`
+    llmsLines.push(`- [${title}](${url})${desc}`);
   }
 
   llmsLines.push("");
@@ -129,44 +182,37 @@ async function main() {
   llmsLines.push("");
   llmsLines.push("- [GitHub](https://github.com/hmziqrs/gpui-query): Source code and issues");
   llmsLines.push(
-    "- [Getting Started](https://gpui-query.hmziq.xyz/docs/getting-started/installation): Install and first query",
+    "- [Introduction](https://gpui-query.hmziq.xyz/docs/): What is gpui-query and why you need it",
   );
 
   const llmsTxt = llmsLines.join("\n");
   await writeFile(join(outputDir, "llms.txt"), llmsTxt, "utf-8");
-  console.log(`Generated llms.txt (${llmsTxt.split("\n").length} lines)`);
+  console.log(`Generated llms.txt (${docs.length} docs, ${llmsTxt.split("\n").length} lines)`);
 
-  // Generate llms-full.txt (complete content)
+  // --- llms-full.txt (concatenated content) ---
   const fullLines = [
     "# gpui-query",
     "",
-    "> Zero-boilerplate async state management for GPUI. Brings TanStack Query patterns to Rust and the Zed editor's GPUI framework.",
+    "> Zero-boilerplate async state management for GPUI. Brings TanStack Query patterns to Rust and the Zed editor's GPUI framework with caching, retry, cooperative cancellation, and persistence.",
     "",
   ];
 
   for (const doc of docs) {
-    fullLines.push(`## ${doc.frontmatter.title || doc.slug}`);
+    fullLines.push(`## ${doc.title}`);
     fullLines.push("");
-    fullLines.push(doc.body);
-    fullLines.push("");
-  }
-
-  if (blogPosts.length > 0) {
-    fullLines.push("---");
-    fullLines.push("");
-    for (const post of blogPosts) {
-      fullLines.push(`## ${post.frontmatter.title || post.slug}`);
-      fullLines.push("");
-      if (post.frontmatter.date) fullLines.push(`*Published: ${post.frontmatter.date}*`);
-      fullLines.push("");
-      fullLines.push(post.body);
+    if (doc.description) {
+      fullLines.push(`*${doc.description}*`);
       fullLines.push("");
     }
+    fullLines.push(doc.plain);
+    fullLines.push("");
   }
 
   const llmsFullTxt = fullLines.join("\n");
   await writeFile(join(outputDir, "llms-full.txt"), llmsFullTxt, "utf-8");
-  console.log(`Generated llms-full.txt (${llmsFullTxt.split("\n").length} lines)`);
+  console.log(
+    `Generated llms-full.txt (${docs.length} docs, ${llmsFullTxt.split("\n").length} lines)`,
+  );
 }
 
 main().catch((err) => {

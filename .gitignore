@@ -17,3 +17,6 @@ web/public/docs/
 Thumbs.db
 
 .commandcode
+
+# Local Playwright/MCP artifacts
+.playwright-mcp/

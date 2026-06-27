@@ -1,83 +1,106 @@
 ---
 sidebar_position: 1
 title: Installation
-description: How to install gpui-query in your project
+description: Add gpui-query to a GPUI app and wire up the global QueryClient
 ---
 
-## Prerequisites
-
-You need Rust stable and a project that depends on GPUI. GPUI is part of the Zed editor ecosystem, so if you are already building a Zed extension or a standalone GPUI app, you have what you need.
-
-gpui-query has no runtime dependencies beyond `serde` and `ahash`. The GPUI crate itself is only pulled in when you enable the `client` or `hook` feature.
+gpui-query is a Cargo crate. This page covers adding it to a GPUI project, choosing the right [feature flags](#feature-flags), and installing a `QueryClient` as a GPUI [`Global`](/api/query-client) so the hooks can share a single cache.
 
 ## Add the dependency
 
-The simplest way to get started is with default features. This gives you the core state machine plus the full `QueryClient` that integrates with GPUI.
+Run `cargo add` in your crate:
 
-```toml title="Cargo.toml"
-[dependencies]
-gpui-query = "0.1.0"
+```sh
+cargo add gpui-query
 ```
 
-Default features include `client`, which is what most GPUI projects want. If you need the declarative hook layer (the `use_query`, `use_mutation`, and `use_infinite_query` functions), add the `hook` feature instead.
+or add it by hand to `Cargo.toml`:
 
-```toml title="Cargo.toml"
+```toml
 [dependencies]
-gpui-query = { version = "0.1.0", features = ["hook"] }
+gpui-query = "0.1"
 ```
 
-The `hook` feature implies `client`, so you get everything in one line.
-
-If you want the state machine without any GPUI dependency at all (for testing, or for use in a non-GPUI context), depend on `core` only:
-
-```toml title="Cargo.toml"
-[dependencies]
-gpui-query = { version = "0.1.0", default-features = false, features = ["core"] }
-```
+:::note
+`gpui-query` depends on `gpui` as a workspace dependency. It does not ship `gpui` itself — your app already brings `gpui` in, and gpui-query links against the same version.
+:::
 
 ## Feature flags
 
-gpui-query ships three feature flags. Each one builds on the previous.
+The crate is split into three layers, each behind a feature flag:
 
-| Flag | Depends on | What it gives you |
-|------|-----------|-------------------|
-| `core` | `serde` | The query state machine (`QueryStateMachine`), cache key types, and serialization. No GPUI types. |
-| `client` | `core`, `gpui` | `QueryClient` as a GPUI entity, query fetching, cache storage, and observer dispatch. This is the default. |
-| `hook` | `client` | Declarative hooks: `use_query`, `use_mutation`, `use_infinite_query`. These bind a query to a GPUI view and re-render on state changes. |
+| Feature  | Default | Pulls in                                            | What it gives you                                  |
+| -------- | ------- | --------------------------------------------------- | -------------------------------------------------- |
+| `core`   | no      | `serde` only                                        | The transport-agnostic state machine (`QueryResource`, `CachePolicy`, …) with no GPUI dependency. Usable in non-GPUI code or tests. |
+| `client` | yes     | `core` + `gpui`                                     | The `QueryClient` registry and its type-partitioned buckets. |
+| `hook`   | no      | `client`                                            | The `use_query` / `use_mutation` hooks you call from views. |
 
-Most projects should use `hook` or stick with the default `client`. The `core` flag exists for cases where you need the state machine in isolation: unit tests, server-side logic, or embedding inside another framework.
+`client` is on by default, so `cargo add gpui-query` is enough to get the registry. To use the ergonomic hooks from your components, enable the `hook` feature:
 
-## Verify it compiles
-
-Add a reference to the crate in `lib.rs` or `main.rs` and run `cargo check`:
-
-```rust
-use gpui_query::QueryClient;
+```toml
+[dependencies]
+gpui-query = { version = "0.1", features = ["hook"] }
 ```
 
 ```sh
-cargo check
+cargo add gpui-query --features hook
 ```
 
-If that compiles without errors, the dependency is wired up correctly.
+You almost always want `hook` in an application. Reach for `core` alone when you need the state machine without a GPUI dependency (a library, a CLI that reasons about cached state, or unit tests).
 
-## Set up QueryClient as a GPUI global
+## Set up the QueryClient
 
-To use `QueryClient` across your application, register it as a GPUI global in your app entry point. This lets any view access the shared query cache without passing handles around.
+`QueryClient` is a GPUI `Global`. Install it once during app setup — from then on, every hook routes resource creation through it for shared caching, deduplication, and garbage collection.
 
 ```rust
-use gpui::App;
-use gpui_query::QueryClient;
+use gpui_query::client::QueryClient;
+use gpui_query::{CachePolicy, core::RequestPolicy};
 
-fn main() {
-    App::new().run(|cx| {
-        cx.set_global(QueryClient::new(cx));
-    });
+fn setup_app(cx: &mut gpui::App) {
+    cx.set_global(QueryClient::new(
+        // Default freshness for every query.
+        CachePolicy::Ttl { ttl_ms: 60_000 },
+        // Default behavior for concurrent fetches on the same resource.
+        RequestPolicy::LatestWins,
+    ));
 }
 ```
 
-From here, any view can call `cx.global::<QueryClient>()` to interact with the cache. The [Quick Start](/getting-started/quick-start) guide picks up from this point and walks through your first query.
+`QueryClient::new` takes the default cache and request policies. Tune the garbage-collection window and the default mutation retry policy with builders:
 
-:::info
-If you used the `core` feature only, `QueryClient` is not available. You would work with `QueryStateMachine` directly instead. See the [API reference](/api/query-client) for details on what each layer exposes.
+```rust
+use gpui_query::client::QueryClient;
+use gpui_query::{CachePolicy, RetryPolicy, core::RequestPolicy};
+
+let client = QueryClient::new(
+    CachePolicy::Ttl { ttl_ms: 60_000 },
+    RequestPolicy::LatestWins,
+)
+.with_gc_time(600_000)                       // 10 minutes (default is 5)
+.with_retry_policy(RetryPolicy::no_retries()); // default retry for mutations
+
+cx.set_global(client);
+```
+
+:::note
+If a hook runs before a `QueryClient` is installed, it falls back to creating a standalone entity — there is no shared cache, no deduplication, and no GC. Always install the client during app startup.
 :::
+
+## Verify it is reachable
+
+From any context, read the client back to confirm the global is set:
+
+```rust
+# use gpui_query::client::QueryClient;
+# fn doc(cx: &gpui::App) {
+let _client = cx.global::<QueryClient>();
+# }
+```
+
+That is the entire setup: add the crate, enable `hook`, install a `QueryClient` global. With that in place, the [Quick Start](/getting-started/quick-start) shows your first end-to-end query.
+
+## Next steps
+
+- [Quick Start](/getting-started/quick-start) — define a fetcher, call `use_query`, render data.
+- [Queries](/api/queries) — the full `use_query` surface and `QueryResource` accessors.
+- [Caching](/guides/caching) — `CachePolicy`, deduplication, and GC in depth.

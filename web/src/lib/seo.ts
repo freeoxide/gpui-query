@@ -34,6 +34,15 @@ interface BlogPostData {
   image?: string;
 }
 
+interface ChangelogData {
+  name: string;
+  description: string;
+  url: string;
+  softwareVersion?: string;
+  datePublished?: string;
+  dateModified?: string;
+}
+
 export function softwareSourceCode(data: SoftwareSourceCodeData) {
   return {
     "@context": "https://schema.org",
@@ -47,6 +56,14 @@ export function softwareSourceCode(data: SoftwareSourceCodeData) {
   };
 }
 
+/*
+ * The following TechArticle / HowTo / BlogPosting factories are intentionally
+ * retained even though some have no current call site in the marketing app:
+ * the docs (Docusaurus) and blog moved out of web/, but the blog will be
+ * re-introduced and wired to blogPost(). techArticle() and howTo() are kept
+ * for parity and future doc/blog embeds. Do not remove.
+ */
+// Retained for Docusaurus/future use — no current call site in this app.
 export function techArticle(data: TechArticleData) {
   return {
     "@context": "https://schema.org",
@@ -59,6 +76,7 @@ export function techArticle(data: TechArticleData) {
   };
 }
 
+// Retained for Docusaurus/future use — no current call site in this app.
 export function howTo(data: HowToData) {
   return {
     "@context": "https://schema.org",
@@ -98,5 +116,31 @@ export function blogPost(data: BlogPostData) {
     ...(data.datePublished && { datePublished: data.datePublished }),
     ...(data.url && { url: data.url }),
     ...(data.image && { image: data.image }),
+  };
+}
+
+/*
+ * A changelog/release-notes page. Modeled as schema.org Article with an
+ * associated SoftwareApplication so the latest version is discoverable.
+ */
+export function changelogPage(data: ChangelogData) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: data.name,
+    description: data.description,
+    url: data.url,
+    mainEntityOfPage: data.url,
+    ...(data.datePublished && { datePublished: data.datePublished }),
+    ...(data.dateModified && { dateModified: data.dateModified }),
+    about: {
+      "@type": "SoftwareApplication",
+      name: "gpui-query",
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Cross-platform",
+      ...(data.softwareVersion && {
+        softwareVersion: data.softwareVersion,
+      }),
+    },
   };
 }
