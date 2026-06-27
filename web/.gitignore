@@ -13,3 +13,6 @@ __unconfig*
 todos.json
 public/docs/
 src/routeTree.gen.ts
+
+# Local Playwright/MCP artifacts
+.playwright-mcp/

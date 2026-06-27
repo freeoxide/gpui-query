@@ -1,122 +1,178 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { getBlogBySlug, type BlogFrontmatter } from "#/lib/blog";
-import { ArrowLeft, CalendarIcon, UserIcon } from "lucide-react";
+import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+import { getAllBlogPosts, getBlogBySlug, type BlogFrontmatter } from "#/lib/blog";
+import { blogPost } from "#/lib/seo";
+
+/* ─── Route ─────────────────────────────────────────────────────────── */
 
 export const Route = createFileRoute("/blog/$slug")({
-  // Loader returns ONLY serializable data (slug + frontmatter). The TSX
+  head: ({ loaderData }) => {
+    const post = loaderData as { slug: string; frontmatter: BlogFrontmatter } | undefined;
+    const siteUrl = "https://gpui-query.hmziq.xyz";
+    if (!post) {
+      return {
+        meta: [{ title: "Not Found - gpui-query Blog" }],
+      };
+    }
+    const fm = post.frontmatter;
+    const url = `${siteUrl}/blog/${post.slug}`;
+    return {
+      meta: [
+        { title: `${fm.title} - gpui-query Blog` },
+        { name: "description", content: fm.description },
+        { property: "og:title", content: `${fm.title} - gpui-query Blog` },
+        { property: "og:description", content: fm.description },
+        { property: "og:type", content: "article" },
+        { property: "og:url", content: url },
+        { property: "og:image", content: `${siteUrl}/og-image.png` },
+        { property: "article:author", content: fm.author },
+        { property: "article:published_time", content: fm.date },
+        { name: "twitter:card", content: "summary_large_image" },
+        { name: "twitter:title", content: fm.title },
+        { name: "twitter:description", content: fm.description },
+      ],
+      links: [{ rel: "canonical", href: url }],
+      scripts: [
+        {
+          type: "application/ld+json",
+          children: JSON.stringify(
+            blogPost({
+              headline: fm.title,
+              description: fm.description,
+              author: fm.author,
+              datePublished: fm.date,
+              url,
+              image: `${siteUrl}/og-image.png`,
+            }),
+          ),
+        },
+      ],
+    };
+  },
+  // Loader returns ONLY serializable data (slug + frontmatter). The MDX
   // `Content` component is non-serializable, so passing it through the loader
   // corrupts loaderData during prerender dehydrate/rehydrate (empty render +
   // hydration invariant). The component resolves `Content` itself below.
-  loader: ({ params }) => {
+  loader: async ({ params }) => {
     const post = getBlogBySlug(params.slug);
-    if (!post) {
-      throw new Error(`Unknown blog slug: ${params.slug}`);
-    }
-    return { slug: post.slug, frontmatter: post.frontmatter };
-  },
-  head: ({ loaderData }) => {
-    const data = loaderData as { slug: string; frontmatter: BlogFrontmatter } | undefined;
-    const fm = data?.frontmatter;
-    const title = fm ? `${fm.title} - gpui-query` : "Post Not Found - gpui-query";
-    const description = fm?.description ?? "Blog post from gpui-query.";
-    const slug = data?.slug ?? "";
-    return {
-      meta: [
-        { title },
-        { name: "description", content: description },
-        { property: "og:title", content: title },
-        { property: "og:description", content: description },
-        { property: "og:type", content: "article" },
-        { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
-        { name: "twitter:card", content: "summary_large_image" },
-        { name: "twitter:title", content: title },
-        { name: "twitter:description", content: description },
-        { name: "twitter:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
-      ],
-      links: [{ rel: "canonical", href: `https://gpui-query.hmziq.xyz/blog/${slug}` }],
-    };
+    return post ? { slug: post.slug, frontmatter: post.frontmatter } : undefined;
   },
   component: BlogPostPage,
+  notFoundComponent: PostNotFound,
 });
 
+/* ─── Helpers ───────────────────────────────────────────────────────── */
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+}
+
+/* ─── Page ──────────────────────────────────────────────────────────── */
+
 function BlogPostPage() {
-  const data = Route.useLoaderData() as { slug: string; frontmatter: BlogFrontmatter };
-  // Resolve the (non-serializable) TSX component at render time.
+  const data = Route.useLoaderData() as { slug: string; frontmatter: BlogFrontmatter } | undefined;
+  if (!data) return <PostNotFound />;
+  // Resolve the (non-serializable) MDX component at render time.
   const post = getBlogBySlug(data.slug);
-  if (!post) {
-    return (
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-3xl text-center">
-          <h1 className="text-3xl font-bold">Post not found</h1>
-          <p className="mt-2 text-muted-foreground">
-            The blog post you&apos;re looking for doesn&apos;t exist.
-          </p>
-          <Button asChild className="mt-6">
-            <Link to="/blog">
-              <ArrowLeft className="mr-1.5 h-4 w-4" />
-              Back to Blog
-            </Link>
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  if (!post) return <PostNotFound />;
 
   const { Content, frontmatter } = post;
+  const posts = getAllBlogPosts();
+  const index = posts.findIndex((p) => p.slug === post.slug);
+  const newer = index > 0 ? posts[index - 1] : undefined;
+  const older = index >= 0 && index < posts.length - 1 ? posts[index + 1] : undefined;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-16 lg:px-8">
-      <article className="mx-auto max-w-3xl">
-        {/* Back link */}
-        <Link
-          to="/blog"
-          className="mb-8 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Back to Blog
-        </Link>
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-16 lg:px-8">
+      <Link
+        to="/blog"
+        className="inline-flex items-center text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+      >
+        <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+        Back to blog
+      </Link>
 
-        {/* Header */}
-        <header>
-          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{frontmatter.title}</h1>
-          <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <CalendarIcon className="h-3.5 w-3.5" />
-              <time dateTime={frontmatter.date}>
-                {new Date(frontmatter.date).toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
-              </time>
-            </span>
-            {frontmatter.author && (
-              <span className="inline-flex items-center gap-1.5">
-                <UserIcon className="h-3.5 w-3.5" />
-                {frontmatter.author}
-              </span>
-            )}
-          </div>
-        </header>
-
-        {/* Divider */}
-        <hr className="my-8 border-border/60" />
-
-        {/* Content */}
-        <div className="prose-container max-w-none [&_h2]:mt-10 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mt-8 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:leading-relaxed [&_p]:text-foreground/90 [&_a]:text-primary [&_a]:underline [&_a]:decoration-primary/30 [&_a]:underline-offset-2 [&_a:hover]:decoration-primary [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-sm [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted/50 [&_pre]:p-4 [&_ul]:my-4 [&_ul]:ml-6 [&_ul]:list-disc [&_ul]:space-y-1 [&_li]:text-foreground/90 [&_li]:leading-relaxed [&_blockquote]:border-l-4 [&_blockquote]:border-primary/40 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground">
-          <Content />
+      {/* Header */}
+      <header className="mt-6 border-l-4 border-primary pl-5">
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{frontmatter.title}</h1>
+        <p className="mt-3 text-lg text-muted-foreground">{frontmatter.description}</p>
+        <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground/90">{frontmatter.author}</span>
+          <span aria-hidden="true">·</span>
+          <time dateTime={frontmatter.date}>{formatDate(frontmatter.date)}</time>
         </div>
+        {frontmatter.tags && frontmatter.tags.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {frontmatter.tags.map((tag) => (
+              <Badge key={tag} variant="secondary" className="font-normal">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </header>
 
-        {/* Bottom nav */}
-        <hr className="my-10 border-border/60" />
-        <Button variant="outline" asChild>
+      {/* Body */}
+      <article className="prose prose-sm mt-10 max-w-none dark:prose-invert sm:prose-base">
+        <Content />
+      </article>
+
+      {/* Prev / next nav */}
+      <nav className="mt-16 flex flex-col gap-4 border-t border-border/60 pt-8 sm:flex-row sm:justify-between">
+        {older ? (
+          <Button variant="outline" asChild className="justify-start">
+            <Link to="/blog/$slug" params={{ slug: older.slug }}>
+              <ArrowLeft className="mr-2 h-4 w-4 shrink-0" />
+              <span className="flex flex-col items-start truncate">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Older
+                </span>
+                <span className="truncate">{older.frontmatter.title}</span>
+              </span>
+            </Link>
+          </Button>
+        ) : (
+          <span className="hidden sm:block" />
+        )}
+        {newer ? (
+          <Button variant="outline" asChild className="justify-end text-right">
+            <Link to="/blog/$slug" params={{ slug: newer.slug }}>
+              <span className="flex flex-col items-end truncate">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Newer
+                </span>
+                <span className="truncate">{newer.frontmatter.title}</span>
+              </span>
+              <ArrowRight className="ml-2 h-4 w-4 shrink-0" />
+            </Link>
+          </Button>
+        ) : null}
+      </nav>
+    </div>
+  );
+}
+
+/* ─── 404 ───────────────────────────────────────────────────────────── */
+
+function PostNotFound() {
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-24 lg:px-8">
+      <div className="flex flex-col items-center text-center">
+        <h1 className="text-2xl font-bold tracking-tight">Post not found</h1>
+        <p className="mt-2 max-w-md text-muted-foreground">
+          The article you are looking for does not exist or has been moved.
+        </p>
+        <Button asChild className="mt-6">
           <Link to="/blog">
-            <ArrowLeft className="mr-1.5 h-4 w-4" />
-            Back to Blog
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            All posts
           </Link>
         </Button>
-      </article>
+      </div>
     </div>
   );
 }

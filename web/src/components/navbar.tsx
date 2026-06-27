@@ -6,7 +6,7 @@ import { MobileNav } from "#/components/mobile-nav";
 import { SearchDialog } from "#/components/search-dialog";
 import { useState, useEffect } from "react";
 
-const navLinks = [
+const navLinks: { href: string; label: string; external?: boolean }[] = [
   { href: "/docs/", label: "Docs" },
   { href: "/blog", label: "Blog" },
   { href: "/faq", label: "FAQ" },

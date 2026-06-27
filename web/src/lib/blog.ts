@@ -1,6 +1,9 @@
 import { type ComponentType } from "react";
 
 import IntroducingGpuiQueryPost from "../content/blog/introducing-gpui-query";
+import WhyGpuiQueryPost from "../content/blog/why-gpui-query";
+import CooperativeCancellationPost from "../content/blog/cooperative-cancellation";
+import CachePoliciesExplainedPost from "../content/blog/cache-policies-explained";
 
 /* ─── Frontmatter schema ────────────────────────────────────────────── */
 
@@ -39,6 +42,42 @@ const POSTS: BlogPost[] = [
       date: "2026-03-10",
       author: "hmziqrs",
       tags: ["gpui", "rust", "async", "introduction"],
+    },
+  },
+  {
+    slug: "why-gpui-query",
+    Content: WhyGpuiQueryPost,
+    frontmatter: {
+      title: "Why gpui-query",
+      description:
+        "Bringing TanStack Query's battle-tested async state patterns to GPUI and Rust — without the boilerplate.",
+      date: "2026-03-12",
+      author: "hmziqrs",
+      tags: ["gpui", "rust", "async", "introduction"],
+    },
+  },
+  {
+    slug: "cooperative-cancellation",
+    Content: CooperativeCancellationPost,
+    frontmatter: {
+      title: "Cooperative Cancellation in gpui-query",
+      description:
+        "How QuerySignal uses Arc<AtomicBool> to cancel in-flight queries cleanly when components unmount.",
+      date: "2026-04-08",
+      author: "hmziqrs",
+      tags: ["gpui", "rust", "concurrency", "cancellation"],
+    },
+  },
+  {
+    slug: "cache-policies-explained",
+    Content: CachePoliciesExplainedPost,
+    frontmatter: {
+      title: "Cache Policies, Explained",
+      description:
+        "NoCache vs Ttl vs StaleWhileRevalidate — when each CachePolicy variant is the right choice, and how they interact with retries and observers.",
+      date: "2026-05-02",
+      author: "hmziqrs",
+      tags: ["gpui", "rust", "caching", "performance"],
     },
   },
 ];
