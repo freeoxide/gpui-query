@@ -24,8 +24,11 @@ app would wire things in, never a path inside this crate.
 
 > **Status:** Verified against the `gpui-query` crate source under
 > `crates/gpui-query/src`. The crate exposes features `core`, `client`, and `hook`
-> (see `crates/gpui-query/src/lib.rs` and `crates/gpui-query/Cargo.toml`); there
-> is **no** `persist` feature — persistence ships as part of the `client` layer.
+> (see `crates/gpui-query/src/lib.rs` and `crates/gpui-query/Cargo.toml`).
+> Persistence is **optional** — it exists only for offline data caching — so this
+> plan puts the entire persistence surface behind a new opt-in `persist` feature;
+> **today** it still ships unconditionally in the `client` layer, and
+> feature-gating that shipped skeleton is itself part of the proposal below.
 > The hooks use a signal-always fetcher closure: `use_query` in
 > `hook/query_hooks.rs` takes `F: Fn(QuerySignal) -> Fut + Send + 'static` and
 > returns a `(Entity<QueryResource<T, E>>, Subscription)` tuple. `QueryClient` is
@@ -34,9 +37,9 @@ app would wire things in, never a path inside this crate.
 > `QueryObserver` / `Observer` machinery in `client/observer.rs` observes
 > individual resource entities via `Observer::observe`; there is **no** `Resource`
 > trait (the relevant bound is `ObservableResource`). Everything marked *Proposed*
-> below — the `gpui-query-http` and `gpui-query-persist` crates, an async
-> `Persister`, a `persist` feature flag, `Fetched<T, E>`, and `use_query_with_policy` —
-> does not exist yet.
+> below — the `gpui-query-http` and `gpui-query-persist` crates, a **disk-based
+> cross-platform `FilePersister`**, an async `Persister`, the `persist` feature
+> gate, `Fetched<T, E>`, and `use_query_with_policy` — does not exist yet.
 
 ---
 
@@ -61,10 +64,16 @@ app would wire things in, never a path inside this crate.
 1. **Core stays agnostic.** `gpui-query` must not import `reqwest`, `http`, or any
    storage backend. Users with gRPC, IPC, or offline-first transports must not pay
    for HTTP semantics they don't use.
-2. **One extension point per concern.** HTTP cache and persistence have different
+2. **Optional concerns are feature-gated.** Persistence is only for offline data
+   caching — the uncommon case — so the whole persistence surface (the shipped
+   `QueryPersister` skeleton and any disk adapter) sits behind an opt-in `persist`
+   feature. Apps that don't persist pay nothing: no persistence code compiled in,
+   and no disk-IO dependencies. HTTP cache helpers get the same treatment by
+   living in their own crate.
+3. **One extension point per concern.** HTTP cache and persistence have different
    scopes, triggers, and shapes. Each gets its own minimal surface rather than a
    unified abstraction that fits neither well.
-3. **The crate owns its extension points; consumers own their adapters.**
+4. **The crate owns its extension points; consumers own their adapters.**
    `gpui-query` is the authority on its cache and query contract, so the extension
    points (the `QueryPersister` trait, the `dehydrate` / `hydrate` / `persist` /
    `restore` methods, and the proposed HTTP helper boundary) belong in — or
@@ -74,17 +83,25 @@ app would wire things in, never a path inside this crate.
    ships only its own backend-specific adapters. The reason to centralize the
    trait and reference adapters here is single-sided design authority, not
    coordination with another owned crate.
-4. **Reference adapters ship with the crate; app-specific adapters ship with the
+5. **Reference adapters ship with the crate; app-specific adapters ship with the
    app.** A reference `FilePersister` already appears as the canonical example in
-   the `QueryPersister` trait docs in `client/erased.rs`. A richer, value-carrying
-   `FilePersister` in a proposed `gpui-query-persist` crate is the future shape. A
+   the `QueryPersister` trait docs in `client/erased.rs`. The proposed
+   `gpui-query-persist` crate ships a **real, disk-based, cross-platform**
+   `FilePersister` (see [2. Persistence](#2-persistence--gpui-query-persist)). A
    `SqlitePersister` (which depends on a consumer's own storage layout and
    migrations) always stays in that consumer.
-5. **No speculative abstractions.** Don't build a generic plugin/middleware trait
+6. **Disk persistence is cross-platform and robust.** The reference `FilePersister`
+   resolves an OS-appropriate data directory (Linux / macOS / Windows), writes
+   atomically (temp file + replace — with the per-OS atomicity/durability nuances
+   in [Disk-based persistence](#disk-based-persistence)), tolerates corruption
+   without panicking, and serializes portably (JSON or bincode). It must be robust
+   on Linux, macOS, and Windows — surviving crash-mid-write, corrupt files,
+   permission errors, and schema drift.
+7. **No speculative abstractions.** Don't build a generic plugin/middleware trait
    to wrap these concerns. Retry already lives in core; HTTP is a wrapper, not a
    layer; persistence is an existing synchronous trait plus proposed enrichment. If
    a new need appears later, add a new small extension point then.
-6. **Follow `rust-best-practices`.** Typed errors via `thiserror` in any proposed
+8. **Follow `rust-best-practices`.** Typed errors via `thiserror` in any proposed
    companion crates; `Arc<T>` for shared resources; `impl Future<...> + Send` on
    trait methods to guarantee spawnable futures (preferred over `async fn` in
    traits, which does not guarantee `Send`); `#![deny(missing_docs)]` on every
@@ -118,15 +135,21 @@ Two concerns, two shapes. Nothing in common, so no shared abstraction.
   placeholder, always `None`, was dropped as dead weight in audit fix #L14). The
   proposed enrichment adds: an async persister, a value/meta-carrying entry, a
   `persist_with` debounce/filter subscription, schema versioning, and (optionally)
-  extraction into a `gpui-query-persist` crate. Note that a subscription built on
-  `cx.observe_global::<QueryClient>()` is **not** free: a `Global` does not notify
-  observers on mutation unless the global explicitly notifies, and today
-  `QueryClient` routes notifications through per-entity `Observer::observe`
-  (`client/observer.rs`), not through whole-client broadcasts — there are no
-  global-notify calls in the `client` layer. Making `persist_with` work is
-  therefore a real core dependency, not pure reuse.
+  extraction into a `gpui-query-persist` crate. Note on the subscription path: a
+  `persist_with` built on `cx.observe_global::<QueryClient>()` **does** fire for
+  free on any mutation routed through `cx.update_global::<QueryClient, _>` — and
+  the crate already does exactly that at every fetch / retry / mutation / infinite-
+  query completion site (`hook/query_hooks.rs`, `hook/fetch_retry.rs`,
+  `hook/mutation_hooks/hooks.rs`, `hook/use_infinite_query/*`), because GPUI's
+  `update_global` pushes a `NotifyGlobalObservers` effect. The one gap is
+  `QueryClient::set_query_data` (`client/mod.rs`), which mutates a resource
+  **entity** via `entity.update(...)` with no global notify — so seed/prime writes
+  would need an explicit global notify (or routing through `update_global`) to wake
+  a `persist_with` observer. So `persist_with` is mostly reuse, plus one small
+  notify hook for the `set_query_data` path.
 
-Each proposed addition is ~50 lines of core surface. No plugin system, no
+Each proposed addition is ~50 lines of core surface, all behind the proposed
+opt-in `persist` feature (persistence is offline-data only). No plugin system, no
 middleware chain, no lifecycle hook bag.
 
 ---
@@ -151,7 +174,7 @@ Per the root `Cargo.toml`, the only workspace member is `crates/gpui-query`
 tree but listed under `exclude`. There is **no** `gpui-query-http` crate, **no**
 `gpui-query-persist` crate, and **no** `gpui-app` crate in this repo.
 
-### Feature flags (real, as shipped)
+### Feature flags (real today, plus the proposed `persist` gate)
 
 ```toml
 # crates/gpui-query/Cargo.toml
@@ -160,15 +183,42 @@ default = ["client"]
 core   = []
 client = ["core", "dep:gpui"]
 hook   = ["client"]
+# PROPOSED — gates the optional persistence surface (offline data only).
+persist = ["client"]
 ```
 
 The crate exposes three layers — `core`, `client`, `hook` — gated by features of
 the same names (see `crates/gpui-query/src/lib.rs`). `client` is on by default.
-There is **no `persist` feature flag**: persistence is part of the `client` layer
-today. `QueryPersister`, `DehydratedEntry`, `DehydratedState`, and the
-`QueryClient::dehydrate` / `hydrate` / `persist` / `restore` methods all ship
-whenever `client` is enabled. A dedicated opt-in feature is conceivable for the
-future async/typed work sketched below, but nothing of the kind exists yet.
+
+Persistence is **optional** (offline-data only), so the design gates it behind a
+new opt-in `persist` feature. **Today** the persistence skeleton — the
+`QueryPersister` trait (`client/erased.rs`), `DehydratedEntry` / `DehydratedState`
+(`client/devtools.rs`), and the `QueryClient::dehydrate` / `hydrate` / `persist` /
+`restore` methods (`client/lifecycle.rs`) — ships **unconditionally** as part of
+`client`; feature-gating that shipped skeleton is part of the proposal.
+
+The gate is feasible but **not** zero-coupling — three prerequisites must land
+first: (1) **extract `current_time_ms`** out of `client/erased.rs` (it is defined
+in the same module as `QueryPersister` and re-exported together at
+`client/mod.rs`, but it is consumed by non-persistence code — gc, diagnostics,
+prepared-fetch, the whole hook layer — so the module cannot be gated as-is; only
+the `QueryPersister` symbol can move once the helper is relocated); (2) decide
+what to do with `collect_key_status_into` — a required method on the always-
+compiled `ErasedBucket` / `ErasedInfiniteBucket` / `ErasedMutationBucket` traits
+whose only caller is `dehydrate` (gate the method + its three impls together, or
+leave the dead method when `persist` is off); (3) cfg-gate the itemized
+`pub use devtools::{…}` and `pub use erased::{…}` lists in `client/mod.rs` in
+lockstep with the gated symbols. Once those are done, `QueryClient::diagnostics()`
+is unaffected (it returns `ClientDiagnostic` and never touches the dehydrate
+types). Dependency note: `serde` is a non-optional core dep (`CachePolicy` derives
+`Serialize` / `Deserialize` from it), but **`serde_json` is currently
+`[dev-dependencies]`-only** — every `serde_json::` use in the crate is behind
+`#[cfg(test)]`. Because the proposed `PersistedEntry.value` / `Fetched.meta` are
+typed `serde_json::Value`, the value-carrying surface promotes `serde_json` to a
+real (gated) dep: add it under `persist`, or keep all JSON serialization inside
+the `gpui-query-persist` companion (current plan: `PersistFormat::Json` lives
+there). The disk-IO crates (`dirs` / `tempfile` / `bincode`) likewise live in the
+companion, pulled only by apps that actually persist.
 
 ### Proposed (not yet implemented)
 
@@ -241,7 +291,7 @@ and (6) snapshot `version` migration. All of these are future work.
 | `QueryKeyFilter<'a>`| `gpui-query` (`core/key_filter.rs`) | `enum { Exact(&'a QueryKey), Prefix(&'a QueryKey), All }`; borrows a `&'a QueryKey` and is **not** `Serialize` — see note in [2. Persistence](#2-persistence--gpui-query-persist) before reusing it in `PersistOptions`. |
 | `QueryPersister`    | `gpui-query` (`client/erased.rs`)   | `Send + Sync`, object-safe; synchronous `load()` / `save()` over `Vec<DehydratedEntry>`. The real extension point today.   |
 | `DehydratedEntry`   | `gpui-query` (`client/devtools.rs`) | Metadata-only: `key` + `TypeId` + `kind`. **Not serde.** No value field. The real cross-boundary persistence value.         |
-| `DehydratedState`   | `gpui-query` (`client/devtools.rs`) | `{ entries: Vec<DehydratedEntry> }`; produced by `QueryClient::dehydrate`, consumed by `hydrate`.                           |
+| `DehydratedState`   | `gpui-query` (`client/devtools.rs`) | `{ entries: Vec<DehydratedEntry> }`; produced by `QueryClient::dehydrate`, consumed by `hydrate` (a no-op hook today).                           |
 
 ### Proposed (not yet implemented — see [2. Persistence](#2-persistence--gpui-query-persist))
 
@@ -250,7 +300,7 @@ and (6) snapshot `version` migration. All of these are future work.
 | `Persister` (async) | `gpui-query` (client/persist, future) | Async successor to the synchronous `QueryPersister`; `load` / `save` returning `impl Future + Send` (**not** object-safe). |
 | `PersistedEntry`    | `gpui-query` (future)               | Carries `value: serde_json::Value`, `cached_at`, `cache_policy`, `meta` — the typed payload `DehydratedEntry` lacks. |
 | `PersistSnapshot`   | `gpui-query` (future)               | `{ entries: HashMap<QueryKey, PersistedEntry>, version: u32 }`.                                                    |
-| `PersistOptions`    | `gpui-query` (future)               | `{ filter, max_age, debounce, dehydrate_filter }`. Note: `filter` cannot reuse `QueryKeyFilter<'a>` directly — see [2. Persistence](#2-persistence--gpui-query-persist). |
+| `PersistOptions`    | `gpui-query` (future)               | `{ filter, max_age, debounce }` (+ optional `dehydrate_filter`, type TBD). Note: `filter` cannot reuse `QueryKeyFilter<'a>` directly — see [2. Persistence](#2-persistence--gpui-query-persist). |
 | `CacheMeta`         | `gpui-query-http` (future)          | `serde::{Serialize, Deserialize}`; crosses into a future persist crate only as opaque `serde_json::Value`.         |
 | `HttpCache`         | `gpui-query-http` (future)          | `reqwest` wrapper; nothing swaps, hence a struct not a trait.                                                       |
 | `FilePersister`     | `gpui-query-persist` (future)       | Reference adapter.                                                                                                  |
@@ -270,9 +320,9 @@ extend the shipped skeleton, not replace it.
 These are **proposed additions and enhancements to `gpui-query` core** that the
 two companion crates depend on. Where a capability already ships in a different
 shape, the proposal is framed as an enhancement of that skeleton rather than a
-fresh build. None of these are behind a feature flag today — persistence currently
-ships unconditionally in the `client` layer (the crate exposes only `core`,
-`client`, and `hook`; see `lib.rs`).
+fresh build. Persistence ships unconditionally in the `client` layer today; this
+plan gates it behind the proposed `persist` feature (offline-data only — see
+[Crate Layout](#crate-layout)).
 
 ### 1. Fetcher-returned `CachePolicy` (for HTTP "server wins")
 
@@ -308,9 +358,11 @@ today. Both are proposed here.
   non-breaking).
 
 - **Option B (callback):** keep the fetcher as `Result<T, E>`, but give the
-  fetcher closure an injected `&QueryContext` handle it can call
-  `ctx.set_cache_policy(...)` / `ctx.set_meta(...)` on. More flexible, more
-  state-passing boilerplate.
+  fetcher closure an injected handle to the resource whose
+  `QueryResource::set_cache_policy` (`core/resource/accessors.rs:134` — **already
+  shipped**; same for `InfiniteQueryResource`) it can call (plus a `set_meta`
+  equivalent). Only the handle plumbing is net-new; the setter itself exists
+  today. More flexible, more state-passing boilerplate.
 
 **Recommendation:** Option A — explicit, serializable, composes cleanly with
 persistence. **Caveat:** the `meta` field and its persistence coupling depend on
@@ -328,33 +380,39 @@ calls `cx.notify()` only on status change. It does **not** observe whole-client
 mutations. A persistence subscription needs to know when _any_ tracked entry
 changes.
 
-**Important — the naive reuse does not work today.** `QueryClient` is a `Global`
-(`impl Global for QueryClient {}` in `client/mod.rs`), but in GPUI updating a
-Global does **not** auto-notify `cx.observe_global` subscribers — the global must
-explicitly notify. The crate currently has **no notification path on the
-`QueryClient` global at all**: every `cx.notify()` call in the crate is
-entity-scoped (fired inside `Observer::observe` callbacks or the fetch-retry /
-mutation runners), and `QueryClient::set_query_data` mutates a resource without
-any notify. There is no `observe_global::<QueryClient>()` usage anywhere in the
-crate. So `cx.observe_global::<QueryClient>()` would simply never fire as-is.
+**Good news — most of the reuse works today.** `QueryClient` is a `Global`
+(`impl Global for QueryClient {}` in `client/mod.rs`), and in GPUI mutating a
+Global via `cx.update_global::<QueryClient, _>` **does** auto-fire
+`cx.observe_global::<QueryClient>()` subscribers (the update pushes a
+`NotifyGlobalObservers` effect). The crate already routes real mutations through
+`update_global::<QueryClient, _>` at every fetch / retry / mutation / infinite-
+query completion site (`hook/query_hooks.rs`, `hook/fetch_retry.rs`,
+`hook/mutation_hooks/hooks.rs`, `hook/use_infinite_query/*`). So a `persist_with`
+subscribing via `observe_global::<QueryClient>()` **already fires** on the common
+mutation paths — no core change needed for those.
+
+**The one gap:** `QueryClient::set_query_data` (`client/mod.rs`) mutates a
+resource **entity** via `entity.update(...)` — that does *not* touch the
+`QueryClient` global, so it would not wake a global observer. Seed/prime writes
+(hydration, optimistic updates) therefore need an explicit global notify (or
+re-routing through `update_global`) to be observed.
 
 **Fix — pick one (Open Question 2):**
 
-- **Option A (coarse global observer — requires a notify hook):** add a
-  `QueryClient` notification path (e.g. a method called from `set_query_data`,
-  fetch-completion, and mutation completion that triggers global observers), then
-  have `persist_with` subscribe via `cx.observe_global::<QueryClient>()`. The
-  `PersistOptions::filter` (an owned filter, see below) and `debounce` do the real
-  selection work. This is a small but **real** core change — the notify hook must
-  exist before `observe_global` is useful.
+- **Option A (coarse global observer):** `persist_with` subscribes via
+  `cx.observe_global::<QueryClient>()` — free for every mutation already going
+  through `update_global` (the common case) — and add one small notify hook so
+  `set_query_data` also wakes the observer. The `PersistOptions::filter` (an owned
+  filter, see below) and `debounce` do the real selection work. This is almost
+  pure reuse plus a one-line notify in `set_query_data`.
 - **Option B (typed dirty signal):** add a `QueryClient` dirty signal (analogous
   to the proposed `notify_buckets_changed`) emitted from `set_query_data` / fetch
   completion, observed by `persist_with`. More precise, more core surface.
 
-**Recommendation:** Option A for v1, but **only after the global-notify hook is
-added** — the existing `Observer` is entity-scoped, so there is nothing to reuse
-for whole-client observation yet. Move to Option B only if profiling shows the
-coarse path firing too often.
+**Recommendation:** Option A for v1 — it is mostly free reuse (the bulk of
+mutations already notify via `update_global`), with a trivial notify added to the
+`set_query_data` path. Move to Option B only if profiling shows the coarse path
+firing too often.
 
 ### 3. Async `Persister` + `persist_with` + real `hydrate` (enhancement of the shipped skeleton)
 
@@ -416,8 +474,9 @@ persister-adapter's problem.
    not a resolved one.
 
 Detailed shape lives in [2. Persistence](#2-persistence--gpui-query-persist).
-When the richer API lands it **may** introduce a new feature flag (e.g.
-`persist`), but the synchronous skeleton it builds on is already unconditional.
+The richer API — and the gating of the currently-unconditional synchronous
+skeleton — lands behind the proposed `persist` feature (see [Crate
+Layout](#crate-layout)).
 
 ---
 
@@ -435,9 +494,9 @@ When the richer API lands it **may** introduce a new feature flag (e.g.
 
 Per-fetch concern. Parse HTTP cache headers, attach conditional request headers
 on refetch, and on `304 Not Modified` return the cached body. This is a wrapper
-around `reqwest`, not a core abstraction. The `http` and `reqwest` dependencies
-would belong to `gpui-query-http` only — `gpui-query` core ships with **neither**
-dependency today (neither appears in `crates/gpui-query/Cargo.toml` nor anywhere
+around `reqwest`, not a core abstraction. The `http`, `reqwest`, and `bytes`
+dependencies would belong to `gpui-query-http` only — `gpui-query` core ships with
+**none** of them today (none appears in `crates/gpui-query/Cargo.toml` nor anywhere
 under `crates/gpui-query/src`), consistent with Guiding Principle 1.
 
 ### Public API
@@ -446,16 +505,21 @@ under `crates/gpui-query/src`), consistent with Guiding Principle 1.
 // crates/gpui-query-http/src/lib.rs   (PROPOSED — file does not exist yet)
 
 use serde::{Serialize, Deserialize};
+use std::time::{Duration, SystemTime};
 
 /// HTTP cache metadata extracted from a response. Serializable so a future
 /// persistence layer (see Section 2) can store it alongside the body and
 /// rehydrate a cold start with valid ETags, enabling cheap 304 refetches on the
 /// first request after launch.
+///
+/// Timestamps use `SystemTime` (serde-supported, epoch-relative) — **never**
+/// `std::time::Instant`, which has no serde impl and is meaningless across
+/// process restarts. This matches the crate's `current_time_ms()` convention.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CacheMeta {
     pub etag: Option<String>,
     pub last_modified: Option<String>,
-    pub stored_at: std::time::Instant,
+    pub stored_at: SystemTime,
     pub fresh_for: Duration,
     pub stale_for: Duration,
 }
@@ -607,12 +671,12 @@ the proposed API as if it already existed. It does not. The two real gaps are (1
 (2) `QueryClient::hydrate` is a **no-op**. Everything else in the richer design is
 future work on top of the shipped skeleton.
 
-### What ships today (`client` layer, no feature flag)
+### What ships today (`client` layer)
 
-Persistence is part of the `client` layer and is compiled whenever the `client`
-feature is enabled — there is no separate `persist` feature flag. The surface
-lives in `client/erased.rs` and `client/devtools.rs`, and the `QueryClient` methods
-live in `client/lifecycle.rs`.
+Today the persistence skeleton is compiled whenever the `client` feature is
+enabled — it is **not yet** behind the proposed `persist` gate (see [Crate
+Layout](#crate-layout)). The surface lives in `client/erased.rs` and
+`client/devtools.rs`, and the `QueryClient` methods live in `client/lifecycle.rs`.
 
 ```rust
 // client/erased.rs — object-safe persistence adapter trait
@@ -701,7 +765,7 @@ pub trait Persister: Send + Sync + 'static {
 /// de/serialization happens at the persister-adapter boundary.
 pub struct PersistedEntry {
     pub value: serde_json::Value,
-    pub cached_at: Instant,
+    pub cached_at: u64,                   // epoch-millis (SystemTime-based, like current_time_ms)
     pub cache_policy: CachePolicy,        // core's CachePolicy is Copy + Serialize
     pub meta: Option<serde_json::Value>,  // opaque, e.g. CacheMeta round-trip
 }
@@ -721,7 +785,8 @@ pub struct PersistOptions {
     pub filter: /* owned filter, design TBD — core's QueryKeyFilter cannot be reused directly */,
     pub max_age: Duration,
     pub debounce: Duration,
-    pub dehydrate_filter: DehydrateFilter,
+    // dehydrate_filter: …,  // PROPOSED, type TBD — e.g. skip entries whose
+    //                        // serialized value exceeds a size budget (Open Question 4).
 }
 
 /// PROPOSED — drop guard that unsubscribes the debounced observer.
@@ -748,18 +813,83 @@ non-object-safe version the companion crate is aimed at. Deciding whether the tw
 coexist or the async one supersedes the shipped one is itself an open design
 question.
 
+### Disk-based persistence
+
+The headline adapter for `gpui-query-persist` is a **proper disk-based
+`FilePersister`** — the normal case for offline data caching. It must work
+identically on Linux, macOS, and Windows and survive the usual failure modes
+(crash mid-write, corrupt file, permission errors, schema drift):
+
+- **OS-appropriate location.** When the caller does not pass an explicit path,
+  resolve a per-app directory with the `dirs` crate and join `<app>` — never
+  hardcode a path or separator, always go through `PathBuf`, and never `unwrap`
+  the dir (it is `None` in sandboxed/headless envs — return `PersistError::BadPath`
+  instead). The default dir is an open choice (see Open Question 8):
+  `dirs::data_dir()` (`$XDG_DATA_HOME` / `~/.local/share` on Linux,
+  `~/Library/Application Support` on macOS, `%APPDATA%` / Roaming on Windows) vs
+  `dirs::cache_dir()` (`~/.cache`, `~/Library/Caches`, `%LOCALAPPDATA%`) — a
+  regenerable offline cache conventionally uses `cache_dir()`, which also avoids a
+  Windows Roaming profile syncing a regenerable store across machines. Under the
+  macOS App Sandbox, both resolve inside the per-app container; an absolute-path
+  override outside the container needs entitlements. The caller can always pass an
+  explicit absolute path.
+- **Atomic writes (atomicity ≠ durability — both matter).** Serialize to a sibling
+  temp file, then replace the target **atomically** via `tempfile`'s
+  `NamedTempFile::persist`, which dispatches `rename(2)` on POSIX and
+  `MoveFileExW`/`ReplaceFile` on Windows. Do **not** call raw `std::fs::rename`
+  yourself: on Windows/NTFS it can fail with `ERROR_ACCESS_DENIED` when another
+  process (e.g. an AV scanner) or a concurrent reader holds the destination
+  (rust-lang/rust#123985) — treat that as a retryable `PersistError::Permission`.
+  This guarantees *atomicity* (no torn file is ever visible; the previous good file
+  survives a crash). For *durability* across power loss, `fsync` the temp file
+  before the replace (use `fcntl(F_FULLFSYNC)` on macOS, where plain `fsync` is
+  advisory), and `fsync` the **parent directory** fd after the replace on POSIX.
+  Never overwrite the target path in place.
+- **Tolerant load.** A missing file is the empty store (first run), not an error.
+  A corrupt or partially-written file is logged and treated as empty — **never
+  panic, never abort startup**. A version mismatch surfaces as a typed
+  `PersistError::VersionMismatch` so the app can wipe-and-continue or bail.
+- **Portable serialization.** `PersistFormat::Json` (human-readable, diffable, the
+  default) or `PersistFormat::Bincode` (compact, faster, for large caches). Both
+  round-trip the same `PersistSnapshot`. JSON is text; bincode is little-endian —
+  fine for a local cache, not a cross-architecture wire format.
+- **Concurrency.** Writes are serialized — one save at a time, enforced by the
+  persister (e.g. a serialization `Mutex` on the tokio save path or a chained
+  in-flight future; the debounced `persist_with` would own this once it exists).
+  `load` is independent. No lock is held across the gpui↔tokio boundary — the
+  persister owns its IO entirely on the tokio side.
+- **Typed errors.** Every IO failure maps to a `PersistError` variant (`Io`,
+  `Serialize`, `Deserialize`, `VersionMismatch`, `Permission`, `BadPath`) — no
+  `unwrap` / `expect`, per `rust-best-practices` ch.4. The app decides whether a
+  failed save is fatal.
+
+Encryption, compression, and non-disk backends (SQLite, keychain) are adapter
+concerns, not core's — see Open Question 6.
+
 ### Proposed companion crate
 
 ```rust
 // PROPOSED — crates/gpui-query-persist/src/lib.rs (does not exist today)
 //
-// Real adapters, not the doc-snippet FilePersister in client/erased.rs.
-pub struct FilePersister { path: PathBuf, format: PersistFormat /* Json | Bincode */ }
-impl Persister for FilePersister { /* ... */ }
+// A real disk-based FilePersister (see "Disk-based persistence" above) plus the
+// types it needs. This is the reference adapter; the doc-snippet FilePersister in
+// client/erased.rs is only a trait-example.
+pub enum PersistFormat { Json, Bincode }
 
-pub struct NoopPersister;     // for tests
+pub struct FilePersister {
+    path: PathBuf,       // explicit, or resolved from dirs::data_dir() + app_name
+    format: PersistFormat,
+    app_name: String,    // names the subdir under the OS data dir
+}
+
+impl Persister for FilePersister { /* atomic write + tolerant load, as above */ }
+
+pub struct NoopPersister;     // for tests / in-memory
 impl Persister for NoopPersister { /* ... */ }
 ```
+
+`FilePersister` is what most consumers will use; `NoopPersister` is for tests. A
+`SqlitePersister` or `SecureStoragePersister` stays in the consuming app.
 
 ### App-specific adapters (in the consuming app)
 
@@ -836,13 +966,13 @@ and no meta at all, so cross-crate data sharing is not yet possible.
 - **No generic mutation hook.** `persist_with` is specific: it subscribes via
   `cx.observe_global::<QueryClient>()` and calls one trait method. Adding a
   general `on_mutate` hook would invite misuse and bloat core. Note that
-  `observe_global::<QueryClient>()` only fires when `QueryClient` explicitly
-  notifies on mutation — a Global update does not auto-notify observers — so the
-  proposed subscription depends on `QueryClient` notifying today, which does not
-  happen: `impl Global for QueryClient {}` is a bare impl, and the only
-  `notify()` calls in the client layer are entity-level `cx.notify()` in
-  `client/observer.rs`, which re-render observing components, not the global.
-  Adding the notify path is part of the proposal, not a free reuse.
+  `observe_global::<QueryClient>()` **fires automatically** on any
+  `cx.update_global::<QueryClient, _>` (GPUI pushes a `NotifyGlobalObservers`
+  effect), and the crate already routes fetch / retry / mutation / infinite-query
+  completion through `update_global`, so the subscription works for free on those
+  paths. The only gap is `QueryClient::set_query_data`, which mutates a resource
+  entity (no global notify) — that one path needs an explicit notify (or routing
+  through `update_global`) to be observed.
 - **Server wins.** `CachePolicy` stored in `PersistedEntry` (proposed) is whatever
   the server last returned (via `Fetched.cache_policy`, itself proposed — see
   Required Core Change 1). On rehydrate, that policy applies until the next fetch
@@ -890,8 +1020,8 @@ Two things must be clear up front:
 A consumer can persist query metadata across restarts *today*:
 
 1. **`Cargo.toml`** — depend on `gpui-query` with the `client` feature (and
-   `hook` if using hooks). There is no `persist` feature to enable; persistence
-   ships with `client`.
+   `hook` if using hooks). Persistence currently ships with `client` (no flag
+   needed yet); once the proposed `persist` gate lands, enable it explicitly.
 2. **Implement `QueryPersister`** in the consumer (e.g. a `query_persister` module
    next to the app's other storage code). The trait is two synchronous methods:
    `fn load(&self) -> Vec<DehydratedEntry>` and
@@ -903,9 +1033,11 @@ A consumer can persist query metadata across restarts *today*:
 4. **On startup** — call the associated function
    `QueryClient::restore(&persister) -> Vec<DehydratedEntry>` to load entries,
    then iterate and restore typed data yourself via
-   `QueryClient::set_query_data::<T, E>(...)` for each entry whose `(T, E)` you
-   know. `QueryClient::hydrate(...)` is currently a **documented no-op** hook
-   point — it does not prime anything; typed restoration is the caller's job.
+   `cx.update_global::<QueryClient, _>(|client, cx| client.set_query_data::<T, E>(
+   ...))` for each entry whose `(T, E)` you know (`set_query_data` is `&mut self`
+   on a `Global`, so it must go through `update_global`).
+   `QueryClient::hydrate(...)` is currently a **documented no-op** hook point — it
+   does not prime anything; typed restoration is the caller's job.
 
 > **Real gap.** The shipped skeleton is metadata-only. `DehydratedEntry` has
 > **no value/data field** (it was deliberately removed as dead weight; see its
@@ -919,9 +1051,9 @@ Once the proposed `gpui-query-persist` companion crate and its core changes land
 (see [Required Core Changes](#required-core-changes) and
 [Open Questions](#open-questions)), the consumer upgrades:
 
-1. **`Cargo.toml`** — add the proposed `gpui-query-persist` dep (and, if a
-   `persist` feature is introduced to gate the richer API, enable it). Today
-   there is no such feature; this is contingent on the proposal.
+1. **`Cargo.toml`** — add the proposed `gpui-query-persist` dep and enable the
+   proposed `persist` feature on `gpui-query` (it gates the persistence surface —
+   offline data only). Today neither exists; this is contingent on the proposal.
 2. **Replace the manual `persist` / `restore` calls** with the proposed
    `QueryClient::persist_with(persister, opts)` (debounced global observer) and
    the proposed typed `hydrate`. These do not exist yet.
@@ -946,10 +1078,11 @@ today. The real current fetcher shape is
    `CachePolicy` flows back (server wins). This requires Core Change 1 to be
    implemented first.
 3. **DevTools wiring** — wherever `QueryClient` is constructed today (per the
-   consumer's devtools setup), the existing `QueryClient::diagnostics()` (in
-   `client/devtools.rs`) can surface a persistence section. A "Persistence" card
-   in the consumer's playground (hydrate count on startup, last save timestamp,
-   persisted key count) doubles as the integration-test surface.
+   consumer's devtools setup), the existing `QueryClient::diagnostics()` (method
+   in `client/lifecycle.rs`; diagnostic *types* in `client/devtools.rs`) can
+   surface a persistence section. A "Persistence" card in the consumer's
+   playground (hydrate count on startup, last save timestamp, persisted key count)
+   doubles as the integration-test surface.
 
 ---
 
@@ -958,7 +1091,9 @@ today. The real current fetcher shape is
 The order matters because the richer persistence API touches core, and the HTTP
 helper depends on the proposed `Fetched<T, E>` core change. Note that a
 metadata-only persistence skeleton already ships, so "persistence" below means
-*upgrading* it, not building it from zero.
+*upgrading* it, not building it from zero. All persistence work — gating the
+shipped skeleton, the async upgrade, and the disk adapter — lands behind the
+proposed `persist` feature (offline data only).
 
 1. **Use the shipped skeleton** (no core change). Consumers can wire
    `QueryPersister` + `QueryClient::persist` / `restore` + caller-side typed
@@ -970,17 +1105,19 @@ metadata-only persistence skeleton already ships, so "persistence" below means
    fetcher, tuple return) is unchanged; the new variant is additive. Add unit
    tests that a `Fetched` with `Some(policy)` overrides the bucket's policy and
    `None` keeps it.
-3. **Proposed Core Change 3 — upgrade persistence** (async `Persister`,
-   `PersistedEntry { value, ... }`, `persist_with`, typed `hydrate`,
-   `PersistOptions { filter, max_age, debounce }`, snapshot versioning) on top of
-   the shipped `QueryPersister` skeleton. `persist_with` uses Core Change 2 Option
-   A (`observe_global::<QueryClient>()`) so it ships together — but see Open
-   Question 2: that option only works if `QueryClient` explicitly performs a
-   global notify on every mutation, since GPUI does not auto-notify global
-   observers. Ship a reference `FilePersister` in the proposed
-   `gpui-query-persist` crate. Add unit tests for debounce, `max_age` filtering,
-   and version mismatch — these need `#[gpui::test]` + `TestAppContext` since
-   they touch `QueryClient`.
+3. **Feature-gate the shipped skeleton, then upgrade it.** First land the three
+   gating prerequisites (extract `current_time_ms` from `client/erased.rs`; decide
+   `collect_key_status_into`'s fate; cfg-gate the itemized `pub use` lists in
+   `client/mod.rs`) and move the persistence surface behind `persist`. Then add
+   the async `Persister`, `PersistedEntry { value, ... }`, `persist_with`, typed
+   `hydrate`, `PersistOptions { filter, max_age, debounce }`, and snapshot
+   versioning on top of the shipped `QueryPersister` skeleton. `persist_with`
+   uses Core Change 2 Option A (`observe_global::<QueryClient>()`) — which works
+   for free on the mutations already routed through `update_global`, needing only
+   a small notify hook for the `set_query_data` path (see Open Question 2). Ship a
+   reference `FilePersister` in the proposed `gpui-query-persist` crate. Add unit
+   tests for debounce, `max_age` filtering, and version mismatch — these need
+   `#[gpui::test]` + `TestAppContext` since they touch `QueryClient`.
 4. **Proposed `gpui-query-http`** with `CacheMeta`, `cache_policy_from_headers`,
    and `HttpCache`. Header-parsing tests are plain `#[test]` (no gpui context);
    the `304` / SWR / `no-store` integration tests use a `mockito` server on tokio.
@@ -1020,18 +1157,18 @@ full refetch. This one test exercises the entire proposed design end-to-end.
    Option B (injected `QueryContext` callback)? Default: A, for explicitness and
    serializability. See Required Core Change 1.
 2. **Bucket-mutation observation** — Option A (`observe_global::<QueryClient>()`,
-   coarse) vs Option B (typed dirty signal, precise)? Default: A for v1. Caveat:
-   in GPUI, updating a Global via `update_global::<QueryClient, _>` does **not**
-   automatically notify global observers — the global must explicitly call a
-   global-notify for `observe_global::<QueryClient>()` to wake. Today the crate
-   performs only entity-level `cx.notify()` calls (view re-renders issued inside
-   `cx.observe(&entity, ...)` closures in `client/observer.rs` and inside
-   `entity.update(cx, |_, cx| cx.notify())` blocks across `hook/`); there is no
-   `QueryClient`-global notify and no `observe_global::<QueryClient>()` usage
-   anywhere in the crate. So Option A is viable only if every mutation routes
-   through `update_global` **and** `QueryClient` is changed to explicitly
-   global-notify on each such mutation; otherwise Option B becomes necessary for
-   completeness.
+   coarse) vs Option B (typed dirty signal, precise)? Default: A for v1.
+   Clarification: in GPUI, `cx.update_global::<QueryClient, _>` **does**
+   auto-notify `observe_global::<QueryClient>()` subscribers (it pushes a
+   `NotifyGlobalObservers` effect), and the crate already routes fetch / retry /
+   mutation / infinite-query completion through `update_global` at six sites
+   (`hook/query_hooks.rs`, `hook/fetch_retry.rs`, `hook/mutation_hooks/hooks.rs`,
+   `hook/use_infinite_query/*`). So Option A works for free on those paths. The
+   only mutation that does **not** wake a global observer today is
+   `QueryClient::set_query_data`, which mutates a resource entity directly — that
+   path needs an explicit global notify (or re-routing through `update_global`).
+   Option B (a typed dirty signal) is more precise but more core surface; defer
+   unless profiling shows the coarse path firing too often.
 3. **Adding a typed value field to the shipped metadata-only entry.** The shipped
    `DehydratedEntry` is `{ key, type_id, kind }` with **no value field** (it was
    removed as dead weight — see its doc comment in `client/devtools.rs`), and
@@ -1057,7 +1194,13 @@ full refetch. This one test exercises the entire proposed design end-to-end.
 6. **Encryption** — should the `Persister` support encrypted backends, or is that
    the adapter's job? Recommendation: adapter's job. Core hands the adapter a
    snapshot; the adapter encrypts however it wants.
-7. **DevTools surface** — `QueryClient::diagnostics()` already exists (in
-   `client/devtools.rs`). Add a persistence section showing last save, last
-   hydrate, persisted key count, and per-key age. Wire into the consumer's
-   existing Query DevTools page.
+7. **DevTools surface** — `QueryClient::diagnostics()` already exists (method in
+   `client/lifecycle.rs`; diagnostic types in `client/devtools.rs`). Add a
+   persistence section showing last save, last hydrate, persisted key count, and
+   per-key age. Wire into the consumer's existing Query DevTools page.
+8. **Default directory — `data_dir()` vs `cache_dir()`.** The offline cache is
+   regenerable, for which `dirs::cache_dir()` (`%LOCALAPPDATA%` / `~/.cache` /
+   `~/Library/Caches`) is the conventional choice and avoids a Windows Roaming
+   profile silently syncing it across machines. `dirs::data_dir()` is the safer
+   default if the store is treated as non-regenerable user data. Pick one as the
+   default and document the roaming/sandbox consequences.
