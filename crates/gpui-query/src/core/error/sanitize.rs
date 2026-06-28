@@ -18,11 +18,23 @@ pub(crate) fn sanitize_message(msg: &str) -> String {
     let mut out: Cow<str> = Cow::Borrowed(msg);
 
     // Redact database connection strings.
-    out = replace_regex(out, r"(?i)(postgres|mysql|mongodb|redis)://\S+", "[REDACTED_CONNECTION]");
+    out = replace_regex(
+        out,
+        r"(?i)(postgres|mysql|mongodb|redis)://\S+",
+        "[REDACTED_CONNECTION]",
+    );
     // Redact bearer/token patterns.
-    out = replace_regex(out, r"(?i)(bearer\s+|token[=:]\s*)\S+", "$1[REDACTED_TOKEN]");
+    out = replace_regex(
+        out,
+        r"(?i)(bearer\s+|token[=:]\s*)\S+",
+        "$1[REDACTED_TOKEN]",
+    );
     // Redact common filesystem paths.
-    out = replace_regex(out, r"(?i)(/home/|/Users/|/etc/|/var/)\S+", "[REDACTED_PATH]");
+    out = replace_regex(
+        out,
+        r"(?i)(/home/|/Users/|/etc/|/var/)\S+",
+        "[REDACTED_PATH]",
+    );
     // Redact email addresses.
     out = replace_regex(
         out,
@@ -80,7 +92,11 @@ fn replace_regex<'a>(
             if !contains_any_scheme(&text.to_ascii_lowercase()) {
                 return input;
             }
-            redact_url_schemes(text, &["postgres", "mysql", "mongodb", "redis"], replacement)
+            redact_url_schemes(
+                text,
+                &["postgres", "mysql", "mongodb", "redis"],
+                replacement,
+            )
         }
         // Bearer/token patterns.
         p if p.contains("bearer") || p.contains("token") => {
@@ -351,7 +367,11 @@ fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
         }
         if let Some(dot_pos) = last_dot {
             let tld_len = domain_end - dot_pos - 1;
-            if tld_len >= 2 && chars[dot_pos + 1..domain_end].iter().all(|c| c.is_alphabetic()) {
+            if tld_len >= 2
+                && chars[dot_pos + 1..domain_end]
+                    .iter()
+                    .all(|c| c.is_alphabetic())
+            {
                 return Some(domain_end);
             }
         }

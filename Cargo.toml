@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gpui-query", "crates/gpui-query-http"]
+members = ["crates/gpui-query", "crates/gpui-query-http", "crates/gpui-query-persist"]
 exclude = ["crates/gpui-query-legacy"]
 resolver = "3"
 

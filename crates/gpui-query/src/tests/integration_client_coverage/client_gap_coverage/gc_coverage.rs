@@ -30,9 +30,15 @@ fn test_gc_preserves_swr_resources_within_stale_window(cx: &mut TestAppContext) 
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("swr_gc");
-            let swr = CachePolicy::StaleWhileRevalidate { ttl_ms: 1_000, stale_ms: 5_000 };
+            let swr = CachePolicy::StaleWhileRevalidate {
+                ttl_ms: 1_000,
+                stale_ms: 5_000,
+            };
             let entity = client.resource_with_policies::<String, QueryError>(
-                key.clone(), swr, RequestPolicy::LatestWins, cx,
+                key.clone(),
+                swr,
+                RequestPolicy::LatestWins,
+                cx,
             );
             entity.update(cx, |r, _| r.apply_success("data".to_string(), 1_000));
             // GC reads live entity state (audit #CL2): Success + swr policy +
@@ -65,9 +71,15 @@ fn test_gc_preserves_swr_resources_within_ttl(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("swr_fresh");
-            let swr = CachePolicy::StaleWhileRevalidate { ttl_ms: 5_000, stale_ms: 3_000 };
+            let swr = CachePolicy::StaleWhileRevalidate {
+                ttl_ms: 5_000,
+                stale_ms: 3_000,
+            };
             let entity = client.resource_with_policies::<String, QueryError>(
-                key.clone(), swr, RequestPolicy::LatestWins, cx,
+                key.clone(),
+                swr,
+                RequestPolicy::LatestWins,
+                cx,
             );
             entity.update(cx, |r, _| r.apply_success("fresh".to_string(), 1_000));
             // GC reads live entity state (audit #CL2): Success + swr policy +
@@ -231,7 +243,8 @@ fn test_bucket_default_max_entries_allows_many_resources(cx: &mut TestAppContext
 
             let all = client.all_queries::<String, QueryError>();
             assert_eq!(
-                all.len(), 100,
+                all.len(),
+                100,
                 "all 100 resources should exist within default max_entries(10_000)"
             );
         });
@@ -265,7 +278,8 @@ fn test_loading_mutation_survives_gc(cx: &mut TestAppContext) {
 
             let mutations = client.all_mutations::<String, String, QueryError>();
             assert_eq!(
-                mutations.len(), 1,
+                mutations.len(),
+                1,
                 "loading mutation must survive GC regardless of age"
             );
         });
@@ -416,7 +430,8 @@ fn test_mutation_bucket_evict_oldest_keeps_count_bounded(cx: &mut TestAppContext
                 MAX_ENTRIES,
                 "MutationBucket entry count must stay bounded at DEFAULT_MAX_ENTRIES \
                  ({}); evict_oldest should have triggered on every insert past the \
-                 cap (#134)", MAX_ENTRIES
+                 cap (#134)",
+                MAX_ENTRIES
             );
 
             // Diagnostics should agree with the bounded bucket size.

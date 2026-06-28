@@ -31,12 +31,12 @@ use gpui::{App, AppContext as _, BackgroundExecutor, Entity, TestAppContext};
 
 #[cfg(feature = "client")]
 use crate::client::QueryClient;
+use crate::core::{
+    CachePolicy, QueryBeginResult, QueryFetchMode, QueryKey, QueryResource, QueryStatus, RequestId,
+    RequestPolicy, RequestSequencer,
+};
 #[cfg(feature = "hook")]
 use crate::hook::MutationOptions;
-use crate::core::{
-    CachePolicy, QueryBeginResult, QueryFetchMode, QueryKey, QueryResource, QueryStatus,
-    RequestId, RequestPolicy, RequestSequencer,
-};
 
 // ── TestAppContext setup ───────────────────────────────────────────────
 
@@ -120,10 +120,7 @@ pub fn test_sequencer() -> RequestSequencer {
 /// step without worrying about TTL freshness windows.
 pub fn resource_with_sequencer(
     key: impl Into<QueryKey>,
-) -> (
-    QueryResource<&'static str>,
-    RequestSequencer,
-) {
+) -> (QueryResource<&'static str>, RequestSequencer) {
     (
         QueryResource::new(key, CachePolicy::NoCache, RequestPolicy::LatestWins),
         RequestSequencer::new(),
@@ -429,6 +426,10 @@ where
     for value in cases {
         let json = serde_json::to_string(value).expect("serialize");
         let back: T = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(&back, value, "serde roundtrip changed value (json={})", json);
+        assert_eq!(
+            &back, value,
+            "serde roundtrip changed value (json={})",
+            json
+        );
     }
 }

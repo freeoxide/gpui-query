@@ -5,6 +5,9 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "persist")]
+use gpui::BorrowAppContext as _;
+
 use crate::core::{InfiniteQueryResource, RequestId};
 
 use crate::hook::{current_time_ms, read_entity};
@@ -97,10 +100,17 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
                 let _ = e.update(cx, |resource, cx| {
                     if let Some(guard) = resource.accept_current_request(request_id) {
                         resource.complete_success_with_guard(
-                            guard, page, has_more, direction.is_next(), now_ms,
+                            guard,
+                            page,
+                            has_more,
+                            direction.is_next(),
+                            now_ms,
                         );
                         // Notify on terminal state change (success).
                         cx.notify();
+                        // B2: precise dirty signal for the persistence layer.
+                        #[cfg(feature = "persist")]
+                        cx.default_global::<crate::client::mutation_signal::CacheMutation>();
                     } else {
                         // stale request, result discarded
                     }
@@ -125,14 +135,13 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
                     // sequential reads). A cancelled or superseded fetch should
                     // not retry.
                     let Some(e) = entity.upgrade() else { return };
-                    let (cancelled, still_current) =
-                        read_entity(&e, cx, |r, _| {
-                            (
-                                r.signal().map(|s| s.is_cancelled()).unwrap_or(false),
-                                r.is_current_request(request_id),
-                            )
-                        })
-                        .unwrap_or((true, false));
+                    let (cancelled, still_current) = read_entity(&e, cx, |r, _| {
+                        (
+                            r.signal().map(|s| s.is_cancelled()).unwrap_or(false),
+                            r.is_current_request(request_id),
+                        )
+                    })
+                    .unwrap_or((true, false));
                     if cancelled {
                         return;
                     }
@@ -159,6 +168,9 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
                             resource.complete_failure_with_guard(guard, error);
                             // Notify on terminal state change (failure).
                             cx.notify();
+                            // B2: precise dirty signal for the persistence layer.
+                            #[cfg(feature = "persist")]
+                            cx.default_global::<crate::client::mutation_signal::CacheMutation>();
                         } else {
                             // stale request, result discarded
                         }
@@ -187,7 +199,15 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
     F: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    run_fetch_page_with_id(entity, fetcher, request_id, retry_policy, cx, PageDirection::Next).await;
+    run_fetch_page_with_id(
+        entity,
+        fetcher,
+        request_id,
+        retry_policy,
+        cx,
+        PageDirection::Next,
+    )
+    .await;
 }
 
 /// Execute a fetch-previous-page operation with a captured `RequestId`.
@@ -209,5 +229,13 @@ pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
     F: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    run_fetch_page_with_id(entity, fetcher, request_id, retry_policy, cx, PageDirection::Previous).await;
+    run_fetch_page_with_id(
+        entity,
+        fetcher,
+        request_id,
+        retry_policy,
+        cx,
+        PageDirection::Previous,
+    )
+    .await;
 }

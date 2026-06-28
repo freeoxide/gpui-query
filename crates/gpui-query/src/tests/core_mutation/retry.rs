@@ -111,7 +111,10 @@ fn prepare_retry_stays_in_loading_with_fresh_signal() {
     // Must still be Loading -- no transient Failure flash
     assert!(m.is_loading(), "prepare_retry must not leave Loading");
     assert!(m.error().is_none());
-    assert!(old_signal.is_cancelled(), "old signal must be cancelled by prepare_retry");
+    assert!(
+        old_signal.is_cancelled(),
+        "old signal must be cancelled by prepare_retry"
+    );
 
     let new_signal = m.signal().unwrap();
     assert!(!new_signal.is_cancelled(), "new signal must be fresh");
@@ -153,7 +156,10 @@ fn increment_retry_bumps_counter_without_state_change() {
 
     m.increment_retry();
     assert_eq!(m.retry_count(), 1);
-    assert!(m.is_loading(), "must still be Loading after increment_retry");
+    assert!(
+        m.is_loading(),
+        "must still be Loading after increment_retry"
+    );
 
     m.increment_retry();
     m.increment_retry();
@@ -186,7 +192,11 @@ fn retry_count_increments_saturating_on_complete_failure() {
     // Retry clears the Failure state so we can fail again without a fresh begin.
     for i in 1..=10u32 {
         m.complete_failure(QueryError::response("fail"));
-        assert_eq!(m.retry_count(), i, "retry_count must increment on each failure");
+        assert_eq!(
+            m.retry_count(),
+            i,
+            "retry_count must increment on each failure"
+        );
         if i < 10 {
             let retried = m.retry();
             assert!(retried, "retry must succeed while retries remain");

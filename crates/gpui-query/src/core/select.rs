@@ -186,7 +186,9 @@ impl<T, U, E> MappedQueryResource<T, U, E> {
     pub fn data(&self) -> Option<U> {
         // `source_data` is `Option<Arc<T>>`; deref the Arc so the transform
         // still receives `&T` as documented (audit #20).
-        self.source_data.as_ref().map(|d| self.transform.apply(d.as_ref()))
+        self.source_data
+            .as_ref()
+            .map(|d| self.transform.apply(d.as_ref()))
     }
 
     /// Whether source data exists.

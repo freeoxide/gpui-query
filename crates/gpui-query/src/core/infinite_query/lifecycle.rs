@@ -163,9 +163,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     ) -> Option<RequestId> {
         let (has_page, is_fetching_same_direction) = match direction {
             PageDirection::Next => (self.has_next_page, self.is_fetching_next_page()),
-            PageDirection::Previous => {
-                (self.has_previous_page, self.is_fetching_previous_page())
-            }
+            PageDirection::Previous => (self.has_previous_page, self.is_fetching_previous_page()),
         };
 
         if !has_page {

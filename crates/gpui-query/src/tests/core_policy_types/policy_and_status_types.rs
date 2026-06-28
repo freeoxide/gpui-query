@@ -179,7 +179,10 @@ fn cache_policy_is_fresh_at_zero_age() {
 #[test]
 fn cache_policy_is_fresh_at_exact_ttl() {
     let policy = CachePolicy::Ttl { ttl_ms: 500 };
-    assert!(policy.is_fresh(500), "age == ttl_ms should be fresh (inclusive)");
+    assert!(
+        policy.is_fresh(500),
+        "age == ttl_ms should be fresh (inclusive)"
+    );
 }
 
 #[test]
@@ -196,7 +199,10 @@ fn cache_policy_nocache_is_never_fresh() {
 
 #[test]
 fn cache_policy_swr_is_stale_between_ttl_and_total() {
-    let policy = CachePolicy::StaleWhileRevalidate { ttl_ms: 100, stale_ms: 200 };
+    let policy = CachePolicy::StaleWhileRevalidate {
+        ttl_ms: 100,
+        stale_ms: 200,
+    };
     // Within TTL: not stale
     assert!(!policy.is_stale_but_serveable(50));
     assert!(!policy.is_stale_but_serveable(100));
@@ -209,7 +215,10 @@ fn cache_policy_swr_is_stale_between_ttl_and_total() {
 
 #[test]
 fn cache_policy_swr_is_expired_past_total() {
-    let policy = CachePolicy::StaleWhileRevalidate { ttl_ms: 100, stale_ms: 200 };
+    let policy = CachePolicy::StaleWhileRevalidate {
+        ttl_ms: 100,
+        stale_ms: 200,
+    };
     assert!(!policy.is_expired(100));
     assert!(!policy.is_expired(300));
     assert!(policy.is_expired(301));
@@ -234,7 +243,10 @@ fn cache_policy_serde_roundtrip() {
     assert_serde_roundtrip(&[
         CachePolicy::NoCache,
         CachePolicy::Ttl { ttl_ms: 5_000 },
-        CachePolicy::StaleWhileRevalidate { ttl_ms: 1_000, stale_ms: 2_000 },
+        CachePolicy::StaleWhileRevalidate {
+            ttl_ms: 1_000,
+            stale_ms: 2_000,
+        },
     ]);
 }
 
@@ -257,14 +269,20 @@ fn cache_policy_label_nocache() {
 
 #[test]
 fn cache_policy_label_swr() {
-    let policy = CachePolicy::StaleWhileRevalidate { ttl_ms: 30_000, stale_ms: 500 };
+    let policy = CachePolicy::StaleWhileRevalidate {
+        ttl_ms: 30_000,
+        stale_ms: 500,
+    };
     assert_eq!(policy.label(), "Stale-while-revalidate TTL 30s stale 500ms");
 }
 
 #[test]
 fn request_policy_labels() {
     assert_eq!(RequestPolicy::LatestWins.label(), "Latest wins");
-    assert_eq!(RequestPolicy::IgnoreWhileLoading.label(), "Ignore while loading");
+    assert_eq!(
+        RequestPolicy::IgnoreWhileLoading.label(),
+        "Ignore while loading"
+    );
 }
 
 #[test]

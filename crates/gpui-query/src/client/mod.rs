@@ -25,30 +25,45 @@ mod infinite_bucket;
 mod infinite_mutation_ops;
 mod lifecycle;
 mod mutation_bucket;
+#[cfg(feature = "persist")]
+mod mutation_signal;
 mod observer;
+#[cfg(feature = "persist")]
+mod persist;
 mod prepared_fetch;
+mod time;
 
 pub use bucket::QueryBucket;
-pub use devtools::{
-    ClientDiagnostic, DehydratedEntry, DehydratedState, MutationDiagnostic, QueryDiagnostic,
-};
-pub use erased::{current_time_ms, QueryPersister};
+pub use devtools::{ClientDiagnostic, MutationDiagnostic, QueryDiagnostic};
+#[cfg(feature = "persist")]
+pub use devtools::{DehydratedEntry, DehydratedState};
+#[cfg(feature = "persist")]
+pub use erased::QueryPersister;
 pub use infinite_bucket::InfiniteQueryBucket;
 pub use mutation_bucket::MutationBucket;
-pub use observer::{InfiniteQueryObserver, MutationObserver, ObservableResource, Observer, ObserverConfig, QueryObserver};
+#[cfg(feature = "persist")]
+pub use mutation_signal::CacheMutation;
+pub use observer::{
+    InfiniteQueryObserver, MutationObserver, ObservableResource, Observer, ObserverConfig,
+    QueryObserver,
+};
+#[cfg(feature = "persist")]
+pub use persist::{
+    NoopPersister, PERSIST_VERSION, PersistError, PersistFilter, PersistHandle, PersistOptions,
+    PersistSnapshot, PersistedEntry, Persister, SerializerRegistry, hydrate,
+};
 pub use prepared_fetch::PreparedFetch;
+pub use time::current_time_ms;
 
 use std::any::TypeId;
 
 use ahash::AHashMap;
 use gpui::{App, Entity, Global};
 
-use crate::core::{
-    CachePolicy, QueryKey, QueryResource, RequestPolicy,
-};
 use crate::client::bucket::shared::GC_INTERVAL;
 use crate::client::bucket::types::MIN_GC_TIME_MS;
 use crate::client::erased::{ErasedBucket, ErasedInfiniteBucket, ErasedMutationBucket};
+use crate::core::{CachePolicy, QueryKey, QueryResource, RequestPolicy};
 
 /// Global registry for query and mutation resources.
 ///
@@ -68,6 +83,14 @@ pub struct QueryClient {
     pub(crate) default_cache_policy: CachePolicy,
     pub(crate) default_request_policy: RequestPolicy,
     pub(crate) gc_time_ms: u64,
+    /// Typed-serializer registry for the value-carrying persistence path
+    /// (`persist` feature). Populated by `register_serializer::<T, E>`.
+    #[cfg(feature = "persist")]
+    pub(crate) serializers: Option<crate::client::persist::SerializerRegistry>,
+    /// Typed-deserializer registry for [`hydrate`] (`persist` feature).
+    /// Populated by `register_deserializer::<T, E>`.
+    #[cfg(feature = "persist")]
+    pub(crate) deserializers: Option<crate::client::persist::DeserializerRegistry>,
     /// Operation counter for opportunistic GC (audit CL1/#105). The GC
     /// subsystem fires every `GC_INTERVAL` resource/mutation operations so it
     /// actually runs in production without requiring hooks to call `gc()`.
@@ -100,6 +123,10 @@ impl Default for QueryClient {
             default_cache_policy: CachePolicy::default(),
             default_request_policy: RequestPolicy::default(),
             gc_time_ms: 300_000,
+            #[cfg(feature = "persist")]
+            serializers: None,
+            #[cfg(feature = "persist")]
+            deserializers: None,
             op_count: 0,
             last_gc_ms: 0,
         }
@@ -181,7 +208,12 @@ impl QueryClient {
         key: impl Into<QueryKey>,
         cx: &mut App,
     ) -> Entity<QueryResource<T, E>> {
-        self.resource_with_policies::<T, E>(key, self.default_cache_policy, self.default_request_policy, cx)
+        self.resource_with_policies::<T, E>(
+            key,
+            self.default_cache_policy,
+            self.default_request_policy,
+            cx,
+        )
     }
 
     /// Get or create a query resource with explicit policies.
@@ -190,7 +222,10 @@ impl QueryClient {
     /// of `expect()`. On type mismatch, logs the type name and creates a
     /// fresh bucket, preventing application crashes from hypothetical
     /// TypeId collisions.
-    pub fn resource_with_policies<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
+    pub fn resource_with_policies<
+        T: Clone + Send + Sync + 'static,
+        E: Clone + Send + Sync + 'static,
+    >(
         &mut self,
         key: impl Into<QueryKey>,
         cache_policy: CachePolicy,
@@ -198,7 +233,8 @@ impl QueryClient {
         cx: &mut App,
     ) -> Entity<QueryResource<T, E>> {
         let type_id = TypeId::of::<(T, E)>();
-        let bucket = self.buckets
+        let bucket = self
+            .buckets
             .entry(type_id)
             .or_insert_with(|| Box::new(QueryBucket::<T, E>::new()));
 
@@ -277,7 +313,11 @@ impl QueryClient {
     fn bucket_or_recreate<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
         bucket: &mut Box<dyn ErasedBucket>,
     ) -> &mut QueryBucket<T, E> {
-        if bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>().is_none() {
+        if bucket
+            .as_any_mut()
+            .downcast_mut::<QueryBucket<T, E>>()
+            .is_none()
+        {
             eprintln!(
                 "QueryClient: type mismatch in bucket downcast for {}. \
                  Replacing with a fresh bucket.",
@@ -285,7 +325,10 @@ impl QueryClient {
             );
             *bucket = Box::new(QueryBucket::<T, E>::new());
             debug_assert!(
-                bucket.as_any_mut().downcast_mut::<QueryBucket<T, E>>().is_some(),
+                bucket
+                    .as_any_mut()
+                    .downcast_mut::<QueryBucket<T, E>>()
+                    .is_some(),
                 "QueryBucket downcast failed after fresh reconstruction"
             );
         }
@@ -359,8 +402,18 @@ impl QueryClient {
     ) {
         let key = key.into();
         let entity = self.resource::<T, E>(key, cx);
-        entity.update(cx, |resource, _| {
+        entity.update(cx, |resource, cx| {
             resource.set_data(data);
+            // B2: bump the precise dirty signal so `persist_with` schedules a
+            // save. `default_global` creates the marker if absent (infallible,
+            // since `CacheMutation: Default`) and always fires GPUI's
+            // `NotifyGlobalObservers` effect.
+            #[cfg(feature = "persist")]
+            cx.default_global::<crate::client::mutation_signal::CacheMutation>();
+            // In the default (no-persist) build the closure's `cx` is otherwise
+            // unused; reference it so the build stays warning-free.
+            #[cfg(not(feature = "persist"))]
+            let _ = cx;
         });
     }
 }

@@ -8,12 +8,12 @@ use gpui::{AppContext as _, BorrowAppContext as _, Context, Entity, Subscription
 use crate::client::{MutationObserver, QueryClient};
 use crate::core::MutationResource;
 
+use super::super::MutationOptions;
+use super::super::options::MutationCallbacks;
 use super::internals::{
     run_mutation_loop, run_mutation_loop_by_ref, run_mutation_loop_by_ref_with_callbacks,
     run_mutation_loop_with_callbacks,
 };
-use super::super::options::MutationCallbacks;
-use super::super::MutationOptions;
 
 /// Hook for executing mutations (create, update, delete operations).
 ///
@@ -437,22 +437,20 @@ fn begin_and_spawn_by_ref<V, T, E, C, F, Fut>(
     let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
     let weak = entity.downgrade();
 
-    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-        match callbacks {
-            Some(callbacks) => {
-                run_mutation_loop_by_ref_with_callbacks(
-                    &weak,
-                    variables,
-                    mutator,
-                    &retry_policy,
-                    callbacks,
-                    cx,
-                )
-                .await;
-            }
-            None => {
-                run_mutation_loop_by_ref(&weak, variables, mutator, &retry_policy, cx).await;
-            }
+    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| match callbacks {
+        Some(callbacks) => {
+            run_mutation_loop_by_ref_with_callbacks(
+                &weak,
+                variables,
+                mutator,
+                &retry_policy,
+                callbacks,
+                cx,
+            )
+            .await;
+        }
+        None => {
+            run_mutation_loop_by_ref(&weak, variables, mutator, &retry_policy, cx).await;
         }
     });
     // Audit fix #6: store the task so it is aborted on replacement / drop.

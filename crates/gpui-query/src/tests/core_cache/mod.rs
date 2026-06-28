@@ -9,8 +9,8 @@
 //! - Data retention: previous_data and rollback
 //! - Cache interactions with different request policies
 
-mod cache_policy;
 mod cache_ops;
+mod cache_policy;
 mod data_retention;
 mod request_interactions;
 
@@ -66,6 +66,10 @@ pub(crate) fn nocache_test_resource() -> QueryResource<&'static str> {
     nocache_resource("nocache-test")
 }
 
-pub(crate) fn seed_data(resource: &mut QueryResource<&'static str>, data: &'static str, stored_at_ms: u64) {
+pub(crate) fn seed_data(
+    resource: &mut QueryResource<&'static str>,
+    data: &'static str,
+    stored_at_ms: u64,
+) {
     resource.apply_success(data, stored_at_ms);
 }

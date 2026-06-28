@@ -18,6 +18,8 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "persist")]
+use gpui::BorrowAppContext as _;
 
 use crate::core::{MutationResource, RetryPolicy};
 
@@ -74,30 +76,38 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
         match result {
             Ok(data) => {
                 // Clone data before update only when callbacks need it.
-                let data_for_callback =
-                    if callbacks.is_some() { Some(data.clone()) } else { None };
+                let data_for_callback = if callbacks.is_some() {
+                    Some(data.clone())
+                } else {
+                    None
+                };
 
                 let Some(entity) = weak.upgrade() else {
                     // Audit fix #9: Entity dropped during mutation. Fire
                     // on_settled with None for both to indicate discard.
                     if let Some(ref cb) = callbacks
-                        && let Some(ref f) = cb.on_settled {
-                            f(None, None);
-                        }
+                        && let Some(ref f) = cb.on_settled
+                    {
+                        f(None, None);
+                    }
                     return;
                 };
                 let _ = entity.update(cx, |resource, cx| {
                     resource.complete_success(data);
                     cx.notify();
+                    // B2: precise dirty signal for the persistence layer.
+                    #[cfg(feature = "persist")]
+                    cx.default_global::<crate::client::mutation_signal::CacheMutation>();
                 });
 
                 // Fire success/settled callbacks outside entity borrow so
                 // they can safely call entity.update().
                 if let Some(ref cb) = callbacks {
                     if let Some(ref d) = data_for_callback
-                        && let Some(ref f) = cb.on_success {
-                            f(d);
-                        }
+                        && let Some(ref f) = cb.on_success
+                    {
+                        f(d);
+                    }
                     if let Some(ref f) = cb.on_settled {
                         f(data_for_callback.as_ref(), None);
                     }
@@ -107,8 +117,11 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
             }
             Err(error) => {
                 // Clone error before update only when callbacks need it.
-                let error_for_callback =
-                    if callbacks.is_some() { Some(error.clone()) } else { None };
+                let error_for_callback = if callbacks.is_some() {
+                    Some(error.clone())
+                } else {
+                    None
+                };
 
                 if retry_policy.should_retry(attempt) {
                     // Audit fix #19: Do NOT call complete_failure() here.
@@ -121,9 +134,10 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                         // Audit fix #9: Entity dropped between mutator failure and retry.
                         if let Some(ref cb) = callbacks {
                             if let Some(ref ec) = error_for_callback
-                                && let Some(ref f) = cb.on_error {
-                                    f(ec);
-                                }
+                                && let Some(ref f) = cb.on_error
+                            {
+                                f(ec);
+                            }
                             if let Some(ref f) = cb.on_settled {
                                 f(None, error_for_callback.as_ref());
                             }
@@ -149,9 +163,10 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                         // Audit fix #9/#10: Entity dropped during retry delay.
                         if let Some(ref cb) = callbacks {
                             if let Some(ref ec) = error_for_callback
-                                && let Some(ref f) = cb.on_error {
-                                    f(ec);
-                                }
+                                && let Some(ref f) = cb.on_error
+                            {
+                                f(ec);
+                            }
                             if let Some(ref f) = cb.on_settled {
                                 f(None, error_for_callback.as_ref());
                             }
@@ -163,9 +178,10 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                         // Fire error callbacks so callers get a terminal notification.
                         if let Some(ref cb) = callbacks {
                             if let Some(ref ec) = error_for_callback
-                                && let Some(ref f) = cb.on_error {
-                                    f(ec);
-                                }
+                                && let Some(ref f) = cb.on_error
+                            {
+                                f(ec);
+                            }
                             if let Some(ref f) = cb.on_settled {
                                 f(None, error_for_callback.as_ref());
                             }
@@ -197,6 +213,9 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                             // Audit fix #4: Reset retry_count on terminal failure.
                             resource.reset_retry_count();
                             cx.notify();
+                            // B2: precise dirty signal for the persistence layer.
+                            #[cfg(feature = "persist")]
+                            cx.default_global::<crate::client::mutation_signal::CacheMutation>();
                         });
                     }
 
@@ -205,9 +224,10 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                     // (Audit fix #9/#10).
                     if let Some(ref cb) = callbacks {
                         if let Some(ref ec) = error_for_callback
-                            && let Some(ref f) = cb.on_error {
-                                f(ec);
-                            }
+                            && let Some(ref f) = cb.on_error
+                        {
+                            f(ec);
+                        }
 
                         if let Some(ref f) = cb.on_settled {
                             f(None, error_for_callback.as_ref());

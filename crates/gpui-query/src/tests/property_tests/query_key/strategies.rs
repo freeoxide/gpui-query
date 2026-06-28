@@ -61,7 +61,7 @@ pub fn arb_unicode_edge_case_string() -> impl Strategy<Value = String> {
             // Combining characters (base + combining marks)
             "e\u{0301}".to_string(), // e + combining acute accent → é (NFD)
             "a\u{0308}\u{0301}".to_string(), // a + combining diaeresis + acute
-            "\u{0300}".to_string(), // standalone combining grave accent
+            "\u{0300}".to_string(),  // standalone combining grave accent
             // BiDi overrides
             "\u{202A}".to_string(), // LRE
             "\u{202B}".to_string(), // RLE
@@ -85,8 +85,8 @@ pub fn arb_unicode_edge_case_string() -> impl Strategy<Value = String> {
             "\u{0627}\u{0628}\u{062A}".to_string(), // Arabic ا ب ت
             "\u{05D0}\u{05D1}\u{05D2}".to_string(), // Hebrew א ב ג
             // Strings with mixed normalization forms
-            "\u{00E9}".to_string(),       // é (NFC, single codepoint)
-            "e\u{0301}".to_string(),       // é (NFD, base + combining)
+            "\u{00E9}".to_string(),  // é (NFC, single codepoint)
+            "e\u{0301}".to_string(), // é (NFD, base + combining)
             // Very long combining chain
             format!("x{}", "\u{0301}".repeat(50)),
             // String of only zero-width characters
@@ -99,7 +99,11 @@ pub fn arb_unicode_edge_case_string() -> impl Strategy<Value = String> {
     (any::<bool>(), any::<String>()).prop_map(move |(prefix, extra)| {
         let idx = (extra.len()) % cases.len();
         let edge = cases[idx].clone();
-        if prefix { format!("{}{}", edge, extra) } else { format!("{}{}", extra, edge) }
+        if prefix {
+            format!("{}{}", edge, extra)
+        } else {
+            format!("{}{}", extra, edge)
+        }
     })
 }
 
@@ -128,11 +132,19 @@ pub fn assert_key_invariants(key: &QueryKey, expected_path: &str) {
     let cloned = key.clone();
     assert_eq!(key, &cloned, "clone should be equal");
 
-    assert_eq!(hash_of(key), hash_of(&cloned), "hash should match for equal keys");
+    assert_eq!(
+        hash_of(key),
+        hash_of(&cloned),
+        "hash should match for equal keys"
+    );
 
     let json = serde_json::to_string(key).unwrap();
     let back: QueryKey = serde_json::from_str(&json).unwrap();
     assert_eq!(key, &back, "serde roundtrip should produce equal key");
 
-    assert_eq!(key.to_path(), expected_path, "to_path should match expected");
+    assert_eq!(
+        key.to_path(),
+        expected_path,
+        "to_path should match expected"
+    );
 }

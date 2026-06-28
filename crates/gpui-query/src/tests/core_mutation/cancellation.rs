@@ -6,7 +6,8 @@ use crate::core::*;
 
 #[test]
 fn cancel_during_loading_sets_failure() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
     m.begin("vars");
 
     let signal = m.signal().unwrap().clone();
@@ -17,7 +18,10 @@ fn cancel_during_loading_sets_failure() {
     assert!(m.is_failure());
     assert_eq!(m.error().unwrap().kind(), QueryErrorKind::Cancelled);
     assert_eq!(m.error().unwrap().message(), "user aborted");
-    assert!(signal.is_cancelled(), "external signal clone must see cancellation");
+    assert!(
+        signal.is_cancelled(),
+        "external signal clone must see cancellation"
+    );
     assert!(m.signal().is_none(), "signal cleared after cancel");
     assert_eq!(m.cancelled_count(), 1);
 }
@@ -26,7 +30,8 @@ fn cancel_during_loading_sets_failure() {
 
 #[test]
 fn cancel_on_idle_is_noop() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
     m.cancel(QueryError::cancelled("x"));
     assert!(m.is_idle());
     assert_eq!(m.cancelled_count(), 0);
@@ -35,7 +40,8 @@ fn cancel_on_idle_is_noop() {
 
 #[test]
 fn cancel_on_success_is_noop() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
     m.begin("vars");
     m.complete_success(10);
     m.cancel(QueryError::cancelled("x"));
@@ -46,7 +52,8 @@ fn cancel_on_success_is_noop() {
 
 #[test]
 fn cancel_on_failure_is_noop() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
     m.begin("vars");
     m.complete_failure(QueryError::response("fail"));
     let retry_count_before = m.retry_count();
@@ -60,7 +67,8 @@ fn cancel_on_failure_is_noop() {
 
 #[test]
 fn cancelled_count_increments_across_mutations() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
 
     m.begin("first");
     m.cancel(QueryError::cancelled("abort 1"));

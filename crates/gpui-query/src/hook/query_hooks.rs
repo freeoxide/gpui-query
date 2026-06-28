@@ -23,9 +23,7 @@
 use gpui::{BorrowAppContext as _, Context, Entity, Subscription};
 
 use crate::client::{QueryClient, QueryObserver};
-use crate::core::{
-    Fetched, QueryFetchMode, QueryKey, QueryResource, QuerySignal, QueryStatus,
-};
+use crate::core::{Fetched, QueryFetchMode, QueryKey, QueryResource, QuerySignal, QueryStatus};
 
 use super::current_time_ms;
 use super::fetch_retry::{begin_request_on_entity, fetch_signal_with_retry, fetch_with_retry};
@@ -78,8 +76,7 @@ where
         force_fetch,
         ..
     } = options.into();
-    let (entity, subscription) =
-        use_query_manual(key.clone(), cache_policy, request_policy, cx);
+    let (entity, subscription) = use_query_manual(key.clone(), cache_policy, request_policy, cx);
 
     // Audit fix #16: Propagate the user's retry policy to the resource entity.
     // Without this, the resource defaults to RetryPolicy::no_retries() and
@@ -114,15 +111,8 @@ where
             // replacement fetch (or entity drop on unmount) aborts the prior
             // in-flight task instead of leaving it detached and running.
             let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-                fetch_signal_with_retry(
-                    fetcher,
-                    signal,
-                    request_id,
-                    &retry_policy,
-                    &weak,
-                    cx,
-                )
-                .await;
+                fetch_signal_with_retry(fetcher, signal, request_id, &retry_policy, &weak, cx)
+                    .await;
             });
             // Audit #6 NOT applied to queries: query fetches already prevent
             // stale writes via the signal + `is_current_request` cooperative
@@ -130,7 +120,7 @@ where
             // superseded fetcher still observes its cancelled signal. Hard-
             // aborting on replacement would break that contract, so the task
             // is detached (it self-terminates when the entity is dropped).
-task.detach();
+            task.detach();
         }
     }
 
@@ -177,8 +167,7 @@ where
         force_fetch,
         ..
     } = options.into();
-    let (entity, subscription) =
-        use_query_manual(key.clone(), cache_policy, request_policy, cx);
+    let (entity, subscription) = use_query_manual(key.clone(), cache_policy, request_policy, cx);
 
     // Audit fix #16 (mirrors `use_query`): propagate the user's retry policy.
     entity.update(cx, |r, _| r.set_retry_policy(retry_policy));
@@ -201,17 +190,10 @@ where
             // queries): cooperative signal cancellation + `accept_current_request`
             // prevent stale writes, and the task self-terminates on entity drop.
             let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-                fetch_signal_with_retry(
-                    fetcher,
-                    signal,
-                    request_id,
-                    &retry_policy,
-                    &weak,
-                    cx,
-                )
-                .await;
+                fetch_signal_with_retry(fetcher, signal, request_id, &retry_policy, &weak, cx)
+                    .await;
             });
-task.detach();
+            task.detach();
         }
     }
 
@@ -258,7 +240,7 @@ where
             // superseded fetcher still observes its cancelled signal. Hard-
             // aborting on replacement would break that contract, so the task
             // is detached (it self-terminates when the entity is dropped).
-task.detach();
+            task.detach();
         }
     }
 

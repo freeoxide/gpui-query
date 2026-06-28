@@ -8,7 +8,7 @@ use gpui::App;
 
 use crate::client::devtools::QueryDiagnostic;
 use crate::client::erased::ErasedBucket;
-use crate::core::{QueryKeyFilter, QueryStatus};
+use crate::core::QueryKeyFilter;
 
 use super::ops::QueryBucket;
 
@@ -97,7 +97,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
     /// fresh `Vec`.
     fn collect_diagnostics_into(&self, now_ms: u64, cx: &App, out: &mut Vec<QueryDiagnostic>) {
         for (key, entry) in self.entries.iter() {
-            let Some(entity) = entry.entity.upgrade() else { continue };
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
             let resource = entity.read(cx);
             out.push(QueryDiagnostic {
                 key: key.to_path(),
@@ -114,11 +116,58 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
     /// status)` pair into `out`, avoiding the `String` allocations of
     /// `cache_policy`/`retry_count` and the `now_ms` syscall for callers that
     /// only need the key and status (e.g. `dehydrate`).
-    fn collect_key_status_into(&self, cx: &App, out: &mut Vec<(String, QueryStatus)>) {
+    #[cfg(feature = "persist")]
+    fn collect_key_status_into(&self, cx: &App, out: &mut Vec<(String, crate::core::QueryStatus)>) {
         for (key, entry) in self.entries.iter() {
-            let Some(entity) = entry.entity.upgrade() else { continue };
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
             let resource = entity.read(cx);
             out.push((key.to_path(), resource.status()));
+        }
+    }
+
+    /// Value-carrying variant for persistence. For each `Success` entry whose
+    /// `(T, E)` has a registered serializer, push `(key, PersistedEntry)` into
+    /// `out`. Entries without a serializer (or not in `Success`) are skipped.
+    #[cfg(feature = "persist")]
+    fn collect_persistable_into(
+        &self,
+        cx: &App,
+        serializers: &crate::client::persist::SerializerRegistry,
+        now_ms: u64,
+        out: &mut Vec<(
+            crate::core::QueryKey,
+            crate::client::persist::PersistedEntry,
+        )>,
+    ) {
+        use crate::core::QueryStatus;
+
+        let type_id = std::any::TypeId::of::<(T, E)>();
+        let Some(serialize_fn) = serializers.get(type_id) else {
+            return;
+        };
+        for (key, entry) in self.entries.iter() {
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
+            let resource = entity.read(cx);
+            if resource.status() != QueryStatus::Success {
+                continue;
+            }
+            let Some(data) = resource.data() else {
+                continue;
+            };
+            let value = serialize_fn(data as &dyn std::any::Any);
+            out.push((
+                key.clone(),
+                crate::client::persist::PersistedEntry {
+                    value,
+                    cached_at: resource.last_updated_at_ms().unwrap_or(now_ms),
+                    cache_policy: resource.cache_policy(),
+                    meta: None,
+                },
+            ));
         }
     }
 }
