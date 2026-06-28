@@ -1,0 +1,23 @@
+[package]
+name = "gpui-query-http"
+version = "0.1.0"
+edition = "2024"
+description = "HTTP cache-header helpers for gpui-query (server-wins CachePolicy + HttpCache)"
+repository = "https://github.com/hmziqrs/gpui-query"
+license = "MIT"
+keywords = ["gpui", "http", "caching", "cache-control", "query"]
+categories = ["asynchronous", "caching", "web-programming::http-client"]
+homepage = "https://gpui-query.hmziq.xyz"
+authors = ["hmziqrs"]
+
+[features]
+default = []
+
+[dependencies]
+gpui-query = { path = "../gpui-query", default-features = false, features = ["core"] }
+http = "1"
+serde = { workspace = true }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = { workspace = true }
