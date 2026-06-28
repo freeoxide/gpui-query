@@ -44,7 +44,13 @@ const config: Config = {
       logo: {
         alt: 'gpui-query',
         src: 'img/logo.svg',
-        href: '/',
+        // The docs site is served under baseUrl `/docs/`, but the homepage is
+        // the separate marketing app at the domain root `/`. A plain `href: '/'`
+        // gets run through useBaseUrl() and becomes `/docs/`, so the logo just
+        // points back at the docs root. The `pathname://` escape hatch renders a
+        // regular anchor with no baseUrl prepending and no SPA interception,
+        // sending the user to the real homepage at `/`.
+        href: 'pathname:///',
         target: '_self',
       },
       items: [
