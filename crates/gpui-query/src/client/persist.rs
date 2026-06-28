@@ -420,6 +420,14 @@ impl QueryClient {
         let pending: Arc<std::sync::Mutex<Option<PersistSnapshot>>> =
             Arc::new(std::sync::Mutex::new(None));
 
+        // Ensure the marker exists before observing. GPUI delivers
+        // `observe_global` notifications for globals that are mutated while the
+        // observer is registered; creating the marker here (idempotent) means
+        // the bump sites' notifications are guaranteed to wake this observer,
+        // and that their `set_global`/`update_global` calls never see an absent
+        // global.
+        let _ = cx.default_global::<super::CacheMutation>();
+
         let subscription = {
             let persister = persister.clone();
             let pending = pending.clone();

@@ -398,7 +398,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
             crate::client::persist::PersistedEntry,
         )>,
     ) {
-        let type_id = std::any::TypeId::of::<(T, E)>();
+        // Serialization depends on the data type `T` (not the error type `E`);
+        // matches `SerializerRegistry::register::<T>` (via `register_serializer::<T, E>`).
+        let type_id = std::any::TypeId::of::<T>();
         let Some(serialize_fn) = serializers.get(type_id) else {
             return;
         };

@@ -5,9 +5,6 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "persist")]
-use gpui::BorrowAppContext as _;
-
 use crate::core::{InfiniteQueryResource, RequestId};
 
 use crate::hook::{current_time_ms, read_entity};
@@ -110,7 +107,7 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
                         cx.notify();
                         // B2: precise dirty signal for the persistence layer.
                         #[cfg(feature = "persist")]
-                        cx.default_global::<crate::client::mutation_signal::CacheMutation>();
+                        cx.default_global::<crate::client::CacheMutation>();
                     } else {
                         // stale request, result discarded
                     }
@@ -170,7 +167,7 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
                             cx.notify();
                             // B2: precise dirty signal for the persistence layer.
                             #[cfg(feature = "persist")]
-                            cx.default_global::<crate::client::mutation_signal::CacheMutation>();
+                            cx.default_global::<crate::client::CacheMutation>();
                         } else {
                             // stale request, result discarded
                         }

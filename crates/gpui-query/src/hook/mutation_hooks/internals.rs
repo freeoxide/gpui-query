@@ -18,9 +18,6 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "persist")]
-use gpui::BorrowAppContext as _;
-
 use crate::core::{MutationResource, RetryPolicy};
 
 use super::super::options::MutationCallbacks;
@@ -97,7 +94,7 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                     cx.notify();
                     // B2: precise dirty signal for the persistence layer.
                     #[cfg(feature = "persist")]
-                    cx.default_global::<crate::client::mutation_signal::CacheMutation>();
+                    cx.default_global::<crate::client::CacheMutation>();
                 });
 
                 // Fire success/settled callbacks outside entity borrow so
@@ -215,7 +212,7 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                             cx.notify();
                             // B2: precise dirty signal for the persistence layer.
                             #[cfg(feature = "persist")]
-                            cx.default_global::<crate::client::mutation_signal::CacheMutation>();
+                            cx.default_global::<crate::client::CacheMutation>();
                         });
                     }
 

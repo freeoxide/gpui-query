@@ -210,7 +210,7 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                         cx.notify();
                         // B2: precise dirty signal for the persistence layer.
                         #[cfg(feature = "persist")]
-                        cx.default_global::<crate::client::mutation_signal::CacheMutation>();
+                        cx.default_global::<crate::client::CacheMutation>();
                     } else {
                         #[cfg(debug_assertions)]
                         eprintln!(
@@ -287,7 +287,7 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                             cx.notify();
                             // B2: precise dirty signal for the persistence layer.
                             #[cfg(feature = "persist")]
-                            cx.default_global::<crate::client::mutation_signal::CacheMutation>();
+                            cx.default_global::<crate::client::CacheMutation>();
                         } else {
                             #[cfg(debug_assertions)]
                             eprintln!(

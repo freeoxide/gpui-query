@@ -143,7 +143,10 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
     ) {
         use crate::core::QueryStatus;
 
-        let type_id = std::any::TypeId::of::<(T, E)>();
+        // Serialization depends on the data type `T` (not the error type `E`),
+        // so look up the registry by `TypeId::of::<T>()` — the same key used by
+        // `SerializerRegistry::register::<T>` (via `register_serializer::<T, E>`).
+        let type_id = std::any::TypeId::of::<T>();
         let Some(serialize_fn) = serializers.get(type_id) else {
             return;
         };

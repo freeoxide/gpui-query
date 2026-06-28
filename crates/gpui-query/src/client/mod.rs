@@ -405,11 +405,13 @@ impl QueryClient {
         entity.update(cx, |resource, cx| {
             resource.set_data(data);
             // B2: bump the precise dirty signal so `persist_with` schedules a
-            // save. `default_global` creates the marker if absent (infallible,
-            // since `CacheMutation: Default`) and always fires GPUI's
-            // `NotifyGlobalObservers` effect.
+            // save. `default_global` creates the marker if absent AND pushes
+            // GPUI's `NotifyGlobalObservers` effect (see gpui `App::default_global`),
+            // which wakes the `observe_global::<CacheMutation>` observer in
+            // `persist_with`. It is infallible, so the no-`persist_with` build's
+            // `set_query_data` path never panics on an absent marker.
             #[cfg(feature = "persist")]
-            cx.default_global::<crate::client::mutation_signal::CacheMutation>();
+            cx.default_global::<crate::client::CacheMutation>();
             // In the default (no-persist) build the closure's `cx` is otherwise
             // unused; reference it so the build stays warning-free.
             #[cfg(not(feature = "persist"))]
