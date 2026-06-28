@@ -136,17 +136,25 @@ Two concerns, two shapes. Nothing in common, so no shared abstraction.
   proposed enrichment adds: an async persister, a value/meta-carrying entry, a
   `persist_with` debounce/filter subscription, schema versioning, and (optionally)
   extraction into a `gpui-query-persist` crate. Note on the subscription path: a
-  `persist_with` built on `cx.observe_global::<QueryClient>()` **does** fire for
-  free on any mutation routed through `cx.update_global::<QueryClient, _>` — and
-  the crate already does exactly that at every fetch / retry / mutation / infinite-
-  query completion site (`hook/query_hooks.rs`, `hook/fetch_retry.rs`,
-  `hook/mutation_hooks/hooks.rs`, `hook/use_infinite_query/*`), because GPUI's
-  `update_global` pushes a `NotifyGlobalObservers` effect. The one gap is
-  `QueryClient::set_query_data` (`client/mod.rs`), which mutates a resource
-  **entity** via `entity.update(...)` with no global notify — so seed/prime writes
-  would need an explicit global notify (or routing through `update_global`) to wake
-  a `persist_with` observer. So `persist_with` is mostly reuse, plus one small
-  notify hook for the `set_query_data` path.
+  `persist_with` built on `cx.observe_global::<QueryClient>()` fires only when the
+  `QueryClient` **global** is mutated via `cx.update_global::<QueryClient, _>` /
+  `global_mut` / `set_global` (these push a `NotifyGlobalObservers` effect). The
+  crate's `update_global::<QueryClient, _>` sites all run at **fetch-start /
+  hook-setup** — resource creation (`resource_with_policies`), request-id
+  allocation (`next_request_id_for_key`), and mutation registration
+  (`register_mutation`) — **not** at completion. The actual completion writes
+  (`complete_success` / `complete_failure`) are bare `entity.update(...)` +
+  `cx.notify()` on the resource **entity** (`hook/fetch_retry.rs`,
+  `hook/mutation_hooks/internals.rs`, `hook/use_infinite_query/fetch_runners.rs`),
+  which wake `cx.observe(&entity)` subscribers but **never** a global observer. So
+  a `persist_with` on `observe_global` would fire before fetched data lands (and
+  `dehydrate()` emits only `Success` entries, so nothing useful is persistable
+  yet) and would **miss** every completion. Closing this needs every completion
+  write routed through `update_global` (or an explicit global notify at each
+  completion site) — not the "one small notify for `set_query_data`" an earlier
+  draft claimed. `set_query_data` itself is **not** the gap: being `&mut self` on a
+  `Global`, every caller already invokes it through `update_global` / `global_mut`,
+  both of which notify. See [Required Core Change 2](#2-whole-client-mutation-observation-for-persistence-subscription).
 
 Each proposed addition is ~50 lines of core surface, all behind the proposed
 opt-in `persist` feature (persistence is offline-data only). No plugin system, no
@@ -200,9 +208,14 @@ new opt-in `persist` feature. **Today** the persistence skeleton — the
 The gate is feasible but **not** zero-coupling — three prerequisites must land
 first: (1) **extract `current_time_ms`** out of `client/erased.rs` (it is defined
 in the same module as `QueryPersister` and re-exported together at
-`client/mod.rs`, but it is consumed by non-persistence code — gc, diagnostics,
-prepared-fetch, the whole hook layer — so the module cannot be gated as-is; only
-the `QueryPersister` symbol can move once the helper is relocated); (2) decide
+`client/mod.rs`, but it is consumed by non-persistence **client-layer** code — gc
+(`client/mod.rs`), the lifecycle methods (`client/lifecycle.rs`), and
+`client/infinite_mutation_ops.rs` — so the module cannot be gated as-is; only the
+`QueryPersister` symbol can move once the helper is relocated. The hook layer does
+**not** consume this one: it has its own identical `current_time_ms` in
+`hook/mod.rs`, and `lib.rs` deliberately re-exports both, so gating `erased.rs`
+leaves the hook layer untouched; `prepared_fetch` only mentions it in doc-comments);
+(2) decide
 what to do with `collect_key_status_into` — a required method on the always-
 compiled `ErasedBucket` / `ErasedInfiniteBucket` / `ErasedMutationBucket` traits
 whose only caller is `dehydrate` (gate the method + its three impls together, or
@@ -380,39 +393,63 @@ calls `cx.notify()` only on status change. It does **not** observe whole-client
 mutations. A persistence subscription needs to know when _any_ tracked entry
 changes.
 
-**Good news — most of the reuse works today.** `QueryClient` is a `Global`
-(`impl Global for QueryClient {}` in `client/mod.rs`), and in GPUI mutating a
-Global via `cx.update_global::<QueryClient, _>` **does** auto-fire
-`cx.observe_global::<QueryClient>()` subscribers (the update pushes a
-`NotifyGlobalObservers` effect). The crate already routes real mutations through
-`update_global::<QueryClient, _>` at every fetch / retry / mutation / infinite-
-query completion site (`hook/query_hooks.rs`, `hook/fetch_retry.rs`,
-`hook/mutation_hooks/hooks.rs`, `hook/use_infinite_query/*`). So a `persist_with`
-subscribing via `observe_global::<QueryClient>()` **already fires** on the common
-mutation paths — no core change needed for those.
+**Reality check — the reuse does *not* cover completions.** `QueryClient` is a
+`Global` (`impl Global for QueryClient {}` in `client/mod.rs`), and in GPUI
+mutating a Global via `cx.update_global::<QueryClient, _>` (or `global_mut` /
+`set_global`) **does** auto-fire `cx.observe_global::<QueryClient>()` subscribers
+(the update pushes a `NotifyGlobalObservers` effect — verified in
+`gpui-0.2.2/src/app.rs`, `end_global_lease`). **But** the crate's
+`update_global::<QueryClient, _>` sites all run at **fetch-start / hook-setup**,
+never at completion: they wrap `resource_with_policies` /
+`infinite_resource_with_policies` (resource creation), `next_request_id_for_key` /
+`next_request_id_for_infinite_key` (request-id allocation), and `register_mutation`
+(`hook/query_hooks.rs`, `hook/fetch_retry.rs`, `hook/use_infinite_query/*`,
+`hook/mutation_hooks/hooks.rs`). The actual **completion** writes —
+`complete_success` / `complete_failure` — are bare `entity.update(...)` +
+`cx.notify()` on the resource entity (`hook/fetch_retry.rs:164`,
+`hook/mutation_hooks/internals.rs:89`, `hook/use_infinite_query/fetch_runners.rs:97`).
+`cx.notify()` inside `entity.update` wakes only `cx.observe(&entity)` subscribers,
+**not** `observe_global`. So a `persist_with` on `observe_global::<QueryClient>()`
+fires at fetch-start (before the data lands; and `dehydrate()` emits only `Success`
+entries, so there is nothing to persist yet) and **does not fire** when the fetch
+resolves. This is observable in practice: gpui-app's Query DevTools dashboard is
+the only consumer that wires `observe_global::<QueryClient>` for live updates
+(`observe_global_in`, no polling), and it refreshes on query creation/start and
+manual toolbar mutations but **not** when a query resolves.
 
-**The one gap:** `QueryClient::set_query_data` (`client/mod.rs`) mutates a
-resource **entity** via `entity.update(...)` — that does *not* touch the
-`QueryClient` global, so it would not wake a global observer. Seed/prime writes
-(hydration, optimistic updates) therefore need an explicit global notify (or
-re-routing through `update_global`) to be observed.
+**The real gaps:** the three completion paths above. Each writes via bare
+`entity.update(...)` and never notifies the global, so a global observer misses
+exactly the writes persistence cares about. `QueryClient::set_query_data`
+(`client/mod.rs`) is **not** one of them: it is `&mut self` on a `Global`, so every
+caller must invoke it through `cx.update_global::<QueryClient, _>` (or `global_mut`)
+— both of which push `NotifyGlobalObservers` — so seed/prime writes (hydration,
+optimistic updates) already wake a global observer for free. An earlier draft had
+this backwards.
 
 **Fix — pick one (Open Question 2):**
 
 - **Option A (coarse global observer):** `persist_with` subscribes via
-  `cx.observe_global::<QueryClient>()` — free for every mutation already going
-  through `update_global` (the common case) — and add one small notify hook so
-  `set_query_data` also wakes the observer. The `PersistOptions::filter` (an owned
-  filter, see below) and `debounce` do the real selection work. This is almost
-  pure reuse plus a one-line notify in `set_query_data`.
+  `cx.observe_global::<QueryClient>()`. For this to capture fetched data, **every
+  completion write must notify the global** — route the `complete_success` /
+  `complete_failure` `entity.update` blocks in `hook/fetch_retry.rs`,
+  `hook/mutation_hooks/internals.rs`, and `hook/use_infinite_query/fetch_runners.rs`
+  through `update_global::<QueryClient, _>`, or add an explicit global notify after
+  each. The `PersistOptions::filter` (an owned filter, see below) and `debounce` do
+  the selection work. This is **not** free reuse: it touches all three completion
+  sites (creation/start and `set_query_data` already notify), and the observer
+  still fires spuriously on every fetch-start/creation.
 - **Option B (typed dirty signal):** add a `QueryClient` dirty signal (analogous
-  to the proposed `notify_buckets_changed`) emitted from `set_query_data` / fetch
-  completion, observed by `persist_with`. More precise, more core surface.
+  to the proposed `notify_buckets_changed`) emitted from the same three completion
+  sites (plus `set_query_data`), observed by `persist_with`. More precise — fires
+  only on real data changes, not on fetch-start — for slightly more core surface.
 
-**Recommendation:** Option A for v1 — it is mostly free reuse (the bulk of
-mutations already notify via `update_global`), with a trivial notify added to the
-`set_query_data` path. Move to Option B only if profiling shows the coarse path
-firing too often.
+**Recommendation:** Option B. The earlier "Option A is free reuse" rationale does
+not hold — the completion sites have to be touched either way (Option A misses
+completions entirely until they are), so the only question is whether the
+subscriber is coarse-and-noisy (A, also fires on every fetch-start/creation) or
+precise (B, fires only on completion + `set_query_data`). Given equal completion-
+site work, prefer B. Choose A only if the spurious fetch-start notifications are
+acceptable and minimizing new core surface matters more than precision.
 
 ### 3. Async `Persister` + `persist_with` + real `hydrate` (enhancement of the shipped skeleton)
 
@@ -968,11 +1005,15 @@ and no meta at all, so cross-crate data sharing is not yet possible.
   general `on_mutate` hook would invite misuse and bloat core. Note that
   `observe_global::<QueryClient>()` **fires automatically** on any
   `cx.update_global::<QueryClient, _>` (GPUI pushes a `NotifyGlobalObservers`
-  effect), and the crate already routes fetch / retry / mutation / infinite-query
-  completion through `update_global`, so the subscription works for free on those
-  paths. The only gap is `QueryClient::set_query_data`, which mutates a resource
-  entity (no global notify) — that one path needs an explicit notify (or routing
-  through `update_global`) to be observed.
+  effect), but the crate routes only fetch-start / hook-setup through
+  `update_global` (resource creation, request-id allocation, mutation
+  registration) — **completion writes are bare `entity.update` on the resource
+  entity and do not notify the global** (see [Required Core Change
+  2](#2-whole-client-mutation-observation-for-persistence-subscription)). So the
+  subscription does **not** work for free on completions; those three sites must be
+  routed through `update_global` (or given an explicit global notify) first.
+  `set_query_data`, by contrast, already notifies — callers reach it via
+  `update_global`.
 - **Server wins.** `CachePolicy` stored in `PersistedEntry` (proposed) is whatever
   the server last returned (via `Fetched.cache_policy`, itself proposed — see
   Required Core Change 1). On rehydrate, that policy applies until the next fetch
@@ -1099,7 +1140,7 @@ proposed `persist` feature (offline data only).
    `QueryPersister` + `QueryClient::persist` / `restore` + caller-side typed
    `set_query_data` priming today. This is metadata-only; verify with
    `#[gpui::test]` + `TestAppContext` (the crate's own tests already use this
-   pattern — see `tests/`).
+   pattern — see `src/tests/`).
 2. **Proposed Core Change 1 — `Fetched<T, E>` + `*_with_policy` fetcher variant**
    in `gpui-query`. Non-breaking: the existing `use_query` signature (signal
    fetcher, tuple return) is unchanged; the new variant is additive. Add unit
@@ -1112,9 +1153,14 @@ proposed `persist` feature (offline data only).
    the async `Persister`, `PersistedEntry { value, ... }`, `persist_with`, typed
    `hydrate`, `PersistOptions { filter, max_age, debounce }`, and snapshot
    versioning on top of the shipped `QueryPersister` skeleton. `persist_with`
-   uses Core Change 2 Option A (`observe_global::<QueryClient>()`) — which works
-   for free on the mutations already routed through `update_global`, needing only
-   a small notify hook for the `set_query_data` path (see Open Question 2). Ship a
+   needs Core Change 2 first: the completion writes (`complete_success` /
+   `complete_failure` in `hook/fetch_retry.rs`, `hook/mutation_hooks/internals.rs`,
+   `hook/use_infinite_query/fetch_runners.rs`) are bare `entity.update`s that do
+   **not** notify the `QueryClient` global, so either route them through
+   `update_global` (Option A) or emit a typed dirty signal from them (Option B,
+   recommended) before `observe_global::<QueryClient>()` can see completions;
+   `set_query_data` already notifies via its caller's `update_global` (see Open
+   Question 2). Ship a
    reference `FilePersister` in the proposed `gpui-query-persist` crate. Add unit
    tests for debounce, `max_age` filtering, and version mismatch — these need
    `#[gpui::test]` + `TestAppContext` since they touch `QueryClient`.
@@ -1131,8 +1177,9 @@ proposed `persist` feature (offline data only).
 Per `gpui-test`: tests that touch `QueryClient` (a `Global`) need
 `#[gpui::test]` + `TestAppContext`; pure-logic tests (header parsing, debounce
 math) are plain `#[test]`. This matches the crate's own test suite, which uses
-`#[gpui::test]` + `TestAppContext` throughout `tests/` (with `setup_query_client`
-/ `setup_test` helpers in `tests/test_support.rs`).
+`#[gpui::test]` + `TestAppContext` throughout `src/tests/` (with `setup_query_client`
+/ `setup_test` helpers in `src/tests/test_support.rs`; the only top-level `tests/`
+file is `tests/edge_cases.rs`).
 
 | Target                                | Unit tests                                                | Integration tests                                  | GPUI ctx? |
 | ------------------------------------- | --------------------------------------------------------- | -------------------------------------------------- | --------- |
@@ -1157,18 +1204,22 @@ full refetch. This one test exercises the entire proposed design end-to-end.
    Option B (injected `QueryContext` callback)? Default: A, for explicitness and
    serializability. See Required Core Change 1.
 2. **Bucket-mutation observation** — Option A (`observe_global::<QueryClient>()`,
-   coarse) vs Option B (typed dirty signal, precise)? Default: A for v1.
-   Clarification: in GPUI, `cx.update_global::<QueryClient, _>` **does**
-   auto-notify `observe_global::<QueryClient>()` subscribers (it pushes a
-   `NotifyGlobalObservers` effect), and the crate already routes fetch / retry /
-   mutation / infinite-query completion through `update_global` at six sites
+   coarse) vs Option B (typed dirty signal, precise)? Default: **B**. Correction:
+   in GPUI, `cx.update_global::<QueryClient, _>` (and `global_mut` / `set_global`)
+   **does** auto-notify `observe_global::<QueryClient>()` subscribers (pushes a
+   `NotifyGlobalObservers` effect). But the crate's six `update_global` sites
    (`hook/query_hooks.rs`, `hook/fetch_retry.rs`, `hook/mutation_hooks/hooks.rs`,
-   `hook/use_infinite_query/*`). So Option A works for free on those paths. The
-   only mutation that does **not** wake a global observer today is
-   `QueryClient::set_query_data`, which mutates a resource entity directly — that
-   path needs an explicit global notify (or re-routing through `update_global`).
-   Option B (a typed dirty signal) is more precise but more core surface; defer
-   unless profiling shows the coarse path firing too often.
+   `hook/use_infinite_query/*`) all fire at **fetch-start / hook-setup** (resource
+   creation, request-id allocation, mutation registration) — **not** at completion.
+   The completion writes (`complete_success` / `complete_failure`) are bare
+   `entity.update`s that notify only the resource entity, so `observe_global` does
+   **not** see them. (`set_query_data` is the opposite of a gap: being `&mut self`
+   on a `Global`, callers reach it via `update_global`, which notifies.) Both
+   options therefore require touching the three completion sites; given that, Option
+   B's precision wins and avoids the spurious fetch-start/creation notifications
+   Option A would deliver before data exists. Real-world confirmation: gpui-app's
+   Query DevTools dashboard wires `observe_global_in::<QueryClient>` with no polling
+   and does not refresh when a query resolves.
 3. **Adding a typed value field to the shipped metadata-only entry.** The shipped
    `DehydratedEntry` is `{ key, type_id, kind }` with **no value field** (it was
    removed as dead weight — see its doc comment in `client/devtools.rs`), and
