@@ -115,8 +115,9 @@ pub use options::{InfiniteQueryOptions, MutationCallbacks, MutationOptions, Quer
 // ── Re-exports from query_hooks ─────────────────────────────────────────
 
 pub use query_hooks::{
-    fetch_query, fetch_query_with_signal, use_query, use_query_manual, use_query_manual_opts,
-    use_query_unsignalled, use_query_unsignalled_opts,
+    fetch_query, fetch_query_with_policy, fetch_query_with_signal, use_query,
+    use_query_manual, use_query_manual_opts, use_query_unsignalled, use_query_unsignalled_opts,
+    use_query_with_policy,
 };
 
 // ── Re-exports from use_infinite_query ───────────────────────────────────

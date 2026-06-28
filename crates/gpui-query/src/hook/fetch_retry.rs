@@ -4,10 +4,42 @@ use gpui::{BorrowAppContext as _, Context, Entity};
 
 use crate::client::QueryClient;
 use crate::core::{
-    QueryBeginResult, QueryFetchMode, QueryKey, QueryResource, QuerySignal, RequestId, RetryPolicy,
+    CachePolicy, Fetched, QueryBeginResult, QueryFetchMode, QueryKey, QueryResource, QuerySignal,
+    RequestId, RetryPolicy,
 };
 
 use super::{current_time_ms, read_entity};
+
+// ── Fetcher-success adapter ("server wins") ─────────────────────────────
+//
+// Lets the single retry loop below serve both fetcher shapes:
+// - `Result<T, E>`         (plain)        → no policy override
+// - `Result<Fetched<T>, E>` (`*_with_policy`) → optional server-derived policy
+//
+// The loop is generic over `Out: FetchedLike<T>`; the success arm extracts
+// `(data, server_policy)` from the fetcher result and, when a server policy is
+// present, applies it to the resource after `complete_success`. A plain `T`
+// yields `(self, None)`, so the existing fetch paths are behaviorally identical.
+
+/// Adapt a fetcher success payload into the underlying data plus an optional
+/// server-derived [`CachePolicy`].
+pub(crate) trait FetchedLike<T> {
+    /// Consume `self` into `(data, server_policy)`, where `server_policy` is
+    /// `None` for plain fetcher results.
+    fn into_data_and_policy(self) -> (T, Option<CachePolicy>);
+}
+
+impl<T> FetchedLike<T> for T {
+    fn into_data_and_policy(self) -> (T, Option<CachePolicy>) {
+        (self, None)
+    }
+}
+
+impl<T> FetchedLike<T> for Fetched<T> {
+    fn into_data_and_policy(self) -> (T, Option<CachePolicy>) {
+        (self.data, self.cache_policy)
+    }
+}
 
 // ── Request lifecycle helpers ───────────────────────────────────────────
 
@@ -135,7 +167,7 @@ where
 ///
 /// Audit fix #27/#121: `entity.update` results are discarded via `let _ =`
 /// because `update` returns `Result<R>` under `AsyncApp`.
-async fn run_query_retry_loop<T, E, F, Fut>(
+async fn run_query_retry_loop<T, E, Out, F, Fut>(
     fetcher: F,
     request_id: RequestId,
     retry_policy: &RetryPolicy,
@@ -145,8 +177,9 @@ async fn run_query_retry_loop<T, E, F, Fut>(
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    Out: FetchedLike<T> + Send + 'static,
     F: Fn(Option<QuerySignal>) -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+    Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
 {
     let mut attempt: u32 = 0;
 
@@ -154,7 +187,10 @@ async fn run_query_retry_loop<T, E, F, Fut>(
         let result = fetcher(signal.clone()).await;
 
         match result {
-            Ok(data) => {
+            Ok(out) => {
+                // Server wins: extract any server-derived policy from a
+                // `Fetched<T>` result (plain `T` yields `None` here).
+                let (data, server_policy) = out.into_data_and_policy();
                 let now_ms = current_time_ms();
                 let Some(e) = entity.upgrade() else {
                     // Documented behavior -- if the owning component
@@ -165,6 +201,11 @@ async fn run_query_retry_loop<T, E, F, Fut>(
                     resource.reset_retry_count();
                     if let Some(guard) = resource.accept_current_request(request_id) {
                         resource.complete_success(guard, data, now_ms);
+                        // Server wins: override the resource's policy only when
+                        // the fetcher supplied one. No-op for plain `T` results.
+                        if let Some(policy) = server_policy {
+                            resource.set_cache_policy(policy);
+                        }
                         // Audit fix #7: Only notify when the result was actually accepted.
                         cx.notify();
                     } else {
@@ -269,7 +310,7 @@ async fn run_query_retry_loop<T, E, F, Fut>(
 ///
 /// Audit fix #14: Thin wrapper over [`run_query_retry_loop`] with
 /// `signal = None`.
-pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
+pub(crate) async fn fetch_with_retry<T, E, Out, F, Fut>(
     fetcher: F,
     request_id: RequestId,
     retry_policy: &RetryPolicy,
@@ -278,11 +319,13 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    Out: FetchedLike<T> + Send + 'static,
     F: Fn() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+    Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
 {
     let wrapper = move |_: Option<QuerySignal>| fetcher();
-    run_query_retry_loop(wrapper, request_id, retry_policy, entity, cx, None).await;
+    run_query_retry_loop::<T, E, Out, _, _>(wrapper, request_id, retry_policy, entity, cx, None)
+        .await;
 }
 
 /// Like [`fetch_with_retry`] but for fetchers that take a [`QuerySignal`].
@@ -293,7 +336,7 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
 ///
 /// Audit fix #14: Thin wrapper over [`run_query_retry_loop`] with
 /// `signal = Some(initial_signal)`.
-pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
+pub(crate) async fn fetch_signal_with_retry<T, E, Out, F, Fut>(
     fetcher: F,
     initial_signal: QuerySignal,
     request_id: RequestId,
@@ -303,9 +346,18 @@ pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    Out: FetchedLike<T> + Send + 'static,
     F: Fn(QuerySignal) -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+    Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
 {
     let wrapper = move |sig: Option<QuerySignal>| fetcher(sig.unwrap_or_default());
-    run_query_retry_loop(wrapper, request_id, retry_policy, entity, cx, Some(initial_signal)).await;
+    run_query_retry_loop::<T, E, Out, _, _>(
+        wrapper,
+        request_id,
+        retry_policy,
+        entity,
+        cx,
+        Some(initial_signal),
+    )
+    .await;
 }

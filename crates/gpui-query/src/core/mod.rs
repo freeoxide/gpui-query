@@ -32,6 +32,7 @@
 //! This module depends only on `serde` — zero framework coupling.
 
 mod error;
+mod fetched;
 mod infinite_query;
 mod key;
 mod key_filter;
@@ -47,6 +48,7 @@ mod signal;
 mod status;
 
 pub use error::{QueryError, QueryErrorKind};
+pub use fetched::Fetched;
 pub use infinite_query::{FetchDirection, InfiniteQueryResource};
 pub use key::QueryKey;
 pub use key_filter::QueryKeyFilter;
