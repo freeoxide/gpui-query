@@ -44,13 +44,13 @@ const config: Config = {
       logo: {
         alt: 'gpui-query',
         src: 'img/logo.svg',
-        // The docs site is served under baseUrl `/docs/`, but the homepage is
-        // the separate marketing app at the domain root `/`. A plain `href: '/'`
-        // gets run through useBaseUrl() and becomes `/docs/`, so the logo just
-        // points back at the docs root. The `pathname://` escape hatch renders a
-        // regular anchor with no baseUrl prepending and no SPA interception,
-        // sending the user to the real homepage at `/`.
-        href: 'pathname:///',
+        // Points at the marketing homepage at the domain root `/`, which is a
+        // separate app served outside the docs `/docs/` baseUrl. Docusaurus's
+        // <Link> always re-appends baseUrl to root-absolute hrefs (even the
+        // `pathname://` escape hatch does), which would turn this into `/docs/`.
+        // The Logo component is swizzled (src/theme/Logo) to render a plain <a>
+        // that escapes the baseUrl — see that file for the full explanation.
+        href: '/',
         target: '_self',
       },
       items: [
