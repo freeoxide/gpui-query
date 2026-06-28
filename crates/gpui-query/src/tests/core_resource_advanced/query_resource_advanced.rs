@@ -20,11 +20,8 @@ use std::num::NonZero;
 #[test]
 fn failure_to_success_recovery_cycle() {
     // Load -> Fail -> Retry -> Succeed
-    let mut r: QueryResource<&str> = QueryResource::new(
-        "test",
-        CachePolicy::NoCache,
-        RequestPolicy::LatestWins,
-    );
+    let mut r: QueryResource<&str> =
+        QueryResource::new("test", CachePolicy::NoCache, RequestPolicy::LatestWins);
     let mut s = test_sequencer();
 
     // First fetch succeeds
@@ -80,11 +77,8 @@ fn cancel_then_fresh_begin_succeeds() {
 
 #[test]
 fn failure_with_data_then_success_updates_data() {
-    let mut r: QueryResource<&str> = QueryResource::new(
-        "test",
-        CachePolicy::NoCache,
-        RequestPolicy::LatestWins,
-    );
+    let mut r: QueryResource<&str> =
+        QueryResource::new("test", CachePolicy::NoCache, RequestPolicy::LatestWins);
     let mut s = test_sequencer();
 
     let rid = match r.begin_request(&mut s, 100, QueryFetchMode::Normal) {
@@ -137,7 +131,9 @@ fn set_retry_policy_updates_policy() {
     let mut r = test_resource();
     assert_eq!(r.retry_policy().max_retries, 0); // default is no_retries
 
-    let new_policy = RetryPolicy::new(5).with_delay(200).with_exponential_backoff();
+    let new_policy = RetryPolicy::new(5)
+        .with_delay(200)
+        .with_exponential_backoff();
     r.set_retry_policy(new_policy.clone());
     assert_eq!(r.retry_policy(), &new_policy);
     assert_eq!(r.retry_policy().max_retries, 5);
@@ -149,7 +145,11 @@ fn retry_policy_preserved_across_reset() {
     r.set_retry_policy(RetryPolicy::new(10));
     r.increment_retry();
     r.reset();
-    assert_eq!(r.retry_policy().max_retries, 10, "policy preserved after reset");
+    assert_eq!(
+        r.retry_policy().max_retries,
+        10,
+        "policy preserved after reset"
+    );
     assert_eq!(r.retry_count(), 0, "count cleared after reset");
 }
 
@@ -261,7 +261,11 @@ fn begin_request_with_id_respects_ignore_while_loading() {
     assert_eq!(r.active_request_id(), Some(custom_id));
 
     // Second request should be ignored
-    let result = r.begin_request_with_id(Some(RequestId::scoped(NonZero::new(10).unwrap(), 2)), 200, QueryFetchMode::Normal);
+    let result = r.begin_request_with_id(
+        Some(RequestId::scoped(NonZero::new(10).unwrap(), 2)),
+        200,
+        QueryFetchMode::Normal,
+    );
     match result {
         QueryBeginResult::IgnoredWhileLoading { active_request_id } => {
             assert_eq!(active_request_id, custom_id);

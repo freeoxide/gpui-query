@@ -9,12 +9,11 @@ use std::any::TypeId;
 
 use gpui::{App, Entity};
 
-use crate::core::{
-    CachePolicy, InfiniteQueryResource, MutationResource, QueryKey, QueryKeyFilter,
-    RequestPolicy,
-};
 use crate::client::infinite_bucket::InfiniteQueryBucket;
 use crate::client::mutation_bucket::MutationBucket;
+use crate::core::{
+    CachePolicy, InfiniteQueryResource, MutationResource, QueryKey, QueryKeyFilter, RequestPolicy,
+};
 
 use super::QueryClient;
 
@@ -64,10 +63,7 @@ impl QueryClient {
     }
 
     /// Get a specific infinite query entity by key.
-    pub fn infinite_query<
-        T: Clone + Send + Sync + 'static,
-        E: Clone + Send + Sync + 'static,
-    >(
+    pub fn infinite_query<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
         &self,
         key: &QueryKey,
     ) -> Option<Entity<InfiniteQueryResource<T, E>>> {
@@ -131,14 +127,15 @@ impl QueryClient {
         cx: &App,
     ) {
         let type_id = TypeId::of::<(V, T, E)>();
-        let bucket = self.mutation_buckets
+        let bucket = self
+            .mutation_buckets
             .entry(type_id)
             .or_insert_with(|| Box::new(MutationBucket::<V, T, E>::new()));
 
         // M6: cache now_ms once and thread it into `insert` (avoids a second
         // `current_time_ms` syscall inside `insert`); the same value is reused
         // by `maybe_opportunistic_gc` below.
-        let now_ms = crate::client::erased::current_time_ms();
+        let now_ms = crate::client::time::current_time_ms();
         // M4: single downcast via the shared helper (redundant TypeId
         // pre-check dropped).
         let typed = Self::mutation_bucket_or_recreate::<V, T, E>(bucket);

@@ -208,6 +208,9 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                         }
                         // Audit fix #7: Only notify when the result was actually accepted.
                         cx.notify();
+                        // B2: precise dirty signal for the persistence layer.
+                        #[cfg(feature = "persist")]
+                        cx.default_global::<crate::client::mutation_signal::CacheMutation>();
                     } else {
                         #[cfg(debug_assertions)]
                         eprintln!(
@@ -245,16 +248,15 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                     // reads). `fresh_signal` is computed unconditionally but only
                     // used when `signal` is `Some` (audit fix #14).
                     let Some(e) = entity.upgrade() else { return };
-                    let (request_still_active, fresh_signal) =
-                        read_entity(&e, cx, |r, _| {
-                            (
-                                r.is_current_request(request_id),
-                                // Audit fix #24: `QuerySignal::new` directly instead
-                                // of the redundant closure.
-                                r.signal().cloned().unwrap_or_else(QuerySignal::new),
-                            )
-                        })
-                        .unwrap_or((false, QuerySignal::new()));
+                    let (request_still_active, fresh_signal) = read_entity(&e, cx, |r, _| {
+                        (
+                            r.is_current_request(request_id),
+                            // Audit fix #24: `QuerySignal::new` directly instead
+                            // of the redundant closure.
+                            r.signal().cloned().unwrap_or_else(QuerySignal::new),
+                        )
+                    })
+                    .unwrap_or((false, QuerySignal::new()));
                     if !request_still_active {
                         #[cfg(debug_assertions)]
                         eprintln!(
@@ -283,6 +285,9 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                             resource.reset_retry_count();
                             // Audit fix #7: Only notify when the result was actually accepted.
                             cx.notify();
+                            // B2: precise dirty signal for the persistence layer.
+                            #[cfg(feature = "persist")]
+                            cx.default_global::<crate::client::mutation_signal::CacheMutation>();
                         } else {
                             #[cfg(debug_assertions)]
                             eprintln!(

@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
 
-use crate::core::{CachePolicy, InfiniteQueryResource, QueryError, QueryKey, QueryStatus, RetryPolicy};
+use crate::core::{
+    CachePolicy, InfiniteQueryResource, QueryError, QueryKey, QueryStatus, RetryPolicy,
+};
 use crate::hook::*;
 use crate::tests::test_support::*;
 
@@ -205,8 +207,16 @@ fn test_fetch_previous_page_prepends_page(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.pages().len(), 2);
-        assert_eq!(resource.pages()[0].as_ref(), &vec![1], "previous page should be at index 0");
-        assert_eq!(resource.pages()[1].as_ref(), &vec![5], "original page should shift to index 1");
+        assert_eq!(
+            resource.pages()[0].as_ref(),
+            &vec![1],
+            "previous page should be at index 0"
+        );
+        assert_eq!(
+            resource.pages()[1].as_ref(),
+            &vec![5],
+            "original page should shift to index 1"
+        );
     });
 }
 
@@ -267,7 +277,11 @@ fn test_infinite_query_max_pages_enforcement(cx: &mut TestAppContext) {
         let resource = harness.read(cx).entity.read(cx);
         let pages = resource.pages();
         assert_eq!(pages.len(), 2, "should still have at most 2 pages");
-        assert_eq!(pages[0].as_ref(), &vec![2], "first page should have been evicted");
+        assert_eq!(
+            pages[0].as_ref(),
+            &vec![2],
+            "first page should have been evicted"
+        );
         assert_eq!(pages[1].as_ref(), &vec![3], "newest page should be present");
     });
 }
@@ -355,7 +369,11 @@ fn test_fetch_previous_page_infinite_direct_call(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.pages().len(), 2);
-        assert_eq!(resource.pages()[0].as_ref(), &vec!["p0"], "previous page should be prepended");
+        assert_eq!(
+            resource.pages()[0].as_ref(),
+            &vec!["p0"],
+            "previous page should be prepended"
+        );
         assert_eq!(resource.pages()[1].as_ref(), &vec!["p2"]);
     });
 }

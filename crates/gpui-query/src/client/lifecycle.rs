@@ -11,12 +11,17 @@
 
 use gpui::App;
 
-use crate::core::{CachePolicy, MutationStatus, QueryKey, QueryStatus, RequestPolicy};
-use crate::client::devtools::{ClientDiagnostic, DehydratedEntry, DehydratedState};
-use crate::client::erased::current_time_ms;
+use crate::client::devtools::ClientDiagnostic;
+#[cfg(feature = "persist")]
+use crate::client::devtools::{DehydratedEntry, DehydratedState};
 use crate::client::prepared_fetch::PreparedFetch;
+use crate::client::time::current_time_ms;
+use crate::core::{CachePolicy, QueryKey, RequestPolicy};
+#[cfg(feature = "persist")]
+use crate::core::{MutationStatus, QueryStatus};
 
 use super::QueryClient;
+#[cfg(feature = "persist")]
 use crate::client::erased::QueryPersister;
 
 impl QueryClient {
@@ -134,6 +139,7 @@ impl QueryClient {
     /// call site. Use `get_query_data::<T, E>(key, cx)` to extract typed
     /// data and serialize it externally. The `DehydratedState` provides
     /// the metadata (keys, type IDs) needed for typed restoration.
+    #[cfg(feature = "persist")]
     pub fn dehydrate(&self, cx: &App) -> DehydratedState {
         // L2: pre-size the entries Vec from the bucket `count()` sums. Only
         // `Success` entries are pushed, so this is an upper bound — never
@@ -141,8 +147,16 @@ impl QueryClient {
         // (The three maps hold different erased trait objects, so they are
         // summed separately rather than chained.)
         let cap = self.buckets.values().map(|b| b.count()).sum::<usize>()
-            + self.infinite_buckets.values().map(|b| b.count()).sum::<usize>()
-            + self.mutation_buckets.values().map(|b| b.count()).sum::<usize>();
+            + self
+                .infinite_buckets
+                .values()
+                .map(|b| b.count())
+                .sum::<usize>()
+            + self
+                .mutation_buckets
+                .values()
+                .map(|b| b.count())
+                .sum::<usize>();
         let mut entries = Vec::with_capacity(cap);
 
         // Audit fix #L13: collapse all three loops (query / infinite / mutation)
@@ -237,6 +251,7 @@ impl QueryClient {
     /// This method is provided as a hook point for typed hydration and to
     /// document the intended API shape matching TanStack Query's
     /// `queryClient.hydrate()`.
+    #[cfg(feature = "persist")]
     pub fn hydrate(&mut self, _state: DehydratedState, _cx: &mut App) {
         // Full hydration requires type-specific deserialization. The DehydratedState
         // contains type_id keys but downcasting requires knowing the concrete types
@@ -251,6 +266,7 @@ impl QueryClient {
     /// Dehydrates the current state and saves it via the persister. This can
     /// be called periodically (e.g., during GC) or on app shutdown to ensure
     /// cached data survives across app restarts.
+    #[cfg(feature = "persist")]
     pub fn persist(&self, persister: &dyn QueryPersister, cx: &App) {
         let state = self.dehydrate(cx);
         persister.save(state.entries);
@@ -267,6 +283,7 @@ impl QueryClient {
     /// not read any `&self` state, so callers invoke it as
     /// `QueryClient::restore(&persister)` instead of `client.restore(...)`,
     /// avoiding the need for a borrow on the client.
+    #[cfg(feature = "persist")]
     pub fn restore(persister: &dyn QueryPersister) -> Vec<DehydratedEntry> {
         persister.load()
     }
@@ -383,12 +400,8 @@ impl QueryClient {
         cx: &mut App,
     ) -> Option<PreparedFetch<T, E>> {
         let key = key.into();
-        let entity = self.resource_with_policies::<T, E>(
-            key.clone(),
-            cache_policy,
-            request_policy,
-            cx,
-        );
+        let entity =
+            self.resource_with_policies::<T, E>(key.clone(), cache_policy, request_policy, cx);
         let now_ms = current_time_ms();
 
         // Get request ID from sequencer

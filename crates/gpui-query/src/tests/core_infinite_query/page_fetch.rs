@@ -2,8 +2,8 @@
 //! signal cancellation on fetch replacement, loading status transitions,
 //! and has_more propagation.
 
-use crate::core::*;
 use super::helpers::*;
+use crate::core::*;
 
 // ── 2. Page append (fetch_next_page) ────────────────────────────────────
 
@@ -17,13 +17,7 @@ fn fetch_next_page_appends_page_and_updates_status() {
     assert!(r.is_fetching_next_page());
     assert!(r.signal().is_some());
 
-    let accepted = r.complete_page_success(
-        id,
-        vec!["a", "b"],
-        true,
-        true,
-        2_000,
-    );
+    let accepted = r.complete_page_success(id, vec!["a", "b"], true, true, 2_000);
     assert!(accepted);
     assert_eq!(r.page_count(), 1);
     assert_eq!(r.status(), QueryStatus::Success);

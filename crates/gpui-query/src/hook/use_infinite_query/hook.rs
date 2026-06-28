@@ -73,13 +73,11 @@
 use gpui::{AppContext as _, BorrowAppContext as _, Context, Entity, Subscription};
 
 use crate::client::{InfiniteQueryObserver, QueryClient};
-use crate::core::{
-    InfiniteQueryResource, QueryStatus,
-};
+use crate::core::{InfiniteQueryResource, QueryStatus};
 
-use crate::hook::options::InfiniteQueryOptions;
-use crate::hook::current_time_ms;
 use super::fetch_runners::run_fetch_next_page_with_id;
+use crate::hook::current_time_ms;
+use crate::hook::options::InfiniteQueryOptions;
 
 // ── Hook ─────────────────────────────────────────────────────────────────
 
@@ -106,10 +104,7 @@ pub fn use_infinite_query<T, E, C, FNext, Fut>(
     options: InfiniteQueryOptions,
     fetch_next: FNext,
     cx: &mut Context<C>,
-) -> (
-    Entity<InfiniteQueryResource<T, E>>,
-    Subscription,
-)
+) -> (Entity<InfiniteQueryResource<T, E>>, Subscription)
 where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
@@ -130,12 +125,7 @@ where
     // caching, GC, and participation in bulk operations (invalidate/reset/remove).
     let entity = if cx.has_global::<QueryClient>() {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            client.infinite_resource_with_policies::<T, E>(
-                key,
-                cache_policy,
-                request_policy,
-                cx,
-            )
+            client.infinite_resource_with_policies::<T, E>(key, cache_policy, request_policy, cx)
         })
     } else {
         #[cfg(debug_assertions)]
@@ -223,14 +213,7 @@ where
             // re-reading + re-cloning from the entity.
             let retry = retry_policy.clone();
             let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-                run_fetch_next_page_with_id(
-                    &weak,
-                    &fetcher,
-                    request_id,
-                    &retry,
-                    cx,
-                )
-                .await;
+                run_fetch_next_page_with_id(&weak, &fetcher, request_id, &retry, cx).await;
             });
             // Audit fix #6: store the task so a replacement fetch (or entity
             // drop on unmount) aborts the prior in-flight initial fetch.

@@ -72,12 +72,15 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
             if let Some(entity) = entry.entity.upgrade() {
                 // M2: refresh the mirror from the same read we already do for
                 // the policy check (zero extra reads).
-                let (needs_update, last_updated, loading) =
-                    entity.read_with(cx, |resource, _| {
-                        let needs_update = resource.cache_policy() != cache_policy
-                            || resource.request_policy() != request_policy;
-                        (needs_update, resource.last_updated_at_ms(), resource.is_loading())
-                    });
+                let (needs_update, last_updated, loading) = entity.read_with(cx, |resource, _| {
+                    let needs_update = resource.cache_policy() != cache_policy
+                        || resource.request_policy() != request_policy;
+                    (
+                        needs_update,
+                        resource.last_updated_at_ms(),
+                        resource.is_loading(),
+                    )
+                });
                 entry.last_updated_ms = last_updated;
                 entry.loading = loading;
                 if needs_update {
@@ -94,7 +97,8 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
             self.evict_oldest(cx);
         }
 
-        let entity = cx.new(|_| InfiniteQueryResource::new(key.clone(), cache_policy, request_policy));
+        let entity =
+            cx.new(|_| InfiniteQueryResource::new(key.clone(), cache_policy, request_policy));
         self.entries.insert(
             key,
             InfiniteBucketEntry {
@@ -194,7 +198,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
         let success_threshold = gc_threshold * (SUCCESS_GC_MULTIPLIER as u64);
 
         self.entries.retain(|_key, entry| {
-            let Some(entity) = entry.entity.upgrade() else { return false };
+            let Some(entity) = entry.entity.upgrade() else {
+                return false;
+            };
             let resource = entity.read(cx);
 
             // M2: refresh the eviction mirror from this read (gc walks every
@@ -259,9 +265,10 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
 
         for key in keys {
             if let Some(entry) = self.entries.get(&key)
-                && let Some(entity) = entry.entity.upgrade() {
-                    action(&entity, cx);
-                }
+                && let Some(entity) = entry.entity.upgrade()
+            {
+                action(&entity, cx);
+            }
         }
     }
 }
@@ -345,7 +352,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
     /// fresh `Vec`.
     fn collect_diagnostics_into(&self, now_ms: u64, cx: &App, out: &mut Vec<QueryDiagnostic>) {
         for (key, entry) in self.entries.iter() {
-            let Some(entity) = entry.entity.upgrade() else { continue };
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
             let resource = entity.read(cx);
             // L6: use the accessor (checked_sub → None on clock skew) so
             // the diagnostic matches QueryBucket's cache_age_ms behavior.
@@ -363,11 +372,58 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
 
     /// Lightweight key/status pairs (#9). Pushes each live entry's `(key,
     /// status)` pair into `out`.
+    #[cfg(feature = "persist")]
     fn collect_key_status_into(&self, cx: &App, out: &mut Vec<(String, QueryStatus)>) {
         for (key, entry) in self.entries.iter() {
-            let Some(entity) = entry.entity.upgrade() else { continue };
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
             let resource = entity.read(cx);
             out.push((key.to_path(), resource.status()));
+        }
+    }
+
+    /// Value-carrying variant for persistence. Infinite resources dehydrate
+    /// their first page only (the full page Vec is opaque to core; a richer
+    /// multi-page serialization can layer on top of `meta` later). Entries
+    /// without a registered serializer, or not in `Success`, are skipped.
+    #[cfg(feature = "persist")]
+    fn collect_persistable_into(
+        &self,
+        cx: &App,
+        serializers: &crate::client::persist::SerializerRegistry,
+        now_ms: u64,
+        out: &mut Vec<(
+            crate::core::QueryKey,
+            crate::client::persist::PersistedEntry,
+        )>,
+    ) {
+        let type_id = std::any::TypeId::of::<(T, E)>();
+        let Some(serialize_fn) = serializers.get(type_id) else {
+            return;
+        };
+        for (key, entry) in self.entries.iter() {
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
+            let resource = entity.read(cx);
+            if resource.status() != QueryStatus::Success {
+                continue;
+            }
+            let Some(page) = resource.first_page_arc() else {
+                continue;
+            };
+            // Serialize the single `Arc<T>` page as the opaque value.
+            let value = serialize_fn(&*page as &dyn std::any::Any);
+            out.push((
+                key.clone(),
+                crate::client::persist::PersistedEntry {
+                    value,
+                    cached_at: resource.last_updated_at_ms().unwrap_or(now_ms),
+                    cache_policy: resource.cache_policy(),
+                    meta: None,
+                },
+            ));
         }
     }
 }

@@ -104,12 +104,21 @@ impl CachePolicy {
         match self {
             Self::NoCache => None,
             Self::Ttl { ttl_ms } => {
-                debug_assert!(ttl_ms > 0, "CachePolicy::Ttl with ttl_ms=0 behaves like NoCache");
+                debug_assert!(
+                    ttl_ms > 0,
+                    "CachePolicy::Ttl with ttl_ms=0 behaves like NoCache"
+                );
                 Some(ttl_ms)
             }
             Self::StaleWhileRevalidate { ttl_ms, stale_ms } => {
-                debug_assert!(ttl_ms > 0, "CachePolicy::StaleWhileRevalidate with ttl_ms=0 behaves like NoCache");
-                debug_assert!(stale_ms > 0, "CachePolicy::StaleWhileRevalidate with stale_ms=0 degenerates to Ttl-only behavior");
+                debug_assert!(
+                    ttl_ms > 0,
+                    "CachePolicy::StaleWhileRevalidate with ttl_ms=0 behaves like NoCache"
+                );
+                debug_assert!(
+                    stale_ms > 0,
+                    "CachePolicy::StaleWhileRevalidate with stale_ms=0 degenerates to Ttl-only behavior"
+                );
                 Some(ttl_ms.saturating_add(stale_ms))
             }
         }
@@ -119,9 +128,7 @@ impl CachePolicy {
     ///
     /// Returns `false` if the policy has no TTL or the data age exceeds TTL.
     pub fn is_fresh(self, age_ms: u64) -> bool {
-        self.ttl_ms()
-            .map(|ttl| age_ms <= ttl)
-            .unwrap_or(false)
+        self.ttl_ms().map(|ttl| age_ms <= ttl).unwrap_or(false)
     }
 
     /// Whether the data is stale but still within the stale-while-revalidate window.
@@ -244,9 +251,7 @@ pub enum QueryBeginResult {
         replaced_request_id: Option<RequestId>,
     },
     /// A request is already loading and the policy is `IgnoreWhileLoading`.
-    IgnoredWhileLoading {
-        active_request_id: RequestId,
-    },
+    IgnoredWhileLoading { active_request_id: RequestId },
 }
 
 /// Format a duration in milliseconds as a human-readable string.
@@ -293,7 +298,10 @@ mod tests {
 
     #[test]
     fn swr_zero_values_label_uses_ms() {
-        let policy = CachePolicy::StaleWhileRevalidate { ttl_ms: 0, stale_ms: 0 };
+        let policy = CachePolicy::StaleWhileRevalidate {
+            ttl_ms: 0,
+            stale_ms: 0,
+        };
         assert_eq!(policy.label(), "Stale-while-revalidate TTL 0ms stale 0ms");
     }
 

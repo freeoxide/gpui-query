@@ -71,12 +71,18 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// Whether a `fetch_next_page` request is in flight.
     pub fn is_fetching_next_page(&self) -> bool {
-        matches!(self.fetching_direction, Some(super::lifecycle::PageDirection::Next))
+        matches!(
+            self.fetching_direction,
+            Some(super::lifecycle::PageDirection::Next)
+        )
     }
 
     /// Whether a `fetch_previous_page` request is in flight.
     pub fn is_fetching_previous_page(&self) -> bool {
-        matches!(self.fetching_direction, Some(super::lifecycle::PageDirection::Previous))
+        matches!(
+            self.fetching_direction,
+            Some(super::lifecycle::PageDirection::Previous)
+        )
     }
 
     /// Maximum number of pages to retain.

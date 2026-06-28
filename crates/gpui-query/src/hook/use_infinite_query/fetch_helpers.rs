@@ -8,10 +8,10 @@ use gpui::{BorrowAppContext as _, Context, Entity};
 use crate::client::QueryClient;
 use crate::core::InfiniteQueryResource;
 
-use crate::hook::current_time_ms;
 use super::fetch_runners::{
-    run_fetch_next_page_with_id, run_fetch_previous_page_with_id, PageDirection,
+    PageDirection, run_fetch_next_page_with_id, run_fetch_previous_page_with_id,
 };
+use crate::hook::current_time_ms;
 
 // ── Public fetch helpers ─────────────────────────────────────────────────
 
@@ -122,9 +122,7 @@ fn fetch_page_infinite<T, E, C, F, Fut>(
     let request_id = entity.update(cx, |resource, _| {
         let now_ms = current_time_ms();
         match direction {
-            PageDirection::Next => {
-                resource.begin_fetch_next_with_id(maybe_request_id, now_ms)
-            }
+            PageDirection::Next => resource.begin_fetch_next_with_id(maybe_request_id, now_ms),
             PageDirection::Previous => {
                 resource.begin_fetch_previous_with_id(maybe_request_id, now_ms)
             }
@@ -140,20 +138,13 @@ fn fetch_page_infinite<T, E, C, F, Fut>(
         // Audit fix #6: store the spawned task on the resource so a replacement
         // fetch (or entity drop on unmount) aborts the prior in-flight task
         // instead of leaving it detached and running.
-        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-            match direction {
-                PageDirection::Next => {
-                    run_fetch_next_page_with_id(
-                        &weak, &fetcher, request_id, &retry_policy, cx,
-                    )
+        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| match direction {
+            PageDirection::Next => {
+                run_fetch_next_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx).await;
+            }
+            PageDirection::Previous => {
+                run_fetch_previous_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx)
                     .await;
-                }
-                PageDirection::Previous => {
-                    run_fetch_previous_page_with_id(
-                        &weak, &fetcher, request_id, &retry_policy, cx,
-                    )
-                    .await;
-                }
             }
         });
         entity.update(cx, |r, _| r.set_current_task(task));

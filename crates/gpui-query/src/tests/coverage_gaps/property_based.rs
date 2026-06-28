@@ -13,7 +13,18 @@ fn prop_retry_delay_never_exceeds_absolute_max_for_all_attempts() {
     const ABSOLUTE_MAX: u64 = 3_600_000;
 
     // Test with various base delays and exponential backoff enabled.
-    let base_delays: &[u64] = &[0, 1, 10, 100, 1_000, 10_000, 100_000, 1_000_000, u64::MAX / 2, u64::MAX];
+    let base_delays: &[u64] = &[
+        0,
+        1,
+        10,
+        100,
+        1_000,
+        10_000,
+        100_000,
+        1_000_000,
+        u64::MAX / 2,
+        u64::MAX,
+    ];
     let max_delays: &[u64] = &[0, 100, 1_000, 30_000, ABSOLUTE_MAX, u64::MAX];
 
     for &base in base_delays {
@@ -31,7 +42,11 @@ fn prop_retry_delay_never_exceeds_absolute_max_for_all_attempts() {
                     delay <= ABSOLUTE_MAX,
                     "delay_for_attempt({}) = {} exceeds ABSOLUTE_MAX ({}) \
                      with base={}, max_delay={}",
-                    attempt, delay, ABSOLUTE_MAX, base, max_delay
+                    attempt,
+                    delay,
+                    ABSOLUTE_MAX,
+                    base,
+                    max_delay
                 );
             }
             // Extreme attempt numbers.
@@ -41,7 +56,11 @@ fn prop_retry_delay_never_exceeds_absolute_max_for_all_attempts() {
                     delay <= ABSOLUTE_MAX,
                     "delay_for_attempt({}) = {} exceeds ABSOLUTE_MAX ({}) \
                      with base={}, max_delay={}",
-                    attempt, delay, ABSOLUTE_MAX, base, max_delay
+                    attempt,
+                    delay,
+                    ABSOLUTE_MAX,
+                    base,
+                    max_delay
                 );
             }
         }
@@ -85,7 +104,9 @@ fn prop_retry_delay_monotonically_increases_or_capped() {
         assert!(
             delay >= prev_delay,
             "delay decreased from {} to {} at attempt {}",
-            prev_delay, delay, attempt
+            prev_delay,
+            delay,
+            attempt
         );
         prev_delay = delay;
     }
@@ -100,12 +121,20 @@ fn prop_cache_policy_fresh_and_expired_are_complementary_for_ttl() {
     let ttl_values: &[u64] = &[1, 10, 100, 1_000, 60_000, u64::MAX];
     for &ttl in ttl_values {
         let policy = CachePolicy::Ttl { ttl_ms: ttl };
-        let total = policy.total_valid_ms().expect("Ttl should have total_valid_ms");
+        let total = policy
+            .total_valid_ms()
+            .expect("Ttl should have total_valid_ms");
         assert_eq!(total, ttl);
 
         // Sample ages: 0, boundary-1, boundary, boundary+1, and large values.
         // Use saturating_add for boundary+1 so u64::MAX does not overflow.
-        let ages: &[u64] = &[0, ttl / 2, ttl, ttl.saturating_add(1), ttl.saturating_mul(2)];
+        let ages: &[u64] = &[
+            0,
+            ttl / 2,
+            ttl,
+            ttl.saturating_add(1),
+            ttl.saturating_mul(2),
+        ];
         for &age in ages {
             let is_fresh = policy.is_fresh(age);
             let is_expired = policy.is_expired(age);
@@ -126,21 +155,28 @@ fn prop_cache_policy_swr_three_way_partition() {
     // For StaleWhileRevalidate, every non-negative age falls into exactly one of:
     // fresh, stale-but-serveable, or expired. No gaps, no overlaps.
     let cases: &[(u64, u64)] = &[
-        (1, 1), (10, 10), (100, 200), (1_000, 2_000), (60_000, 30_000),
+        (1, 1),
+        (10, 10),
+        (100, 200),
+        (1_000, 2_000),
+        (60_000, 30_000),
     ];
     for &(ttl, stale) in cases {
-        let policy = CachePolicy::StaleWhileRevalidate { ttl_ms: ttl, stale_ms: stale };
+        let policy = CachePolicy::StaleWhileRevalidate {
+            ttl_ms: ttl,
+            stale_ms: stale,
+        };
         let total = ttl.saturating_add(stale);
 
         let ages: &[u64] = &[
             0,
             ttl / 2,
-            ttl,        // boundary: still fresh
-            ttl + 1,    // just past TTL: stale
-            total / 2 + ttl / 2,  // mid-stale window
-            total,              // boundary: still stale-but-serveable
-            total + 1,          // expired
-            total.saturating_mul(2),          // way expired
+            ttl,                     // boundary: still fresh
+            ttl + 1,                 // just past TTL: stale
+            total / 2 + ttl / 2,     // mid-stale window
+            total,                   // boundary: still stale-but-serveable
+            total + 1,               // expired
+            total.saturating_mul(2), // way expired
         ];
         for &age in ages {
             let is_fresh = policy.is_fresh(age);
@@ -159,7 +195,11 @@ fn prop_cache_policy_swr_three_way_partition() {
             if age <= ttl {
                 assert!(is_fresh, "age {} <= ttl {} must be fresh", age, ttl);
             } else if age <= total {
-                assert!(is_stale, "age {} must be stale-but-serveable (ttl={}, total={})", age, ttl, total);
+                assert!(
+                    is_stale,
+                    "age {} must be stale-but-serveable (ttl={}, total={})",
+                    age, ttl, total
+                );
             } else {
                 assert!(is_expired, "age {} > total {} must be expired", age, total);
             }
@@ -174,9 +214,20 @@ fn prop_cache_policy_nocache_always_expired_never_fresh() {
     assert_eq!(policy.ttl_ms(), None);
 
     for age in [0u64, 1, 100, 1_000, u64::MAX] {
-        assert!(!policy.is_fresh(age), "NoCache should never be fresh at age {}", age);
-        assert!(policy.is_expired(age), "NoCache should always be expired at age {}", age);
-        assert!(!policy.is_stale_but_serveable(age), "NoCache should never be stale-but-serveable");
+        assert!(
+            !policy.is_fresh(age),
+            "NoCache should never be fresh at age {}",
+            age
+        );
+        assert!(
+            policy.is_expired(age),
+            "NoCache should always be expired at age {}",
+            age
+        );
+        assert!(
+            !policy.is_stale_but_serveable(age),
+            "NoCache should never be stale-but-serveable"
+        );
     }
 }
 
@@ -188,8 +239,14 @@ fn prop_cache_policy_total_valid_ms_consistency() {
         CachePolicy::Ttl { ttl_ms: 1 },
         CachePolicy::Ttl { ttl_ms: 60_000 },
         CachePolicy::Ttl { ttl_ms: u64::MAX },
-        CachePolicy::StaleWhileRevalidate { ttl_ms: 100, stale_ms: 50 },
-        CachePolicy::StaleWhileRevalidate { ttl_ms: u64::MAX, stale_ms: u64::MAX },
+        CachePolicy::StaleWhileRevalidate {
+            ttl_ms: 100,
+            stale_ms: 50,
+        },
+        CachePolicy::StaleWhileRevalidate {
+            ttl_ms: u64::MAX,
+            stale_ms: u64::MAX,
+        },
     ];
     for policy in cases {
         match policy {
@@ -237,9 +294,18 @@ fn prop_serde_roundtrip_all_cache_policies() {
         CachePolicy::Ttl { ttl_ms: 1 },
         CachePolicy::Ttl { ttl_ms: 60_000 },
         CachePolicy::Ttl { ttl_ms: u64::MAX },
-        CachePolicy::StaleWhileRevalidate { ttl_ms: 0, stale_ms: 0 },
-        CachePolicy::StaleWhileRevalidate { ttl_ms: 100, stale_ms: 200 },
-        CachePolicy::StaleWhileRevalidate { ttl_ms: u64::MAX, stale_ms: u64::MAX },
+        CachePolicy::StaleWhileRevalidate {
+            ttl_ms: 0,
+            stale_ms: 0,
+        },
+        CachePolicy::StaleWhileRevalidate {
+            ttl_ms: 100,
+            stale_ms: 200,
+        },
+        CachePolicy::StaleWhileRevalidate {
+            ttl_ms: u64::MAX,
+            stale_ms: u64::MAX,
+        },
     ]);
 }
 
@@ -257,8 +323,14 @@ fn prop_serde_roundtrip_retry_policies() {
         RetryPolicy::default(),
         RetryPolicy::new(0),
         RetryPolicy::new(100),
-        RetryPolicy::new(5).with_delay(0).with_exponential_backoff().with_max_delay(0),
-        RetryPolicy::new(u32::MAX).with_delay(u64::MAX).with_exponential_backoff().with_max_delay(u64::MAX),
+        RetryPolicy::new(5)
+            .with_delay(0)
+            .with_exponential_backoff()
+            .with_max_delay(0),
+        RetryPolicy::new(u32::MAX)
+            .with_delay(u64::MAX)
+            .with_exponential_backoff()
+            .with_max_delay(u64::MAX),
     ]);
 }
 
@@ -319,7 +391,8 @@ fn prop_request_sequencer_monotonic_within_scope() {
         assert!(
             curr > prev,
             "RequestIds must be monotonically increasing: {:?} <= {:?}",
-            prev, curr
+            prev,
+            curr
         );
         prev = curr;
     }
@@ -339,12 +412,17 @@ fn prop_request_sequencer_scope_advance_preserves_monotonicity() {
         assert!(
             curr > prev,
             "monotonicity broken at iteration {}: {:?} <= {:?}",
-            i, prev, curr
+            i,
+            prev,
+            curr
         );
         prev = curr;
     }
     // After wrapping through u64::MAX, the scope should have advanced.
-    assert!(seq.scope_id.get() >= 2, "scope should have advanced past overflow");
+    assert!(
+        seq.scope_id.get() >= 2,
+        "scope should have advanced past overflow"
+    );
 }
 
 #[test]
@@ -354,10 +432,7 @@ fn prop_request_sequencer_uniqueness_across_many_ids() {
     let mut seen = HashSet::new();
     for _ in 0..10_000 {
         let id = seq.next_request();
-        assert!(
-            seen.insert(id),
-            "duplicate RequestId generated: {:?}", id
-        );
+        assert!(seen.insert(id), "duplicate RequestId generated: {:?}", id);
     }
 }
 
@@ -375,7 +450,10 @@ fn prop_request_sequencer_two_sequencers_no_collision() {
 
     // Now advance seq1 more.
     let id1_second = seq1.next_request(); // 1:2
-    assert_ne!(id1_second, id2_first, "advanced id should differ from initial");
+    assert_ne!(
+        id1_second, id2_first,
+        "advanced id should differ from initial"
+    );
 
     // If we create a sequencer that's been advanced, it should produce
     // distinct ids from a fresh one.

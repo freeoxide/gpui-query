@@ -82,8 +82,9 @@ impl<T, E> QueryResource<T, E> {
             () => {{
                 match &mut id_source {
                     MaybeRequestId::FromSequencer(seq) => seq.next_request(),
-                    MaybeRequestId::Provided(maybe_id) => maybe_id
-                        .unwrap_or_else(|| self.transient_sequencer.next_request()),
+                    MaybeRequestId::Provided(maybe_id) => {
+                        maybe_id.unwrap_or_else(|| self.transient_sequencer.next_request())
+                    }
                 }
             }};
         }

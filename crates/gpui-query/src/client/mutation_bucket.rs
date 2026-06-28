@@ -35,9 +35,9 @@ use gpui::{App, WeakEntity};
 
 use crate::core::{MutationResource, MutationStatus};
 
+use super::ErasedMutationBucket;
 use super::bucket::types::{DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
 use super::devtools::MutationDiagnostic;
-use super::ErasedMutationBucket;
 
 // (Audit #75: `DEFAULT_MUTATION_GC_TIME_MS` was dead code — never referenced
 // after the GC refactor — so the constant and its `#[allow(dead_code)]` are
@@ -300,7 +300,9 @@ impl<
 
             // Audit fix (finding 5): Remove dead entries whose entity has
             // already been collected.
-            let Some(entity) = entry.entity.upgrade() else { return false };
+            let Some(entity) = entry.entity.upgrade() else {
+                return false;
+            };
 
             let resource = entity.read(cx);
             entry.last_updated_ms = resource.last_updated_at_ms();
@@ -347,7 +349,9 @@ impl<
     /// `MutationDiagnostic` into `out` instead of allocating a fresh `Vec`.
     fn collect_diagnostics_into(&self, cx: &App, out: &mut Vec<MutationDiagnostic>) {
         for entry in self.resources.values() {
-            let Some(entity) = entry.entity.upgrade() else { continue };
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
             let resource = entity.read(cx);
             out.push(MutationDiagnostic {
                 key: resource.key().map(|k| k.to_path()),
@@ -360,13 +364,12 @@ impl<
     /// Lightweight key/status pairs (#9). `key` is `None` for keyless
     /// mutations. Pushes each live entry's `(Option<String>, MutationStatus)`
     /// pair into `out`.
-    fn collect_key_status_into(
-        &self,
-        cx: &App,
-        out: &mut Vec<(Option<String>, MutationStatus)>,
-    ) {
+    #[cfg(feature = "persist")]
+    fn collect_key_status_into(&self, cx: &App, out: &mut Vec<(Option<String>, MutationStatus)>) {
         for entry in self.resources.values() {
-            let Some(entity) = entry.entity.upgrade() else { continue };
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
             let resource = entity.read(cx);
             out.push((resource.key().map(|k| k.to_path()), resource.status()));
         }

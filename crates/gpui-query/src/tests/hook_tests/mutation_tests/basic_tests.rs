@@ -42,7 +42,10 @@ fn test_mutate_triggers_execution_and_completes(cx: &mut TestAppContext) {
             |vars| async move { Ok::<_, QueryError>(format!("result-{}", vars)) },
             cx,
         );
-        assert!(entity.read(cx).is_loading(), "should be Loading immediately");
+        assert!(
+            entity.read(cx).is_loading(),
+            "should be Loading immediately"
+        );
         HookHarness::new(entity)
     });
 
@@ -67,10 +70,8 @@ fn test_mutate_failure_stores_error(cx: &mut TestAppContext) {
     }
 
     let harness = cx.new(|cx| {
-        let (entity, _sub) = use_mutation::<String, String, QueryError, _>(
-            MutationOptions::default(),
-            cx,
-        );
+        let (entity, _sub) =
+            use_mutation::<String, String, QueryError, _>(MutationOptions::default(), cx);
         mutate(
             &entity,
             "bad-input".to_string(),
