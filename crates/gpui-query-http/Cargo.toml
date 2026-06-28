@@ -12,12 +12,22 @@ authors = ["hmziqrs"]
 
 [features]
 default = []
+## Enables the optional `reqwest`-based backend
+## ([`crate::reqwest_backend::ReqwestBackend`]).
+##
+## Off by default so the crate stays usable as a pure, library-agnostic HTTP
+## cache: any request library can plug into
+## [`crate::backend::HttpBackend`].
+reqwest = ["dep:reqwest"]
 
 [dependencies]
 gpui-query = { path = "../gpui-query", default-features = false, features = ["core"] }
+bytes = "1"
 http = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
 serde = { workspace = true }
 thiserror = "2"
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt"] }

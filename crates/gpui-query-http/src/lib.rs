@@ -1,11 +1,20 @@
 //! HTTP cache-header helpers for [`gpui_query`] — turn server cache headers into
-//! a [`gpui_query::core::CachePolicy`] ("server wins") and (in a later phase)
-//! wrap `reqwest` with conditional-request and `304` handling.
+//! a [`gpui_query::core::CachePolicy`] ("server wins") and layer an in-memory
+//! [`HttpCache`] over any [`HttpBackend`].
 //!
 //! This crate depends on `gpui-query` with the **`core`** feature only (no
 //! GPUI), so it is usable from any async context, and it keeps
 //! `reqwest` / `http` / `bytes` out of the core crate (Guiding Principle 1 of
 //! `docs/features.md`).
+//!
+//! # Library-agnostic by design
+//!
+//! [`HttpCache`] is generic over a [`HttpBackend`] — a trait that abstracts a
+//! single conditional `GET`. The crate ships *one* optional backend,
+//! [`ReqwestBackend`](crate::reqwest_backend::ReqwestBackend), behind the
+//! `reqwest` cargo feature; any other request library can implement
+//! [`HttpBackend`] and plug into [`HttpCache::new`](HttpCache::new) instead.
+//! `reqwest` is never a hard dependency.
 //!
 //! # Server wins
 //!
@@ -32,6 +41,14 @@ use gpui_query::core::CachePolicy;
 use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub mod backend;
+pub mod cache;
+#[cfg(feature = "reqwest")]
+pub mod reqwest_backend;
+
+pub use backend::{BackendResponse, Conditionals, HttpBackend};
+pub use cache::{HttpCache, HttpError};
 
 /// HTTP cache metadata extracted from a response.
 ///
