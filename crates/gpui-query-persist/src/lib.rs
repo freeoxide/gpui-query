@@ -26,6 +26,25 @@
 //! from the GPUI background executor never interleave temp-file lifecycles.
 //! Reads take the same lock briefly. No `tokio` is required: the persister
 //! runs its async methods on GPUI's `background_executor`.
+//!
+//! # Blocking I/O note
+//!
+//! `FilePersister` performs synchronous `std::fs` I/O inside its async `load`
+//! and `save` bodies and is intended to run on GPUI's `background_executor`,
+//! which is a dedicated blocking-friendly thread pool. Callers running on a
+//! `tokio` multi-thread runtime that need non-blocking semantics should wrap
+//! `load`/`save` in `spawn_blocking` (e.g. via a `tokio::task::spawn_blocking`
+//! → bridge) to avoid stalling executor threads.
+//!
+//! # Windows `ERROR_ACCESS_DENIED` (retryable)
+//!
+//! On Windows the atomic replace can fail with `ERROR_ACCESS_DENIED` when an
+//! antivirus scanner or concurrent reader holds the destination. This is
+//! surfaced as [`PersistError::Permission`] (rather than flattened into an IO
+//! error), preserving the retryable signal so callers can back off and retry
+//! the save. All other persist failures are returned as
+//! [`PersistError::Io`] carrying the original `std::io::Error` (kind + source
+//! chain intact) so no diagnostic detail is lost.
 
 #![deny(missing_docs)]
 
@@ -150,10 +169,28 @@ impl FilePersister {
         // Promote F_FULLFSYNC on macOS for true durability.
         #[cfg(target_os = "macos")]
         try_fullfsync(tmp.as_file());
-        tmp.persist(&self.path).map_err(|e| {
-            PersistError::Io(std::io::Error::other(format!(
-                "atomic persist of cache file failed: {e}"
-            )))
+        // tempfile's persist failure exposes the underlying io::Error via its
+        // `.error` field. We preserve that error's real ErrorKind/source chain
+        // (rather than flattening to a string) so callers can match on it.
+        //
+        // On Windows, an AV scanner or concurrent reader holding the destination
+        // surfaces `ERROR_ACCESS_DENIED` (5) from `MoveFileEx`; the std
+        // ErrorKind for that is `PermissionDenied`. Per the design doc, that
+        // case is *retryable* and is mapped to `PersistError::Permission` so a
+        // caller can back off and retry the save. Everything else is preserved
+        // as `PersistError::Io` with the original error (kind + source).
+        tmp.persist(&self.path).map_err(|persist_err| {
+            let io_err = persist_err.error;
+            let kind = io_err.kind();
+            let is_access_denied = kind == std::io::ErrorKind::PermissionDenied
+                || is_windows_access_denied(io_err.raw_os_error());
+            if is_access_denied {
+                PersistError::Permission(format!(
+                    "atomic persist of cache file was denied (retryable): {io_err}"
+                ))
+            } else {
+                PersistError::Io(io_err)
+            }
         })?;
 
         // On POSIX, fsync the parent directory so the rename is durable.
@@ -332,6 +369,28 @@ fn log_or_eprint(msg: &str) {
 /// stronger `F_FULLFSYNC`. A failure here is propagated as an IO error.
 fn fullfsync_err(e: std::io::Error) -> PersistError {
     PersistError::Io(e)
+}
+
+/// Returns `true` if the given raw OS error is Windows `ERROR_ACCESS_DENIED`.
+///
+/// On Windows, antivirus scanners and concurrent readers can cause
+/// `MoveFileEx` to fail with `ERROR_ACCESS_DENIED` (5) during the atomic
+/// replace (rust-lang/rust#123985). Such failures are transient and retryable.
+/// `std::io::ErrorKind::PermissionDenied` already maps this on Windows, but we
+/// also check the raw code defensively (e.g. for errors constructed via
+/// `from_raw_os_error` whose kind may not be normalized uniformly).
+#[cfg(windows)]
+const ERROR_ACCESS_DENIED: i32 = 5;
+fn is_windows_access_denied(raw: Option<i32>) -> bool {
+    #[cfg(windows)]
+    {
+        raw == Some(ERROR_ACCESS_DENIED)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = raw;
+        false
+    }
 }
 
 /// Issue `F_FULLFSYNC` on macOS for true durability (flushes the drive cache).

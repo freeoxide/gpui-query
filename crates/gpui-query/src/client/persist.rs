@@ -53,6 +53,12 @@ pub enum PersistError {
     #[error("persistence serialize error: {0}")]
     Serialize(#[from] serde_json::Error),
     /// The on-disk snapshot could not be parsed / deserialized.
+    ///
+    /// Reserved for persister implementations that surface (rather than
+    /// tolerate) deserialization failures; the shipped `FilePersister` degrades
+    /// corrupt stores to an empty snapshot instead, so core never constructs
+    /// this variant. It is retained on the public API for backends that prefer
+    /// to propagate parse errors.
     #[error("persistence deserialize error: {0}")]
     Deserialize(String),
     /// The on-disk snapshot's `version` does not match [`PERSIST_VERSION`].
@@ -161,6 +167,10 @@ pub struct PersistOptions {
     pub max_age: Duration,
     /// Coalesce bursts of [`CacheMutation`](super::CacheMutation) into one save
     /// per window.
+    ///
+    /// Passing [`Duration::ZERO`] disables the timer-based coalescing window —
+    /// each bump still races to drain the pending slot, but there is no
+    /// batching delay (saves still serialize through the drain slot).
     pub debounce: Duration,
 }
 
@@ -180,9 +190,16 @@ impl Default for PersistOptions {
 type SerializeFn = Box<dyn Fn(&dyn std::any::Any) -> JsonValue + Send + Sync>;
 
 /// Registry of `T -> serde_json::Value` serializers, keyed by `TypeId` of the
-/// resource's data type `T` (the resource type pair is `(T, E)`, but we key on
-/// `T` alone is insufficient because two different `E`s could share a `T`;
-/// the bucket impls key on `TypeId::of::<(T, E)>()` and pass that here).
+/// resource's data type `T`.
+///
+/// The keying is intentionally on `T` alone (not the full `(T, E)` resource
+/// pair): the bucket impls (`erased_ops.rs`, `infinite_bucket.rs`) likewise
+/// look up by `TypeId::of::<T>()`, so insert and lookup are consistent on `T`.
+/// Serialization only depends on the data type, not the error type. Consequence:
+/// registering serializers for the same `T` under two different `E` types
+/// silently overwrites (last write wins); whichever serializer survives is
+/// applied to both `(T, E)` buckets, which is correct because the value *is*
+/// that `T`.
 ///
 /// Stored closures accept `&dyn Any` and downcast internally, so the registry
 /// stays free of `T: Serialize` bounds on the resource itself.
@@ -198,10 +215,10 @@ impl SerializerRegistry {
     /// `&dyn Any` here so the registry is heterogeneous.
     pub fn register<T: 'static>(&mut self, f: fn(&T) -> JsonValue) {
         let wrap = move |any: &dyn std::any::Any| -> JsonValue {
-            // Safety of downcast: the bucket impl only calls this closure for
-            // entries whose `TypeId::of::<(T, E)>()` matched, so the `Any` is
-            // the concrete `T`. The fn pointer stored is `fn(&T)`, so downcast
-            // to `&T` is correct.
+            // Safety of downcast: the bucket impl only calls this closure after
+            // looking it up by `TypeId::of::<T>()`, so the `Any` is the concrete
+            // `T`. The fn pointer stored is `fn(&T)`, so downcast to `&T` is
+            // correct.
             let val = any
                 .downcast_ref::<T>()
                 .expect("serializer registry: type id matched but downcast failed");
@@ -306,9 +323,11 @@ pub trait Persister: Send + Sync + 'static {
 /// Drop-guard returned by [`QueryClient::persist_with`].
 ///
 /// Holding the handle keeps the underlying [`CacheMutation`](super::CacheMutation)
-/// observation (and thus the debounced save loop) alive; dropping it cancels
-/// further saves. The wrapped [`Persister`] is held in an `Arc` so the spawned
-/// save future can use it after `persist_with` returns.
+/// observation (and thus the debounced save loop) alive; dropping it drops the
+/// [`Subscription`], so no *new* saves are scheduled. A save task already
+/// waiting on its debounce timer is detached and may still complete one final
+/// save. The wrapped [`Persister`] is held in an `Arc` so the spawned save
+/// future can use it after `persist_with` returns.
 pub struct PersistHandle {
     // Subscription is dropped when the handle is, ending observation.
     _subscription: Option<Subscription>,
@@ -347,6 +366,16 @@ impl QueryClient {
 
     /// Register a deserializer for resources of type `(T, E)`, enabling
     /// [`hydrate`] to re-prime on-disk values of this type.
+    ///
+    /// **Strict-deserializer contract.** [`hydrate`] offers every on-disk entry
+    /// to *every* registered deserializer (there is no type discriminator on
+    /// [`PersistedEntry`], so routing is by trial). A deserializer MUST return
+    /// `None` for any JSON shape it does not recognize as its own `T`; only
+    /// return `Some` for values that genuinely decode to `T`. A lax
+    /// deserializer that accepts a foreign shape would mis-prime the wrong
+    /// bucket. (Each `(T, E)` writes to its own bucket, so typed data is not
+    /// clobbered, but a permissive decoder wastes work and can prime a stale
+    /// value.) Keep deserializers strict and cheap.
     pub fn register_deserializer<T, E>(&mut self, deserialize: fn(&JsonValue) -> Option<T>)
     where
         T: Clone + Send + Sync + 'static,
@@ -379,6 +408,17 @@ impl QueryClient {
         }
         for bucket in self.infinite_buckets.values() {
             bucket.collect_persistable_into(cx, registry, now_ms, &mut out);
+        }
+
+        // Enrich each collected entry with any opaque metadata recorded for its
+        // key at fetch-completion time (see QueryClient::record_meta), so HTTP
+        // CacheMeta and similar round-trip through PersistedEntry.meta.
+        if let Some(meta_map) = &self.persisted_meta {
+            for (key, entry) in &mut out {
+                if let Some(m) = meta_map.get(key) {
+                    entry.meta = Some(m.clone());
+                }
+            }
         }
 
         let mut snapshot = PersistSnapshot::new();
@@ -420,17 +460,27 @@ impl QueryClient {
         let pending: Arc<std::sync::Mutex<Option<PersistSnapshot>>> =
             Arc::new(std::sync::Mutex::new(None));
 
-        // Ensure the marker exists before observing. GPUI delivers
-        // `observe_global` notifications for globals that are mutated while the
-        // observer is registered; creating the marker here (idempotent) means
-        // the bump sites' notifications are guaranteed to wake this observer,
-        // and that their `set_global`/`update_global` calls never see an absent
-        // global.
+        // Bound on in-flight debounce tasks: at most one pending per window.
+        // A bump that arrives while a task is already armed skips spawning a
+        // new one (its snapshot still lands in `pending`, where the armed task
+        // will drain it), so a burst produces one task rather than N. Cleared
+        // by the task after it drains (or finds empty) the slot — on every
+        // path, so persistence can never get stuck never-spawning-again.
+        let armed: Arc<std::sync::Mutex<bool>> = Arc::new(std::sync::Mutex::new(false));
+
+        // Ensure the marker exists before observing. The bump sites (see
+        // `mutation_signal.rs`) call `cx.default_global::<CacheMutation>()`,
+        // which — like `set_global`/`global_mut` — pushes a
+        // `NotifyGlobalObservers` effect; that notification is what wakes this
+        // observer. We seed the marker here too so it is guaranteed present
+        // before observation is registered (the idempotent seeding itself also
+        // notifies, harmlessly).
         let _ = cx.default_global::<super::CacheMutation>();
 
         let subscription = {
             let persister = persister.clone();
             let pending = pending.clone();
+            let armed = armed.clone();
             let filter = opts.filter;
             let max_age = opts.max_age;
             let bg = cx.background_executor().clone();
@@ -443,20 +493,35 @@ impl QueryClient {
                 if let Ok(mut slot) = pending.lock() {
                     *slot = Some(snapshot);
                 }
-                // Spawn a debounced save on the background executor. Each bump
-                // spawns a new task; the slot is drained under the mutex so
-                // only one save actually fires per debounce window (later tasks
-                // find an empty slot and no-op).
+                // Spawn a debounced save only if no task is already armed for
+                // this window; otherwise let the in-flight task drain the slot
+                // we just stashed (latest snapshot wins).
+                {
+                    let Ok(mut guard) = armed.lock() else {
+                        return;
+                    };
+                    if *guard {
+                        return;
+                    }
+                    *guard = true;
+                }
                 let persister = persister.clone();
                 let pending = pending.clone();
+                let armed = armed.clone();
                 let bg_for_future = bg.clone();
                 bg.spawn(async move {
                     if !debounce.is_zero() {
                         bg_for_future.timer(debounce).await;
                     }
                     // Take the latest snapshot (or no-op if a later task
-                    // already drained the slot).
+                    // already drained the slot). Clear `armed` on every path so
+                    // the next bump can spawn again — do it after draining so a
+                    // bump that lands during the window still coalesces into
+                    // this task's drain.
                     let snapshot = pending.lock().ok().and_then(|mut slot| slot.take());
+                    if let Ok(mut guard) = armed.lock() {
+                        *guard = false;
+                    }
                     let Some(snapshot) = snapshot else { return };
                     if let Err(err) = persister.save(&snapshot).await {
                         #[cfg(debug_assertions)]
@@ -505,6 +570,12 @@ impl Persister for NoopPersister {
 /// `hydrate` escape hatch).
 ///
 /// Entries older than `max_age` or excluded by `filter` are skipped.
+///
+/// **Routing.** There is no type discriminator on [`PersistedEntry`], so every
+/// surviving entry is offered to every registered deserializer (O(deserializers
+/// × entries)); each is primed by the first deserializer that decodes it. This
+/// relies on the strict-deserializer contract of
+/// [`QueryClient::register_deserializer`] — keep deserializers strict.
 ///
 /// Returns the loaded snapshot (post-filter) so callers can perform additional
 /// metadata-only priming or diagnostics. Errors from the persister's `load`

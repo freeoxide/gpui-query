@@ -14,8 +14,7 @@ authors = ["hmziqrs"]
 default = []
 
 [dependencies]
-gpui-query = { path = "../gpui-query", default-features = false, features = ["persist", "client"] }
-gpui = { workspace = true }
+gpui-query = { path = "../gpui-query", default-features = false, features = ["persist", "client", "hook"] }
 dirs = "6"
 tempfile = "3"
 bincode = "1"

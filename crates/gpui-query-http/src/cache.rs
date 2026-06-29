@@ -57,6 +57,13 @@ pub enum HttpError {
         /// The URL that produced the spurious `304`.
         url: String,
     },
+    /// A cache [`Mutex`](std::sync::Mutex) was poisoned by a panicking thread.
+    ///
+    /// Rather than panicking the caller (the previous `.expect` behavior), the
+    /// poison is surfaced as a typed error so a poisoned cache fails one
+    /// request instead of taking down the process.
+    #[error("cache mutex poisoned")]
+    Poisoned,
 }
 
 /// A URL-keyed HTTP cache layered over a [`HttpBackend`].
@@ -104,10 +111,7 @@ impl<B: HttpBackend> HttpCache<B> {
     ) -> Result<(Bytes, CachePolicy, Option<CacheMeta>), HttpError> {
         // (a) Read cached meta, clone out, DROP the guard before any .await.
         let cached_meta = {
-            let guard = self
-                .meta
-                .lock()
-                .expect("cache meta mutex poisoned; cache is unusable");
+            let guard = self.meta.lock().map_err(|_| HttpError::Poisoned)?;
             guard.get(url).cloned()
         };
 
@@ -119,7 +123,7 @@ impl<B: HttpBackend> HttpCache<B> {
                 let guard = self
                     .bodies
                     .lock()
-                    .expect("cache bodies mutex poisoned; cache is unusable");
+                    .map_err(|_| HttpError::Poisoned)?;
                 guard.get(url).cloned()
             };
             if let Some(body) = body {
@@ -147,7 +151,7 @@ impl<B: HttpBackend> HttpCache<B> {
                 let guard = self
                     .bodies
                     .lock()
-                    .expect("cache bodies mutex poisoned; cache is unusable");
+                    .map_err(|_| HttpError::Poisoned)?;
                 guard.get(url).cloned()
             };
             let Some(body) = body else {
@@ -206,14 +210,14 @@ impl<B: HttpBackend> HttpCache<B> {
             let mut bodies = self
                 .bodies
                 .lock()
-                .expect("cache bodies mutex poisoned; cache is unusable");
+                .map_err(|_| HttpError::Poisoned)?;
             bodies.insert(url.to_string(), body.clone());
         }
         {
             let mut meta_guard = self
                 .meta
                 .lock()
-                .expect("cache meta mutex poisoned; cache is unusable");
+                .map_err(|_| HttpError::Poisoned)?;
             meta_guard.insert(url.to_string(), meta.clone());
         }
 

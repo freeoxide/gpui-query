@@ -21,23 +21,42 @@ use super::{current_time_ms, read_entity};
 // present, applies it to the resource after `complete_success`. A plain `T`
 // yields `(self, None)`, so the existing fetch paths are behaviorally identical.
 
-/// Adapt a fetcher success payload into the underlying data plus an optional
-/// server-derived [`CachePolicy`].
+/// Decomposed fetcher success: the underlying data, an optional server-derived
+/// [`CachePolicy`], and (under `persist`) optional opaque metadata sourced from
+/// [`Fetched::meta`](crate::core::Fetched).
+pub(crate) struct FetchParts<T> {
+    pub data: T,
+    pub server_policy: Option<CachePolicy>,
+    #[cfg(feature = "persist")]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Adapt a fetcher success payload into its decomposed [`FetchParts`].
 pub(crate) trait FetchedLike<T> {
-    /// Consume `self` into `(data, server_policy)`, where `server_policy` is
-    /// `None` for plain fetcher results.
-    fn into_data_and_policy(self) -> (T, Option<CachePolicy>);
+    /// Consume `self` into [`FetchParts`]; `server_policy` (and `meta` under
+    /// `persist`) are `None` for plain fetcher results.
+    fn into_parts(self) -> FetchParts<T>;
 }
 
 impl<T> FetchedLike<T> for T {
-    fn into_data_and_policy(self) -> (T, Option<CachePolicy>) {
-        (self, None)
+    fn into_parts(self) -> FetchParts<T> {
+        FetchParts {
+            data: self,
+            server_policy: None,
+            #[cfg(feature = "persist")]
+            meta: None,
+        }
     }
 }
 
 impl<T> FetchedLike<T> for Fetched<T> {
-    fn into_data_and_policy(self) -> (T, Option<CachePolicy>) {
-        (self.data, self.cache_policy)
+    fn into_parts(self) -> FetchParts<T> {
+        FetchParts {
+            data: self.data,
+            server_policy: self.cache_policy,
+            #[cfg(feature = "persist")]
+            meta: self.meta,
+        }
     }
 }
 
@@ -188,9 +207,14 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
 
         match result {
             Ok(out) => {
-                // Server wins: extract any server-derived policy from a
-                // `Fetched<T>` result (plain `T` yields `None` here).
-                let (data, server_policy) = out.into_data_and_policy();
+                // Server wins: extract any server-derived policy (and, under
+                // `persist`, opaque metadata) from a `Fetched<T>` result. Plain
+                // `T` results yield `None` for both.
+                let parts = out.into_parts();
+                let data = parts.data;
+                let server_policy = parts.server_policy;
+                #[cfg(feature = "persist")]
+                let meta = parts.meta;
                 let now_ms = current_time_ms();
                 let Some(e) = entity.upgrade() else {
                     // Documented behavior -- if the owning component
@@ -211,6 +235,16 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                         // B2: precise dirty signal for the persistence layer.
                         #[cfg(feature = "persist")]
                         cx.default_global::<crate::client::CacheMutation>();
+                        // L1: carry fetcher-supplied opaque metadata (e.g. an
+                        // HTTP CacheMeta) into the persistence layer's per-key
+                        // map so it round-trips through PersistedEntry.meta.
+                        #[cfg(feature = "persist")]
+                        if let Some(meta) = meta {
+                            let key = resource.key().clone();
+                            cx.update_global::<QueryClient, _>(|client, _| {
+                                client.record_meta(key, meta);
+                            });
+                        }
                     } else {
                         #[cfg(debug_assertions)]
                         eprintln!(

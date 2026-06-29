@@ -108,7 +108,6 @@ pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, Par
     let mut s_maxage_secs: Option<u64> = None;
     let mut max_age_secs: Option<u64> = None;
     let mut stale_while_revalidate_secs: Option<u64> = None;
-    let mut no_cache = false;
 
     for value in headers.get_all(http::header::CACHE_CONTROL).iter() {
         let Ok(raw) = value.to_str() else {
@@ -124,7 +123,11 @@ pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, Par
                 None => (directive, None),
             };
             match name.to_ascii_lowercase().as_str() {
-                "no-store" | "no-cache" => no_cache = true,
+                // no-store / no-cache win immediately per rule 1 and RFC 9111 §5.2.1.5:
+                // they are never cacheable, so a malformed directive that happens to
+                // follow them (e.g. `no-store, max-age=abc`) must not surface as a
+                // parse error.
+                "no-store" | "no-cache" => return Ok(CachePolicy::NoCache),
                 "s-maxage" => {
                     if let Some(v) = val {
                         s_maxage_secs = Some(parse_secs(false, v)?);
@@ -143,10 +146,6 @@ pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, Par
                 _ => {}
             }
         }
-    }
-
-    if no_cache {
-        return Ok(CachePolicy::NoCache);
     }
 
     // s-maxage (shared cache) takes precedence over max-age when both are set.
@@ -234,6 +233,14 @@ mod tests {
             cache_policy_from_headers(&cc("no-cache")).unwrap(),
             CachePolicy::NoCache
         );
+    }
+
+    #[test]
+    fn no_store_short_circuits_before_parsing_later_directives() {
+        // Rule 1 priority: `no-store` wins immediately, so a malformed trailing
+        // `max-age` must NOT surface as `InvalidMaxAge`. (RFC 9111 §5.2.1.5.)
+        let policy = cache_policy_from_headers(&cc("no-store, max-age=abc")).unwrap();
+        assert_eq!(policy, CachePolicy::NoCache);
     }
 
     #[test]

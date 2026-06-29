@@ -7,6 +7,7 @@
 //! **Audit 3 additions**:
 //! - `DehydratedState` and `DehydratedEntry` for state serialization
 
+#[cfg(feature = "persist")]
 use std::any::TypeId;
 
 use crate::core::{MutationStatus, QueryStatus};

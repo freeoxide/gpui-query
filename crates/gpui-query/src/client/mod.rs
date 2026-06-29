@@ -91,6 +91,14 @@ pub struct QueryClient {
     /// Populated by `register_deserializer::<T, E>`.
     #[cfg(feature = "persist")]
     pub(crate) deserializers: Option<crate::client::persist::DeserializerRegistry>,
+    /// Per-key opaque metadata captured from `Fetched::meta` at fetch
+    /// completion (`persist` feature), surfaced into
+    /// [`PersistedEntry::meta`](crate::client::persist::PersistedEntry) at
+    /// collect time so HTTP `CacheMeta` and similar can round-trip through a
+    /// cold start. Entries for evicted keys are simply ignored at collect time.
+    #[cfg(feature = "persist")]
+    pub(crate) persisted_meta:
+        Option<std::collections::HashMap<crate::core::QueryKey, serde_json::Value>>,
     /// Operation counter for opportunistic GC (audit CL1/#105). The GC
     /// subsystem fires every `GC_INTERVAL` resource/mutation operations so it
     /// actually runs in production without requiring hooks to call `gc()`.
@@ -127,6 +135,8 @@ impl Default for QueryClient {
             serializers: None,
             #[cfg(feature = "persist")]
             deserializers: None,
+            #[cfg(feature = "persist")]
+            persisted_meta: None,
             op_count: 0,
             last_gc_ms: 0,
         }
@@ -159,6 +169,19 @@ impl QueryClient {
     pub fn with_gc_time(mut self, gc_time_ms: u64) -> Self {
         self.gc_time_ms = gc_time_ms;
         self
+    }
+
+    /// Record opaque metadata (e.g. a serialized HTTP `CacheMeta`) for `key`,
+    /// captured from a fetcher's [`Fetched::meta`](crate::core::Fetched) at
+    /// completion. Surfaced into
+    /// [`PersistedEntry::meta`](crate::client::persist::PersistedEntry) at
+    /// collect time so the metadata round-trips through persistence. `persist`
+    /// feature only.
+    #[cfg(feature = "persist")]
+    pub(crate) fn record_meta(&mut self, key: crate::core::QueryKey, meta: serde_json::Value) {
+        self.persisted_meta
+            .get_or_insert_with(std::collections::HashMap::new)
+            .insert(key, meta);
     }
 
     /// Opportunistic GC trigger (audit CL1/#105). Runs GC every `GC_INTERVAL`
