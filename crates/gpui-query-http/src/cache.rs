@@ -438,4 +438,20 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// (e) A `304` with no cached body for the URL surfaces a typed error rather
+    /// than serving nothing — a `304` is only meaningful as a revalidation of a
+    /// cached entry.
+    #[tokio::test]
+    async fn not_modified_without_cached_body_is_typed_error() {
+        // First fetch returns 304 directly (no prior cache to fall back on).
+        let backend = MockBackend::new(vec![Ok(resp_304_with_etag("\"v1\""))]);
+        let cache = HttpCache::new(backend);
+
+        let err = cache.fetch("https://example.test/e").await.unwrap_err();
+        assert!(
+            matches!(err, HttpError::NotModifiedWithoutCachedBody { .. }),
+            "a 304 with no cached body should surface NotModifiedWithoutCachedBody, got {err:?}"
+        );
+    }
 }

@@ -416,7 +416,11 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
                 continue;
             };
             // Serialize the single `Arc<T>` page as the opaque value.
-            let value = serialize_fn(&*page as &dyn std::any::Any);
+            // `None` only if the downcast failed (unreachable by construction;
+            // see `SerializerRegistry::register`) — skip in that case.
+            let Some(value) = serialize_fn(&*page as &dyn std::any::Any) else {
+                continue;
+            };
             out.push((
                 key.clone(),
                 crate::client::persist::PersistedEntry {

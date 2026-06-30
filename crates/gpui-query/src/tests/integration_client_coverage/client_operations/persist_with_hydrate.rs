@@ -13,9 +13,12 @@ use crate::client::{
     CacheMutation, NoopPersister, PersistError, PersistFilter, PersistHandle, PersistOptions,
     PersistSnapshot, PersistedEntry, Persister, QueryClient, hydrate,
 };
-use crate::core::{QueryError, QueryKey, QueryResource, QueryStatus};
-use crate::hook::fetch_query;
-use crate::hook::use_query_manual;
+use crate::core::{
+    InfiniteQueryResource, MutationResource, QueryError, QueryKey, QueryResource, QueryStatus,
+};
+use crate::hook::{
+    fetch_query, mutate, use_infinite_query, use_mutation, use_query_manual, InfiniteQueryOptions,
+};
 use crate::tests::test_support::*;
 
 /// An in-memory persister that stores the last saved snapshot, for asserting
@@ -423,6 +426,259 @@ fn test_persist_with_driven_by_real_fetch_completion(cx: &mut TestAppContext) {
         entry.value,
         serde_json::json!("fetched-value"),
         "the snapshot value should be the fetched result, serialized"
+    );
+    let _ = harness;
+}
+
+// ── H2: a REAL MUTATION completion drives persist_with ────────────────────
+//
+// Mirrors `test_persist_with_driven_by_real_fetch_completion` for the mutation
+// family. Mutations are not themselves persisted (mutation buckets are not
+// collected into the snapshot), but a `use_mutation` resolve bumps
+// `CacheMutation` inside `run_mutation_loop_inner`, so a retained Success query
+// entry IS saved. This catches a regression that dropped the mutation-completion
+// bump — previously the only "mutation" test triggered via `set_query_data` on
+// a sibling key, so the real mutate() path was exercised only by compilation.
+
+#[gpui::test]
+fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let captured = persister.last_saved.clone();
+
+    struct H {
+        // A retained Success query entry — the thing actually persisted.
+        query: Entity<QueryResource<String, QueryError>>,
+        // The mutation entity; completing it bumps the dirty signal.
+        mutation: Entity<MutationResource<String, String, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(|s| {
+                serde_json::to_value(s).expect("serialize")
+            });
+            client.persist_with(
+                persister.clone(),
+                PersistOptions {
+                    debounce: Duration::ZERO,
+                    ..PersistOptions::default()
+                },
+                cx,
+            )
+        });
+        // Prime a retained Success query entry. `apply_success` does NOT bump
+        // `CacheMutation`, so no save fires from this priming.
+        let query = cx.update_global::<QueryClient, _>(|client, cx| {
+            let e = client.resource::<String, QueryError>(QueryKey::from("retained"), cx);
+            e.update(cx, |r, _| {
+                r.apply_success("data".to_string(), crate::client::current_time_ms())
+            });
+            e
+        });
+        // Create the mutation via the REAL hook path.
+        let (mutation, _msub) = use_mutation::<String, String, QueryError, _>((), cx);
+        H {
+            query,
+            mutation,
+            _handle,
+        }
+    });
+
+    // Drive a REAL mutation to success. The resolving fetcher hits
+    // `run_mutation_loop_inner`'s success arm, which bumps `CacheMutation`,
+    // waking `persist_with` to collect (and save) the retained Success entry.
+    harness.update(cx, |this, cx| {
+        mutate(
+            &this.mutation,
+            "vars".to_string(),
+            |_vars| async move { Ok::<_, QueryError>("mutation-done".to_string()) },
+            cx,
+        );
+    });
+    cx.run_until_parked();
+
+    // Confirm the mutation really did complete (the trigger is NOT set_query_data).
+    cx.update(|cx| {
+        let m = harness.read(cx).mutation.read(cx);
+        assert_eq!(
+            m.data().cloned(),
+            Some("mutation-done".to_string()),
+            "the real mutation must resolve to Success before asserting on the save"
+        );
+    });
+
+    let saved = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("persist_with should have saved after the real mutation completed");
+    assert!(
+        saved.entries.contains_key("retained"),
+        "the mutation-completion bump should have saved the retained Success entry: {:?}",
+        saved.entries.keys().collect::<Vec<_>>()
+    );
+    let _ = harness;
+}
+
+// ── H3: a REAL INFINITE first-page completion drives persist_with ──────────
+//
+// Mirrors the query marquee for the infinite family. Creating an infinite query
+// via `use_infinite_query` auto-fetches the first page; when it resolves, the
+// success arm in `run_fetch_next_page_with_id` bumps `CacheMutation`. Infinite
+// buckets ARE collected into the snapshot (first page only), so the page is
+// saved. This catches a regression that dropped the infinite-completion bump.
+
+#[gpui::test]
+fn test_persist_with_driven_by_real_infinite_completion(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let captured = persister.last_saved.clone();
+
+    struct H {
+        infinite: Entity<InfiniteQueryResource<Vec<String>, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
+            // The infinite page type is `Vec<String>`; register a serializer
+            // keyed on that `T` so `collect_persistable_into` emits the page.
+            client.register_serializer::<Vec<String>, QueryError>(|v| {
+                serde_json::to_value(v).expect("serialize")
+            });
+            client.persist_with(
+                persister.clone(),
+                PersistOptions {
+                    debounce: Duration::ZERO,
+                    ..PersistOptions::default()
+                },
+                cx,
+            )
+        });
+        // Create the infinite query via the REAL hook path; the first-page fetch
+        // starts immediately and resolves on `run_until_parked`.
+        let (infinite, _isub) = use_infinite_query(
+            InfiniteQueryOptions::new("infinite-feed")
+                .cache_policy(crate::core::CachePolicy::Ttl { ttl_ms: 0 }),
+            |_last_page| async move { Ok::<_, QueryError>((vec!["page-0".to_string()], true)) },
+            cx,
+        );
+        H {
+            infinite,
+            _handle,
+        }
+    });
+
+    // Let the first-page fetch resolve → bumps `CacheMutation` → `persist_with`
+    // collects the infinite first page and saves.
+    cx.run_until_parked();
+
+    // Confirm the infinite query really did fetch (the trigger is NOT set_query_data).
+    cx.update(|cx| {
+        let r = harness.read(cx).infinite.read(cx);
+        assert_eq!(
+            r.status(),
+            QueryStatus::Success,
+            "the real infinite fetch must resolve to Success before asserting on the save"
+        );
+    });
+
+    let saved = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("persist_with should have saved after the real infinite fetch completed");
+    let entry = saved
+        .entries
+        .get("infinite-feed")
+        .expect("saved snapshot should include the infinite first-page entry");
+    assert_eq!(
+        entry.value,
+        serde_json::json!(["page-0"]),
+        "the snapshot value should be the fetched first page, serialized"
+    );
+    let _ = harness;
+}
+
+// ── H4: an IMPERATIVE PreparedFetch completion drives persist_with ─────────
+//
+// Guards the C1 fix: `PreparedFetch::complete_success` now bumps `CacheMutation`
+// (gated on `persist`), so the imperative escape-hatch (`prepare_fetch_query`,
+// the TanStack `queryClient.fetchQuery()` equivalent) is no longer invisible to
+// `persist_with`. Without the bump, a resolved imperative fetch was silently
+// never saved — the hook-layer completions all bumped, but this path did not.
+
+#[gpui::test]
+fn test_persist_with_driven_by_imperative_prepared_fetch(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let captured = persister.last_saved.clone();
+
+    struct H {
+        query: Entity<QueryResource<String, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(|s| {
+                serde_json::to_value(s).expect("serialize")
+            });
+            client.persist_with(
+                persister.clone(),
+                PersistOptions {
+                    debounce: Duration::ZERO,
+                    ..PersistOptions::default()
+                },
+                cx,
+            )
+        });
+        // Create + RETAIN the query resource via the REAL hook path so the
+        // bucket's WeakEntity stays alive until the observer collects it.
+        // (`prepare_fetch_query` reuses this same entity via `resource()`.)
+        let (query, _qsub) = use_query_manual::<String, QueryError, _>(
+            QueryKey::from("imperative"),
+            crate::core::CachePolicy::NoCache,
+            crate::core::RequestPolicy::LatestWins,
+            cx,
+        );
+        H { query, _handle }
+    });
+
+    // Start a request imperatively and complete it with success. The C1 fix
+    // bumps `CacheMutation` inside `PreparedFetch::complete_success`, waking
+    // `persist_with` to collect + save the now-Success entry.
+    harness.update(cx, |_this, cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let prepared = client
+                .prepare_fetch_query::<String, QueryError>(QueryKey::from("imperative"), cx)
+                .expect("imperative fetch should start (resource is not fresh)");
+            prepared.complete_success("imperative-value".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let r = harness.read(cx).query.read(cx);
+        assert_eq!(
+            r.data(),
+            Some(&"imperative-value".to_string()),
+            "the imperative fetch must have completed before asserting on the save"
+        );
+    });
+
+    let saved = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("persist_with should have saved after the imperative completion");
+    let entry = saved
+        .entries
+        .get("imperative")
+        .expect("saved snapshot should include the imperative Success entry");
+    assert_eq!(
+        entry.value,
+        serde_json::json!("imperative-value"),
+        "the snapshot value should be the imperative fetch result, serialized"
     );
     let _ = harness;
 }

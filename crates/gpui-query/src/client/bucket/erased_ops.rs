@@ -161,7 +161,12 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
             let Some(data) = resource.data() else {
                 continue;
             };
-            let value = serialize_fn(data as &dyn std::any::Any);
+            let Some(value) = serialize_fn(data as &dyn std::any::Any) else {
+                // Downcast failed (unreachable by construction; see
+                // `SerializerRegistry::register`). Skip the entry rather than
+                // persisting a placeholder.
+                continue;
+            };
             out.push((
                 key.clone(),
                 crate::client::persist::PersistedEntry {

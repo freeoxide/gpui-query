@@ -186,8 +186,14 @@ impl Default for PersistOptions {
 
 // ── Serializer / deserializer registries ─────────────────────────────────
 
-/// Type-erased serializer closure: `&dyn Any -> serde_json::Value`.
-type SerializeFn = Box<dyn Fn(&dyn std::any::Any) -> JsonValue + Send + Sync>;
+/// Type-erased serializer closure: `&dyn Any -> Option<serde_json::Value>`.
+///
+/// `None` means the downcast to the registered `T` failed — unreachable by
+/// construction (the bucket looks the closure up by `TypeId::of::<T>()` and
+/// passes that same `T`), but callers skip the entry rather than persisting a
+/// placeholder, so a future invariant break can never panic the foreground
+/// thread from inside the persistence path.
+type SerializeFn = Box<dyn Fn(&dyn std::any::Any) -> Option<JsonValue> + Send + Sync>;
 
 /// Registry of `T -> serde_json::Value` serializers, keyed by `TypeId` of the
 /// resource's data type `T`.
@@ -214,15 +220,14 @@ impl SerializerRegistry {
     /// `f` receives a `&T` already downcast by the bucket impl; we erase it to
     /// `&dyn Any` here so the registry is heterogeneous.
     pub fn register<T: 'static>(&mut self, f: fn(&T) -> JsonValue) {
-        let wrap = move |any: &dyn std::any::Any| -> JsonValue {
-            // Safety of downcast: the bucket impl only calls this closure after
-            // looking it up by `TypeId::of::<T>()`, so the `Any` is the concrete
-            // `T`. The fn pointer stored is `fn(&T)`, so downcast to `&T` is
-            // correct.
-            let val = any
-                .downcast_ref::<T>()
-                .expect("serializer registry: type id matched but downcast failed");
-            f(val)
+        let wrap = move |any: &dyn std::any::Any| -> Option<JsonValue> {
+            // Downcast to the concrete `T` this closure was registered for. The
+            // bucket impl only invokes this after looking the closure up by
+            // `TypeId::of::<T>()`, so the `Any` is that `T` and the downcast
+            // always succeeds — but degrade to `None` (the bucket then skips the
+            // entry) instead of `.expect()`, honoring the no-panic rule for the
+            // persistence path even if the TypeId invariant ever breaks.
+            any.downcast_ref::<T>().map(f)
         };
         self.serializers.insert(TypeId::of::<T>(), Box::new(wrap));
     }
