@@ -1,9 +1,10 @@
 export const meta = {
   name: 'features-audit',
-  description: 'Audit docs/features.md implementation against code + rust/gpui standards',
+  description: 'Audit docs/features.md vs code + rust/gpui standards, verify each issue, then fix the real ones',
   phases: [
     { title: 'Audit', detail: 'one agent per track verifies features.md claims + standards' },
     { title: 'Verify', detail: 'adversarially confirm each correctness/standards issue' },
+    { title: 'Fix', detail: 'sequentially fix each verified-real issue per track, then re-verify it' },
   ],
 }
 
@@ -98,6 +99,87 @@ const VERIFY_SCHEMA = {
     confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
     reasoning: { type: 'string', description: 'cite file:line you read to decide' },
     correction: { type: 'string', description: 'if not real (or only partly), what is actually true' },
+  },
+}
+
+const FIX_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['track', 'summary', 'fixes', 'compiles', 'residual'],
+  properties: {
+    track: { type: 'string' },
+    summary: { type: 'string', description: '2-4 sentences: what you changed and why' },
+    fixes: {
+      type: 'array',
+      description: 'one entry per issue you addressed',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'files', 'change', 'resolved'],
+        properties: {
+          title: { type: 'string', description: 'the issue title addressed' },
+          files: { type: 'array', items: { type: 'string' }, description: 'paths actually edited' },
+          change: { type: 'string', description: 'precise description of the edit and its rationale' },
+          resolved: { type: 'boolean', description: 'true only if this issue is now genuinely fixed' },
+          notes: { type: 'string', description: 'caveats, follow-ups, or empty' },
+        },
+      },
+    },
+    compiles: { type: 'string', enum: ['yes', 'no', 'not-checked'], description: 'did the relevant crate(s) compile after your edits' },
+    build_command: { type: 'string', description: 'exact cargo command(s) you ran, e.g. cargo check -p gpui-query --features persist' },
+    build_output: { type: 'string', description: 'final status line + any errors/warnings your edits introduced' },
+    residual: {
+      type: 'array',
+      description: 'verified-real issues you could NOT fully fix, and why',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'reason'],
+        properties: {
+          title: { type: 'string' },
+          reason: { type: 'string', description: 'why it was left unfixed (needs a design decision, too risky, blocked, etc.)' },
+        },
+      },
+    },
+  },
+}
+
+const REVERIFY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['track', 'issues', 'regressions', 'overall'],
+  properties: {
+    track: { type: 'string' },
+    issues: {
+      type: 'array',
+      description: 're-check each issue the fixer claimed to resolve by reading the CURRENT source',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'status', 'evidence'],
+        properties: {
+          title: { type: 'string' },
+          status: { type: 'string', enum: ['resolved', 'partial', 'unresolved', 'cannot-confirm'] },
+          evidence: { type: 'string', description: 'file:line you re-read to decide' },
+          reasoning: { type: 'string' },
+        },
+      },
+    },
+    regressions: {
+      type: 'array',
+      description: 'new problems the fix introduced (compile errors, broken tests, new unwrap/panic, new lock-across-await, etc.)',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'evidence'],
+        properties: {
+          title: { type: 'string' },
+          evidence: { type: 'string', description: 'file:line proving the regression' },
+          severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+        },
+      },
+    },
+    overall: { type: 'string', description: 'one-line verdict for this track after fixes' },
   },
 }
 
@@ -304,4 +386,108 @@ Decide is_real: true ONLY if the issue is genuinely present and materially corre
   }
 )
 
-return results
+// ---- Phase 3: Fix ----------------------------------------------------------
+// After audit + adversarial verify, fix every issue confirmed is_real.
+//
+// Fix agents MUTATE the working tree, and tracks overlap on shared files
+// (persist.rs, fetched.rs, Cargo.toml, lib.rs). Running them concurrently would
+// lose edits (each Edit re-reads state and cannot see another agent's in-flight
+// change), so we apply them SEQUENTIALLY — each agent reads the current,
+// post-previous-fix tree. Worktrees are the wrong tool here: their changes do
+// not auto-merge back and would be discarded.
+//
+// Pass { fix: false } via Workflow `args` to run audit/verify only (dry-run).
+const applyFixes = args?.fix !== false
+
+const buildFixPrompt = (batch) => `${COMMON}
+You are an IMPLEMENTER for track "${batch.track}". The audit + adversarial-verify phases confirmed the issues below as REAL. Fix each one in the working tree with a minimal, targeted, correct edit, then confirm the relevant crate still compiles.
+
+TRACK CONTEXT (from audit): ${batch.audit?.summary || '(no summary)'}
+
+VERIFIED-REAL ISSUES TO FIX (the verifier independently confirmed each by reading the source):
+${batch.issues.map((v, i) => `
+${i + 1}. title: ${v.title}
+   severity: ${v.severity} | kind: ${v.kind}
+   detail: ${v.detail}
+   evidence: ${v.evidence}
+   standards_ref: ${v.standards_ref || '(none)'}
+   verifier (is_real, ${v.verdict.confidence}): ${v.verdict.reasoning}${v.verdict.correction ? ` | correction: ${v.verdict.correction}` : ''}
+`).join('')}
+
+FIXING RULES:
+1. Read each cited file with the Read tool BEFORE editing (required). Find the issue at the cited line; if the line moved since the audit, relocate it.
+2. Make the MINIMAL correct fix for the ROOT CAUSE — not a workaround. Match the surrounding code's style, naming, comment density, and idioms.
+3. Honor EVERY standard in the STANDARDS block: no unwrap/expect/panic!/unreachable!/todo! outside #[cfg(test)]; typed errors via thiserror; /// doc comments on new public items; NO Mutex/lock held across .await; Send bounds on spawned futures. Do NOT introduce a NEW violation while fixing an old one.
+4. 'missing-test': add a #[cfg(test)] unit test (or #[gpui::test] + TestAppContext where a Global/Entity is touched) that exercises the behavior. NEVER use sleep() — channels/barriers only.
+5. 'doc-drift': reconcile docs/features.md with the code — change whichever side is wrong (prefer code-matches-design; if the design is genuinely wrong, update the docs and note it).
+6. Do NOT expand scope: no unrelated refactors, no reformatting of untouched regions.
+7. If two issues conflict or one needs a design decision, LEAVE it and record it under residual with the reason — do not guess.
+8. VERIFY after editing: run the narrowest cargo command that covers your changes via the Bash tool — e.g. \`cargo check -p gpui-query\` (add \`--features persist\` for gated code) or \`cargo test -p gpui-query-persist\` if you added tests. Put the final status line + any new errors/warnings into build_output. If it does NOT compile, either fix your edit or report compiles=no with the error.
+
+Your output IS the structured result — no prose preamble.`
+
+const buildReverifyPrompt = (batch, fix) => `${COMMON}
+You are a FIX VERIFIER for track "${batch.track}". Another agent just applied fixes for the issues below. Do NOT trust its claims — independently confirm by RE-READING the current source whether each issue is genuinely resolved, and catch any regressions.
+
+WHAT THE FIXER REPORTED:
+  summary: ${fix.summary}
+  compiles: ${fix.compiles} | build_command: ${fix.build_command || '(none)'}
+  build_output: ${fix.build_output || '(none)'}
+  claimed residual (unfixed): ${(fix.residual || []).map((r) => r.title).join('; ') || '(none)'}
+
+ISSUES TO RE-CHECK (read the CURRENT file:line for each):
+${batch.issues.map((v, i) => {
+  const f = (fix.fixes || []).find((x) => x.title === v.title)
+  return `
+${i + 1}. ${v.title}
+   original evidence: ${v.evidence}
+   fixer change: ${f ? f.change : '(no matching fix entry — likely left as residual)'}`
+}).join('')}
+
+For each issue set status resolved / partial / unresolved / cannot-confirm, citing the file:line you just read. Then enumerate any REGRESSIONS the fix introduced (new compile errors, broken tests, new unwrap/panic, new lock-across-await, etc.) with file:line and severity. Default to skepticism: if you cannot confirm a fix landed, mark it unresolved or cannot-confirm.`
+
+const fixes = []
+if (!applyFixes) {
+  log('Fix: SKIPPED (args.fix === false) — audit/verify only.')
+} else {
+  phase('Fix')
+
+  // Group verified-real issues by track. Each track is fixed by ONE agent so its
+  // (often shared-file) edits stay coherent; tracks then run sequentially.
+  const fixBatches = results
+    .filter((r) => r && r.verifiedIssues && r.verifiedIssues.length > 0)
+    .map((r) => ({
+      track: r.track,
+      audit: r.audit,
+      issues: r.verifiedIssues.filter((v) => v.verdict && v.verdict.is_real),
+    }))
+    .filter((r) => r.issues.length > 0)
+
+  if (fixBatches.length === 0) {
+    log('Fix: no verified-real issues to fix.')
+  } else {
+    log(`Fix: ${fixBatches.length} track(s) with verified-real issues — applying sequentially (shared files across tracks).`)
+    for (const batch of fixBatches) {
+      const fix = await agent(buildFixPrompt(batch), {
+        label: `fix:${batch.track}`,
+        phase: 'Fix',
+        schema: FIX_SCHEMA,
+      })
+      // Independent read-back: confirm the fix actually landed and broke nothing.
+      const recheck = fix
+        ? await agent(buildReverifyPrompt(batch, fix), {
+            label: `reverify:${batch.track}`,
+            phase: 'Fix',
+            schema: REVERIFY_SCHEMA,
+          })
+        : null
+      fixes.push({ track: batch.track, fix, recheck })
+    }
+  }
+}
+
+return {
+  audit: results,
+  fixes,
+  fixApplied: applyFixes,
+}
