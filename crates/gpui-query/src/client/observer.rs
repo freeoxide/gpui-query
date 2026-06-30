@@ -15,7 +15,9 @@ use std::cell::Cell;
 
 use gpui::{Context, Entity, Subscription};
 
-use crate::core::{InfiniteQueryResource, MutationResource, MutationStatus, QueryResource, QueryStatus};
+use crate::core::{
+    InfiniteQueryResource, MutationResource, MutationStatus, QueryResource, QueryStatus,
+};
 
 /// Bridges a resource type to its status for the generic [`Observer`].
 ///

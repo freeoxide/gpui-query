@@ -186,7 +186,7 @@ impl QueryOptions {
         self
     }
 
-/// Keep previous data when the key changes.
+    /// Keep previous data when the key changes.
     ///
     /// **Reserved / forward-compat** (audit fix #80): sets the
     /// `keep_previous_data` field, which is **not yet consumed** by `use_query`
@@ -229,7 +229,9 @@ impl From<crate::core::QueryKey> for QueryOptions {
 /// raw-parameter triple without forcing them to spell out `QueryOptions::new`.
 /// Non-breaking: the existing constructors and `From` impls are untouched.
 impl From<(crate::core::QueryKey, CachePolicy, RequestPolicy)> for QueryOptions {
-    fn from((key, cache_policy, request_policy): (crate::core::QueryKey, CachePolicy, RequestPolicy)) -> Self {
+    fn from(
+        (key, cache_policy, request_policy): (crate::core::QueryKey, CachePolicy, RequestPolicy),
+    ) -> Self {
         Self {
             key,
             cache_policy,
@@ -288,8 +290,7 @@ pub type MutationSuccessCallback<T> = Option<Arc<dyn Fn(&T) + Send + Sync>>;
 pub type MutationErrorCallback<E> = Option<Arc<dyn Fn(&E) + Send + Sync>>;
 
 /// Type alias for the `on_settled` callback field on [`MutationCallbacks`].
-pub type MutationSettledCallback<T, E> =
-    Option<Arc<dyn Fn(Option<&T>, Option<&E>) + Send + Sync>>;
+pub type MutationSettledCallback<T, E> = Option<Arc<dyn Fn(Option<&T>, Option<&E>) + Send + Sync>>;
 
 /// Lifecycle callbacks for mutations.
 ///
@@ -349,7 +350,10 @@ impl<T, E> MutationCallbacks<T, E> {
     }
 
     /// Set the settled callback (fires on both success and failure).
-    pub fn on_settled(mut self, f: impl Fn(Option<&T>, Option<&E>) + Send + Sync + 'static) -> Self {
+    pub fn on_settled(
+        mut self,
+        f: impl Fn(Option<&T>, Option<&E>) + Send + Sync + 'static,
+    ) -> Self {
         self.on_settled = Some(Arc::new(f));
         self
     }

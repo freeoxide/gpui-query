@@ -7,6 +7,7 @@
 //! **Audit 3 additions**:
 //! - `DehydratedState` and `DehydratedEntry` for state serialization
 
+#[cfg(feature = "persist")]
 use std::any::TypeId;
 
 use crate::core::{MutationStatus, QueryStatus};
@@ -55,6 +56,10 @@ pub struct ClientDiagnostic {
 }
 
 // ── Dehydration / Hydration types (Audit 3, Finding 8) ────────────────
+//
+// Gated behind `persist`: these types back the legacy `dehydrate`/`hydrate`/
+// `persist`/`restore` methods and the `QueryPersister` trait, all of which are
+// `persist`-only. The metadata-only diagnostic types above stay ungated.
 
 /// A single entry in a dehydrated query cache snapshot.
 ///
@@ -68,6 +73,7 @@ pub struct ClientDiagnostic {
 /// `dehydrate()` always populated it with `None`, so it was 24 bytes/entry of
 /// dead weight. Typed data serialization (when it lands) will be added as a
 /// real field, not a permanently-`None` placeholder.
+#[cfg(feature = "persist")]
 #[derive(Clone, Debug)]
 pub struct DehydratedEntry {
     /// Full key path (e.g., "users::42::posts").
@@ -111,6 +117,7 @@ pub struct DehydratedEntry {
 /// let state = DehydratedState { entries };
 /// assert_eq!(state.entries.len(), 1);
 /// ```
+#[cfg(feature = "persist")]
 #[derive(Clone, Debug, Default)]
 pub struct DehydratedState {
     /// All dehydrated cache entries.

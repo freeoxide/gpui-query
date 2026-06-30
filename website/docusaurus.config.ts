@@ -44,6 +44,12 @@ const config: Config = {
       logo: {
         alt: 'gpui-query',
         src: 'img/logo.svg',
+        // Points at the marketing homepage at the domain root `/`, which is a
+        // separate app served outside the docs `/docs/` baseUrl. Docusaurus's
+        // <Link> always re-appends baseUrl to root-absolute hrefs (even the
+        // `pathname://` escape hatch does), which would turn this into `/docs/`.
+        // The Logo component is swizzled (src/theme/Logo) to render a plain <a>
+        // that escapes the baseUrl — see that file for the full explanation.
         href: '/',
         target: '_self',
       },

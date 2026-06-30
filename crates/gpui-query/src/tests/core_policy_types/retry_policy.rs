@@ -64,13 +64,13 @@ fn retry_policy_delay_for_attempt_exponential() {
         .with_exponential_backoff()
         .with_max_delay(10_000);
 
-    assert_eq!(policy.delay_for_attempt(0), 100);     // 100 * 2^0 = 100
-    assert_eq!(policy.delay_for_attempt(1), 200);     // 100 * 2^1 = 200
-    assert_eq!(policy.delay_for_attempt(2), 400);     // 100 * 2^2 = 400
-    assert_eq!(policy.delay_for_attempt(3), 800);     // 100 * 2^3 = 800
-    assert_eq!(policy.delay_for_attempt(4), 1600);    // 100 * 2^4 = 1600
-    assert_eq!(policy.delay_for_attempt(5), 3200);    // 100 * 2^5 = 3200
-    assert_eq!(policy.delay_for_attempt(6), 6400);    // 100 * 2^6 = 6400
+    assert_eq!(policy.delay_for_attempt(0), 100); // 100 * 2^0 = 100
+    assert_eq!(policy.delay_for_attempt(1), 200); // 100 * 2^1 = 200
+    assert_eq!(policy.delay_for_attempt(2), 400); // 100 * 2^2 = 400
+    assert_eq!(policy.delay_for_attempt(3), 800); // 100 * 2^3 = 800
+    assert_eq!(policy.delay_for_attempt(4), 1600); // 100 * 2^4 = 1600
+    assert_eq!(policy.delay_for_attempt(5), 3200); // 100 * 2^5 = 3200
+    assert_eq!(policy.delay_for_attempt(6), 6400); // 100 * 2^6 = 6400
     // 100 * 2^7 = 12800, capped by max_delay=10000
     assert_eq!(policy.delay_for_attempt(7), 10_000);
 }
@@ -122,7 +122,10 @@ fn retry_policy_should_retry_zero_max() {
 fn retry_policy_serde_roundtrip() {
     // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[
-        RetryPolicy::new(5).with_delay(200).with_exponential_backoff().with_max_delay(5000),
+        RetryPolicy::new(5)
+            .with_delay(200)
+            .with_exponential_backoff()
+            .with_max_delay(5000),
         RetryPolicy::no_retries(),
         RetryPolicy::default(),
     ]);

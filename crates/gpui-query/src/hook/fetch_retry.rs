@@ -4,10 +4,61 @@ use gpui::{BorrowAppContext as _, Context, Entity};
 
 use crate::client::QueryClient;
 use crate::core::{
-    QueryBeginResult, QueryFetchMode, QueryKey, QueryResource, QuerySignal, RequestId, RetryPolicy,
+    CachePolicy, Fetched, QueryBeginResult, QueryFetchMode, QueryKey, QueryResource, QuerySignal,
+    RequestId, RetryPolicy,
 };
 
 use super::{current_time_ms, read_entity};
+
+// ── Fetcher-success adapter ("server wins") ─────────────────────────────
+//
+// Lets the single retry loop below serve both fetcher shapes:
+// - `Result<T, E>`         (plain)        → no policy override
+// - `Result<Fetched<T>, E>` (`*_with_policy`) → optional server-derived policy
+//
+// The loop is generic over `Out: FetchedLike<T>`; the success arm extracts
+// `(data, server_policy)` from the fetcher result and, when a server policy is
+// present, applies it to the resource after `complete_success`. A plain `T`
+// yields `(self, None)`, so the existing fetch paths are behaviorally identical.
+
+/// Decomposed fetcher success: the underlying data, an optional server-derived
+/// [`CachePolicy`], and (under `persist`) optional opaque metadata sourced from
+/// [`Fetched::meta`](crate::core::Fetched).
+pub(crate) struct FetchParts<T> {
+    pub data: T,
+    pub server_policy: Option<CachePolicy>,
+    #[cfg(feature = "persist")]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Adapt a fetcher success payload into its decomposed [`FetchParts`].
+pub(crate) trait FetchedLike<T> {
+    /// Consume `self` into [`FetchParts`]; `server_policy` (and `meta` under
+    /// `persist`) are `None` for plain fetcher results.
+    fn into_parts(self) -> FetchParts<T>;
+}
+
+impl<T> FetchedLike<T> for T {
+    fn into_parts(self) -> FetchParts<T> {
+        FetchParts {
+            data: self,
+            server_policy: None,
+            #[cfg(feature = "persist")]
+            meta: None,
+        }
+    }
+}
+
+impl<T> FetchedLike<T> for Fetched<T> {
+    fn into_parts(self) -> FetchParts<T> {
+        FetchParts {
+            data: self.data,
+            server_policy: self.cache_policy,
+            #[cfg(feature = "persist")]
+            meta: self.meta,
+        }
+    }
+}
 
 // ── Request lifecycle helpers ───────────────────────────────────────────
 
@@ -135,7 +186,7 @@ where
 ///
 /// Audit fix #27/#121: `entity.update` results are discarded via `let _ =`
 /// because `update` returns `Result<R>` under `AsyncApp`.
-async fn run_query_retry_loop<T, E, F, Fut>(
+async fn run_query_retry_loop<T, E, Out, F, Fut>(
     fetcher: F,
     request_id: RequestId,
     retry_policy: &RetryPolicy,
@@ -145,8 +196,9 @@ async fn run_query_retry_loop<T, E, F, Fut>(
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    Out: FetchedLike<T> + Send + 'static,
     F: Fn(Option<QuerySignal>) -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+    Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
 {
     let mut attempt: u32 = 0;
 
@@ -154,7 +206,15 @@ async fn run_query_retry_loop<T, E, F, Fut>(
         let result = fetcher(signal.clone()).await;
 
         match result {
-            Ok(data) => {
+            Ok(out) => {
+                // Server wins: extract any server-derived policy (and, under
+                // `persist`, opaque metadata) from a `Fetched<T>` result. Plain
+                // `T` results yield `None` for both.
+                let parts = out.into_parts();
+                let data = parts.data;
+                let server_policy = parts.server_policy;
+                #[cfg(feature = "persist")]
+                let meta = parts.meta;
                 let now_ms = current_time_ms();
                 let Some(e) = entity.upgrade() else {
                     // Documented behavior -- if the owning component
@@ -165,8 +225,26 @@ async fn run_query_retry_loop<T, E, F, Fut>(
                     resource.reset_retry_count();
                     if let Some(guard) = resource.accept_current_request(request_id) {
                         resource.complete_success(guard, data, now_ms);
+                        // Server wins: override the resource's policy only when
+                        // the fetcher supplied one. No-op for plain `T` results.
+                        if let Some(policy) = server_policy {
+                            resource.set_cache_policy(policy);
+                        }
                         // Audit fix #7: Only notify when the result was actually accepted.
                         cx.notify();
+                        // B2: precise dirty signal for the persistence layer.
+                        #[cfg(feature = "persist")]
+                        cx.default_global::<crate::client::CacheMutation>();
+                        // L1: carry fetcher-supplied opaque metadata (e.g. an
+                        // HTTP CacheMeta) into the persistence layer's per-key
+                        // map so it round-trips through PersistedEntry.meta.
+                        #[cfg(feature = "persist")]
+                        if let Some(meta) = meta {
+                            let key = resource.key().clone();
+                            cx.update_global::<QueryClient, _>(|client, _| {
+                                client.record_meta(key, meta);
+                            });
+                        }
                     } else {
                         #[cfg(debug_assertions)]
                         eprintln!(
@@ -204,16 +282,15 @@ async fn run_query_retry_loop<T, E, F, Fut>(
                     // reads). `fresh_signal` is computed unconditionally but only
                     // used when `signal` is `Some` (audit fix #14).
                     let Some(e) = entity.upgrade() else { return };
-                    let (request_still_active, fresh_signal) =
-                        read_entity(&e, cx, |r, _| {
-                            (
-                                r.is_current_request(request_id),
-                                // Audit fix #24: `QuerySignal::new` directly instead
-                                // of the redundant closure.
-                                r.signal().cloned().unwrap_or_else(QuerySignal::new),
-                            )
-                        })
-                        .unwrap_or((false, QuerySignal::new()));
+                    let (request_still_active, fresh_signal) = read_entity(&e, cx, |r, _| {
+                        (
+                            r.is_current_request(request_id),
+                            // Audit fix #24: `QuerySignal::new` directly instead
+                            // of the redundant closure.
+                            r.signal().cloned().unwrap_or_else(QuerySignal::new),
+                        )
+                    })
+                    .unwrap_or((false, QuerySignal::new()));
                     if !request_still_active {
                         #[cfg(debug_assertions)]
                         eprintln!(
@@ -242,6 +319,9 @@ async fn run_query_retry_loop<T, E, F, Fut>(
                             resource.reset_retry_count();
                             // Audit fix #7: Only notify when the result was actually accepted.
                             cx.notify();
+                            // B2: precise dirty signal for the persistence layer.
+                            #[cfg(feature = "persist")]
+                            cx.default_global::<crate::client::CacheMutation>();
                         } else {
                             #[cfg(debug_assertions)]
                             eprintln!(
@@ -269,7 +349,7 @@ async fn run_query_retry_loop<T, E, F, Fut>(
 ///
 /// Audit fix #14: Thin wrapper over [`run_query_retry_loop`] with
 /// `signal = None`.
-pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
+pub(crate) async fn fetch_with_retry<T, E, Out, F, Fut>(
     fetcher: F,
     request_id: RequestId,
     retry_policy: &RetryPolicy,
@@ -278,11 +358,13 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    Out: FetchedLike<T> + Send + 'static,
     F: Fn() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+    Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
 {
     let wrapper = move |_: Option<QuerySignal>| fetcher();
-    run_query_retry_loop(wrapper, request_id, retry_policy, entity, cx, None).await;
+    run_query_retry_loop::<T, E, Out, _, _>(wrapper, request_id, retry_policy, entity, cx, None)
+        .await;
 }
 
 /// Like [`fetch_with_retry`] but for fetchers that take a [`QuerySignal`].
@@ -293,7 +375,7 @@ pub(crate) async fn fetch_with_retry<T, E, F, Fut>(
 ///
 /// Audit fix #14: Thin wrapper over [`run_query_retry_loop`] with
 /// `signal = Some(initial_signal)`.
-pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
+pub(crate) async fn fetch_signal_with_retry<T, E, Out, F, Fut>(
     fetcher: F,
     initial_signal: QuerySignal,
     request_id: RequestId,
@@ -303,9 +385,18 @@ pub(crate) async fn fetch_signal_with_retry<T, E, F, Fut>(
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    Out: FetchedLike<T> + Send + 'static,
     F: Fn(QuerySignal) -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+    Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
 {
     let wrapper = move |sig: Option<QuerySignal>| fetcher(sig.unwrap_or_default());
-    run_query_retry_loop(wrapper, request_id, retry_policy, entity, cx, Some(initial_signal)).await;
+    run_query_retry_loop::<T, E, Out, _, _>(
+        wrapper,
+        request_id,
+        retry_policy,
+        entity,
+        cx,
+        Some(initial_signal),
+    )
+    .await;
 }

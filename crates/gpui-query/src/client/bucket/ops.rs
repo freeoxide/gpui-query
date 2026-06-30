@@ -126,12 +126,15 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
             if let Some(entity) = entry.entity.upgrade() {
                 // M2: refresh the mirror from the same read we already do for
                 // the policy check (zero extra reads).
-                let (needs_update, last_updated, loading) =
-                    entity.read_with(cx, |resource, _| {
-                        let needs_update = resource.cache_policy() != cache_policy
-                            || resource.request_policy() != request_policy;
-                        (needs_update, resource.last_updated_at_ms(), resource.is_loading())
-                    });
+                let (needs_update, last_updated, loading) = entity.read_with(cx, |resource, _| {
+                    let needs_update = resource.cache_policy() != cache_policy
+                        || resource.request_policy() != request_policy;
+                    (
+                        needs_update,
+                        resource.last_updated_at_ms(),
+                        resource.is_loading(),
+                    )
+                });
                 entry.last_updated_ms = last_updated;
                 entry.loading = loading;
                 if needs_update {
@@ -222,9 +225,10 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
 
         for key in keys {
             if let Some(entry) = self.entries.get(&key)
-                && let Some(entity) = entry.entity.upgrade() {
-                    action(&entity, cx);
-                }
+                && let Some(entity) = entry.entity.upgrade()
+            {
+                action(&entity, cx);
+            }
         }
     }
 
@@ -239,7 +243,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         let success_threshold = gc_threshold * (super::types::SUCCESS_GC_MULTIPLIER as u64);
 
         self.entries.retain(|_key, entry| {
-            let Some(entity) = entry.entity.upgrade() else { return false };
+            let Some(entity) = entry.entity.upgrade() else {
+                return false;
+            };
             let resource = entity.read(cx);
 
             // M2: refresh the eviction mirror from this read (gc walks every

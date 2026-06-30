@@ -1,7 +1,7 @@
 //! Tests for max_pages enforcement, edge cases, and evicted pages returns.
 
-use crate::core::*;
 use super::helpers::*;
+use crate::core::*;
 
 // ── 4. max_pages enforcement ────────────────────────────────────────────
 
@@ -89,11 +89,10 @@ fn max_pages_50_allows_50_pages_and_evicts_on_51st() {
 
     // Static page labels "p0".."p50" (T9: avoids per-page format! allocation).
     const P_LABELS: [&str; 51] = [
-        "p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10",
-        "p11", "p12", "p13", "p14", "p15", "p16", "p17", "p18", "p19", "p20",
-        "p21", "p22", "p23", "p24", "p25", "p26", "p27", "p28", "p29", "p30",
-        "p31", "p32", "p33", "p34", "p35", "p36", "p37", "p38", "p39", "p40",
-        "p41", "p42", "p43", "p44", "p45", "p46", "p47", "p48", "p49", "p50",
+        "p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "p11", "p12", "p13",
+        "p14", "p15", "p16", "p17", "p18", "p19", "p20", "p21", "p22", "p23", "p24", "p25", "p26",
+        "p27", "p28", "p29", "p30", "p31", "p32", "p33", "p34", "p35", "p36", "p37", "p38", "p39",
+        "p40", "p41", "p42", "p43", "p44", "p45", "p46", "p47", "p48", "p49", "p50",
     ];
 
     // Load 50 pages — all with has_more=true so has_next_page stays true

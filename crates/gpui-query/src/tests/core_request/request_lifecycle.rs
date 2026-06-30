@@ -9,10 +9,10 @@ use crate::core::{
     CachePolicy, QueryBeginResult, QueryFetchMode, QueryResource, QueryStatus, RequestId,
     RequestPolicy,
 };
-use std::num::NonZero;
 use crate::tests::test_support::{
-    assert_status, begin_request_id, test_resource_with_policies, test_sequencer, TEST_NOW_MS,
+    TEST_NOW_MS, assert_status, begin_request_id, test_resource_with_policies, test_sequencer,
 };
+use std::num::NonZero;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RequestGuard: proof-of-ownership (obtained via accept_current_request)
@@ -50,8 +50,7 @@ fn accept_current_request_returns_guard_for_active_request() {
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
     let mut seq = test_sequencer();
 
-    let request_id =
-        begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
+    let request_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
 
     let guard = resource
         .accept_current_request(request_id)

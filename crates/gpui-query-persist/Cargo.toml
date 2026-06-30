@@ -1,0 +1,27 @@
+[package]
+name = "gpui-query-persist"
+version = "0.1.0"
+edition = "2024"
+description = "Reference disk-based persistence adapter (FilePersister) for gpui-query"
+repository = "https://github.com/hmziqrs/gpui-query"
+license = "MIT"
+keywords = ["gpui", "persistence", "cache", "query", "filesystem"]
+categories = ["asynchronous", "caching", "filesystem"]
+homepage = "https://gpui-query.hmziq.xyz"
+authors = ["hmziqrs"]
+
+[features]
+default = []
+
+[dependencies]
+gpui-query = { path = "../gpui-query", default-features = false, features = ["persist", "client", "hook"] }
+dirs = "6"
+tempfile = "3"
+bincode = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = "2"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+pollster = "0.4"

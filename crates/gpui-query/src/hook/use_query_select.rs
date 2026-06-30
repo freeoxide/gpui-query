@@ -52,7 +52,7 @@ use gpui::{AppContext as _, Context, Entity, Subscription};
 
 use crate::core::{MappedQueryResource, QueryResource, SelectTransform};
 
-use super::{use_query, QueryOptions};
+use super::{QueryOptions, use_query};
 
 /// The result of [`use_query_select`]: the projected view entity, the
 /// underlying query entity, and the pair of subscriptions that keep both
@@ -161,21 +161,17 @@ where
 
             // H1 step 2: Compare cached `&T` vs fresh `&T` WITHOUT cloning T.
             // `cached` is owned, so no nested borrow is taken on `mapped`.
-            let changed =
-                entity.read_with(cx, |r, _| match (&cached, r.data()) {
-                    (Some(c), Some(fresh)) => c.as_ref() != fresh,
-                    (None, None) => false,
-                    _ => true,
-                });
+            let changed = entity.read_with(cx, |r, _| match (&cached, r.data()) {
+                (Some(c), Some(fresh)) => c.as_ref() != fresh,
+                (None, None) => false,
+                _ => true,
+            });
 
             if changed {
                 // H1 step 3: Only now clone `T` into an `Arc<T>` for the
                 // update (the source `QueryResource` owns `T` by value and only
                 // lends `&T`, so this single clone is unavoidable on change).
-                let fresh: Option<Arc<T>> = entity
-                    .read(cx)
-                    .data()
-                    .map(|d| Arc::new(d.clone()));
+                let fresh: Option<Arc<T>> = entity.read(cx).data().map(|d| Arc::new(d.clone()));
                 // Audit fix #116: Notify after updating the mapped source so
                 // third-party observers of the mapped entity (not just the
                 // primary caller, which already re-renders via the query

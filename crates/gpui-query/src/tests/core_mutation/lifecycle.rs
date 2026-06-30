@@ -25,7 +25,8 @@ fn new_mutation_is_idle() {
 
 #[test]
 fn lifecycle_idle_to_loading_to_success() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
 
     // Idle
     assert_eq!(m.status(), MutationStatus::Idle);
@@ -52,7 +53,8 @@ fn lifecycle_idle_to_loading_to_success() {
 
 #[test]
 fn lifecycle_idle_to_loading_to_failure() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
 
     m.begin("delete-user");
     assert!(m.is_loading());
@@ -97,14 +99,18 @@ fn reset_returns_to_idle_and_clears_all_state() {
 
 #[test]
 fn reset_cancels_in_flight_signal() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
     m.begin("vars");
     let signal = m.signal().unwrap().clone();
     assert!(!signal.is_cancelled());
 
     m.reset();
 
-    assert!(signal.is_cancelled(), "reset must cancel the in-flight signal");
+    assert!(
+        signal.is_cancelled(),
+        "reset must cancel the in-flight signal"
+    );
     assert!(m.signal().is_none());
 }
 
@@ -112,7 +118,8 @@ fn reset_cancels_in_flight_signal() {
 
 #[test]
 fn begin_cancels_previous_signal_on_replacement() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
 
     m.begin("first");
     let first_signal = m.signal().unwrap().clone();
@@ -121,7 +128,10 @@ fn begin_cancels_previous_signal_on_replacement() {
     // Second begin while first is still loading -> LatestWins
     m.begin("second");
     assert!(first_signal.is_cancelled(), "old signal must be cancelled");
-    assert!(!m.signal().unwrap().is_cancelled(), "new signal must be fresh");
+    assert!(
+        !m.signal().unwrap().is_cancelled(),
+        "new signal must be fresh"
+    );
     assert_eq!(m.variables(), Some(&"second"));
     assert_eq!(m.retry_count(), 0, "begin resets retry_count");
 }
@@ -130,7 +140,8 @@ fn begin_cancels_previous_signal_on_replacement() {
 
 #[test]
 fn begin_clears_error_from_previous_failure() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
 
     m.begin("first");
     m.complete_failure(QueryError::response("first failed"));
@@ -217,7 +228,9 @@ fn status_labels() {
 
 #[test]
 fn retry_policy_accessor() {
-    let policy = RetryPolicy::new(5).with_delay(200).with_exponential_backoff();
+    let policy = RetryPolicy::new(5)
+        .with_delay(200)
+        .with_exponential_backoff();
     let m: MutationResource<&'static str, i32> = MutationResource::new(policy.clone());
     assert_eq!(m.retry_policy(), &policy);
     assert_eq!(m.retry_policy().max_retries, 5);
@@ -227,7 +240,8 @@ fn retry_policy_accessor() {
 
 #[test]
 fn multiple_sequential_mutations() {
-    let mut m: MutationResource<&'static str, i32> = MutationResource::new(RetryPolicy::no_retries());
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
 
     // First mutation
     m.begin("a");

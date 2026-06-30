@@ -140,7 +140,12 @@ impl<T, E> InfiniteQueryResource<T, E> {
         cache_policy: CachePolicy,
         request_policy: RequestPolicy,
     ) -> Self {
-        Self::with_direction(key, cache_policy, request_policy, FetchDirection::ForwardOnly)
+        Self::with_direction(
+            key,
+            cache_policy,
+            request_policy,
+            FetchDirection::ForwardOnly,
+        )
     }
 
     /// Create a new infinite query resource configured for bidirectional paging.
@@ -153,7 +158,12 @@ impl<T, E> InfiniteQueryResource<T, E> {
         cache_policy: CachePolicy,
         request_policy: RequestPolicy,
     ) -> Self {
-        Self::with_direction(key, cache_policy, request_policy, FetchDirection::Bidirectional)
+        Self::with_direction(
+            key,
+            cache_policy,
+            request_policy,
+            FetchDirection::Bidirectional,
+        )
     }
 
     /// Create a new infinite query resource with an explicit [`FetchDirection`].

@@ -87,12 +87,7 @@ impl<T, E> QueryResource<T, E> {
     ///
     /// If `data` is `None`, the status is set to [`QueryStatus::Idle`] rather than
     /// [`QueryStatus::Success`] to maintain the invariant that Success implies data exists.
-    pub fn complete_success_optional(
-        &mut self,
-        guard: RequestGuard,
-        data: Option<T>,
-        now_ms: u64,
-    ) {
+    pub fn complete_success_optional(&mut self, guard: RequestGuard, data: Option<T>, now_ms: u64) {
         self.validate_guard(&guard);
         self.apply_success_optional(data, now_ms);
     }
@@ -143,12 +138,7 @@ impl<T, E> QueryResource<T, E> {
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
     }
 
-    pub(crate) fn apply_failure_with_data(
-        &mut self,
-        data: T,
-        error: impl Into<E>,
-        now_ms: u64,
-    ) {
+    pub(crate) fn apply_failure_with_data(&mut self, data: T, error: impl Into<E>, now_ms: u64) {
         self.status = QueryStatus::Failure;
         self.data = Some(data);
         self.error = Some(error.into());

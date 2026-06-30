@@ -114,7 +114,11 @@ fn sequencer_advances_scope_when_sequence_reaches_max() {
 
     // After advancing, the next id should be in scope 6, seq 1.
     let next_id = seq.next_request();
-    assert_eq!(next_id.scope_id(), NonZero::new(6).unwrap(), "scope should have advanced to 6");
+    assert_eq!(
+        next_id.scope_id(),
+        NonZero::new(6).unwrap(),
+        "scope should have advanced to 6"
+    );
     assert_eq!(
         next_id.value(),
         1,

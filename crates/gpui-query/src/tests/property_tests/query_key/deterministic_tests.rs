@@ -185,7 +185,11 @@ fn key_deeply_nested_200_segments() {
     for depth in [1, 50, 100, 199] {
         let prefix_segs: Vec<String> = segments[..depth].to_vec();
         let prefix = make_key(&prefix_segs);
-        assert!(key.starts_with(&prefix), "should match prefix of depth {}", depth);
+        assert!(
+            key.starts_with(&prefix),
+            "should match prefix of depth {}",
+            depth
+        );
     }
 }
 
@@ -205,7 +209,14 @@ fn key_unicode_edge_cases_distinct_keys() {
     assert_ne!(zwj, bom);
 
     // They should also have distinct hashes (not guaranteed but very likely)
-    let hashes: Vec<u64> = [&zwsp, &zwnj, &zwj, &bom].iter().map(|k| hash_of(k)).collect();
+    let hashes: Vec<u64> = [&zwsp, &zwnj, &zwj, &bom]
+        .iter()
+        .map(|k| hash_of(k))
+        .collect();
     let unique_hashes: std::collections::HashSet<u64> = hashes.into_iter().collect();
-    assert_eq!(unique_hashes.len(), 4, "four distinct zero-width chars should have distinct hashes");
+    assert_eq!(
+        unique_hashes.len(),
+        4,
+        "four distinct zero-width chars should have distinct hashes"
+    );
 }
