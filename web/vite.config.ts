@@ -67,7 +67,7 @@ const config = defineConfig({
       pages: blogRoutes().map((path) => ({ path })),
       sitemap: {
         enabled: true,
-        host: "https://gpui-query.hmziq.xyz",
+        host: "https://gpui-query.freeoxide.com",
       },
     }),
     viteReact(),

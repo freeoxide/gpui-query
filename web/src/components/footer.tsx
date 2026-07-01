@@ -58,7 +58,7 @@ export function Footer() {
             <ul className="space-y-2.5">
               <li>
                 <a
-                  href="https://github.com/hmziqrs/gpui-query"
+                  href="https://github.com/freeoxide/gpui-query"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"

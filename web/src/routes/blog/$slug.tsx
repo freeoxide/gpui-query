@@ -10,7 +10,7 @@ import { blogPost } from "#/lib/seo";
 export const Route = createFileRoute("/blog/$slug")({
   head: ({ loaderData }) => {
     const post = loaderData as { slug: string; frontmatter: BlogFrontmatter } | undefined;
-    const siteUrl = "https://gpui-query.hmziq.xyz";
+    const siteUrl = "https://gpui-query.freeoxide.com";
     if (!post) {
       return {
         meta: [{ title: "Not Found - gpui-query Blog" }],

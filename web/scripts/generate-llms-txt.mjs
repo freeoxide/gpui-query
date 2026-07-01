@@ -18,7 +18,7 @@ const outputDir = process.argv.includes("--output")
 
 // Scripts run from web/, so the Docusaurus docs live one level up.
 const docsRoot = resolve("..", "website", "docs");
-const siteUrl = "https://gpui-query.hmziq.xyz";
+const siteUrl = "https://gpui-query.freeoxide.com";
 
 /**
  * Recursively collect every .md and .mdx file under `dir`.
@@ -180,9 +180,9 @@ async function main() {
   llmsLines.push("");
   llmsLines.push("## Links");
   llmsLines.push("");
-  llmsLines.push("- [GitHub](https://github.com/hmziqrs/gpui-query): Source code and issues");
+  llmsLines.push("- [GitHub](https://github.com/freeoxide/gpui-query): Source code and issues");
   llmsLines.push(
-    "- [Introduction](https://gpui-query.hmziq.xyz/docs/): What is gpui-query and why you need it",
+    "- [Introduction](https://gpui-query.freeoxide.com/docs/): What is gpui-query and why you need it",
   );
 
   const llmsTxt = llmsLines.join("\n");

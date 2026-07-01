@@ -44,7 +44,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
             ),
           )}
           <a
-            href="https://github.com/hmziqrs/gpui-query"
+            href="https://github.com/freeoxide/gpui-query"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"

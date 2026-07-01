@@ -37,7 +37,7 @@ export function CtaSection() {
             </Button>
             <Button variant="outline" size="lg" asChild>
               <a
-                href="https://github.com/hmziqrs/gpui-query"
+                href="https://github.com/freeoxide/gpui-query"
                 target="_blank"
                 rel="noopener noreferrer"
               >

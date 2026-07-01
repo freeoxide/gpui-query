@@ -102,7 +102,7 @@ export function Navbar() {
             <ThemeToggle />
             <Button variant="ghost" size="icon" asChild className="hidden md:inline-flex">
               <a
-                href="https://github.com/hmziqrs/gpui-query"
+                href="https://github.com/freeoxide/gpui-query"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="GitHub repository"

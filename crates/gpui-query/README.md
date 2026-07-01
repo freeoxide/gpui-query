@@ -98,9 +98,9 @@ The crate is split into three layers, each behind a feature flag:
 
 ## Links
 
-- Website: <https://gpui-query.hmziq.xyz>
-- Docs: <https://gpui-query.hmziq.xyz/docs/>
-- Source: <https://github.com/hmziqrs/gpui-query>
+- Website: <https://gpui-query.freeoxide.com>
+- Docs: <https://gpui-query.freeoxide.com/docs/>
+- Source: <https://github.com/freeoxide/gpui-query>
 - GPUI: <https://github.com/zed-industries/zed/tree/main/crates/gpui>
 - TanStack Query: <https://tanstack.com/query>
 

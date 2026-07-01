@@ -252,9 +252,9 @@ Garbage collection runs on idle resources older than `gc_time_ms` (default: 5 mi
 
 ## links
 
-- Documentation: <https://gpui-query.hmziq.xyz/docs/>
-- Website: <https://gpui-query.hmziq.xyz>
-- Source: <https://github.com/hmziqrs/gpui-query>
+- Documentation: <https://gpui-query.freeoxide.com/docs/>
+- Website: <https://gpui-query.freeoxide.com>
+- Source: <https://github.com/freeoxide/gpui-query>
 - GPUI framework: <https://github.com/zed-industries/zed/tree/main/crates/gpui>
 - TanStack Query: <https://tanstack.com/query>
 

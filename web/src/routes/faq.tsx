@@ -113,16 +113,16 @@ export const Route = createFileRoute("/faq")({
         content: "Frequently asked questions about gpui-query — async state management for GPUI.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "FAQ - gpui-query" },
       {
         name: "twitter:description",
         content: "Frequently asked questions about gpui-query — async state management for GPUI.",
       },
-      { name: "twitter:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
     ],
-    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/faq" }],
+    links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/faq" }],
     scripts: [
       {
         type: "application/ld+json",
@@ -214,7 +214,7 @@ function FAQPage() {
               className="px-6 text-base font-semibold shadow-lg shadow-primary/20"
             >
               <a
-                href="https://github.com/hmziqrs/gpui-query/issues"
+                href="https://github.com/freeoxide/gpui-query/issues"
                 target="_blank"
                 rel="noopener noreferrer"
               >

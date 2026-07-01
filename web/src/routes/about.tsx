@@ -38,7 +38,7 @@ export const Route = createFileRoute("/about")({
           "About gpui-query — zero-boilerplate async state management for the GPUI framework.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "About - gpui-query" },
       {
@@ -46,9 +46,9 @@ export const Route = createFileRoute("/about")({
         content:
           "About gpui-query — zero-boilerplate async state management for the GPUI framework.",
       },
-      { name: "twitter:image", content: "https://gpui-query.hmziq.xyz/og-image.png" },
+      { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
     ],
-    links: [{ rel: "canonical", href: "https://gpui-query.hmziq.xyz/about" }],
+    links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/about" }],
   }),
   component: AboutPage,
 });
@@ -354,7 +354,7 @@ function OpenSourceSection() {
               <div className="flex flex-wrap gap-3 pt-2">
                 <Button size="sm" asChild>
                   <a
-                    href="https://github.com/hmziqrs/gpui-query"
+                    href="https://github.com/freeoxide/gpui-query"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -364,7 +364,7 @@ function OpenSourceSection() {
                 </Button>
                 <Button variant="outline" size="sm" asChild>
                   <a
-                    href="https://github.com/hmziqrs/gpui-query/issues"
+                    href="https://github.com/freeoxide/gpui-query/issues"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -423,7 +423,11 @@ function LinksSection() {
         </div>
 
         <div className="mx-auto mt-14 grid max-w-3xl gap-4 sm:grid-cols-2">
-          <a href="https://github.com/hmziqrs/gpui-query" target="_blank" rel="noopener noreferrer">
+          <a
+            href="https://github.com/freeoxide/gpui-query"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             <LinkCard
               icon={GithubLogoIcon}
               label="GitHub"

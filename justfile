@@ -67,7 +67,7 @@ ci-logs run_id:
 
 # Open the GitHub releases page
 releases:
-    open "https://github.com/hmziqrs/gpui-query/releases"
+    open "https://github.com/freeoxide/gpui-query/releases"
 
 # Create a new release: bumps version in CHANGELOG, commits, and pushes
 # Usage: just release 0.1.2

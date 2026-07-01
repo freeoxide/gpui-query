@@ -70,7 +70,7 @@ export default function IntroducingGpuiQueryPost() {
       <p>
         We&apos;re working on DevTools UI integration, server-state synchronization patterns, and a
         plugin system for custom query backends.{" "}
-        <a href="https://github.com/hmziqrs/gpui-query" target="_blank" rel="noreferrer noopener">
+        <a href="https://github.com/freeoxide/gpui-query" target="_blank" rel="noreferrer noopener">
           Star the repo
         </a>{" "}
         to follow along.

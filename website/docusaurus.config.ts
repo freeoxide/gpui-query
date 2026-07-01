@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'gpui-query Docs',
   tagline: 'Zero-boilerplate async state management for GPUI',
-  url: 'https://gpui-query.hmziq.xyz',
+  url: 'https://gpui-query.freeoxide.com',
   baseUrl: '/docs/',
   favicon: 'img/favicon.ico',
 
@@ -61,7 +61,7 @@ const config: Config = {
           label: 'Docs',
         },
         {
-          href: 'https://github.com/hmziqrs/gpui-query',
+          href: 'https://github.com/freeoxide/gpui-query',
           label: 'GitHub',
           position: 'right',
         },
@@ -92,7 +92,7 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/hmziqrs/gpui-query',
+              href: 'https://github.com/freeoxide/gpui-query',
             },
           ],
         },
