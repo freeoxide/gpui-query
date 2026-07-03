@@ -20,3 +20,5 @@ Thumbs.db
 
 # Local Playwright/MCP artifacts
 .playwright-mcp/
+
+.wrangler/cache

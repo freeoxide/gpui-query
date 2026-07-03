@@ -8,6 +8,22 @@
     "directory": "./dist/client",
     "binding": "ASSETS",
     "html_handling": "auto-trailing-slash",
-    "run_worker_first": ["/*", "!/docs/**", "!/assets/**", "!/pagefind/**"],
+    // The /src, /@vite, /@id, /@fs and /node_modules exclusions only matter in
+    // `vp dev`, where the Cloudflare plugin honors run_worker_first and would
+    // otherwise route Vite module/CSS requests into the SSR worker (which
+    // rejects non-HTML requests). Production never requests these paths.
+    "run_worker_first": [
+      "/*",
+      "!/docs/**",
+      "!/assets/**",
+      "!/pagefind/**",
+      "!/src/**",
+      "!/@vite/**",
+      "!/@id/**",
+      "!/@fs/**",
+      "!/@react-refresh",
+      "!/@tanstack-start/**",
+      "!/node_modules/**",
+    ],
   },
 }
