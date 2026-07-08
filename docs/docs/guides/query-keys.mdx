@@ -1,7 +1,7 @@
 ---
 sidebar_position: 5
 title: Query Keys
-description: Hierarchical, cheap-to-clone cache keys and the QueryKeyFilter for bulk operations
+description: "Hierarchical, cheap-to-clone cache keys and the QueryKeyFilter for bulk operations"
 ---
 
 Every cached resource in gpui-query is identified by a [`QueryKey`](/api/queries) — a structured, hierarchical key inspired by TanStack Query's array keys (`["users", "42", "posts"]`). Keys are the foundation of caching, deduplication, and the bulk operations (`invalidate_queries`, `cancel_queries`, `reset_queries`, `remove_queries`) that the [`QueryClient`](/api/query-client) exposes.

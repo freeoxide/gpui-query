@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: Caching
-description: Understanding and configuring query caching
+description: "Configure caching in gpui-query: how NoCache, Ttl, and StaleWhileRevalidate policies decide when data is fresh, stale, or refetched in the background."
 ---
 
 Every query in gpui-query has a cache policy. The policy determines whether a fetch happens at all, and whether stale data gets served while a refetch runs in the background. Picking the right policy is the main lever you have for tuning how "live" your data feels versus how many network requests your app makes.

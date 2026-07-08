@@ -9,12 +9,14 @@ export const Route = createFileRoute("/blog/")({
       { title: "Blog - gpui-query" },
       {
         name: "description",
-        content: "Announcements, deep dives, and updates about gpui-query.",
+        content:
+          "Deep dives on async state management for GPUI in Rust: cache policies, cooperative cancellation, and updates from the gpui-query project.",
       },
       { property: "og:title", content: "Blog - gpui-query" },
       {
         property: "og:description",
-        content: "Announcements, deep dives, and updates about gpui-query.",
+        content:
+          "Deep dives on async state management for GPUI in Rust: cache policies, cooperative cancellation, and updates from the gpui-query project.",
       },
       { property: "og:type", content: "website" },
       { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
@@ -22,11 +24,12 @@ export const Route = createFileRoute("/blog/")({
       { name: "twitter:title", content: "Blog - gpui-query" },
       {
         name: "twitter:description",
-        content: "Announcements, deep dives, and updates about gpui-query.",
+        content:
+          "Deep dives on async state management for GPUI in Rust: cache policies, cooperative cancellation, and updates from the gpui-query project.",
       },
       { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
     ],
-    links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/blog" }],
+    links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/blog/" }],
     scripts: [
       {
         type: "application/ld+json",
@@ -34,8 +37,9 @@ export const Route = createFileRoute("/blog/")({
           "@context": "https://schema.org",
           "@type": "Blog",
           name: "gpui-query Blog",
-          url: "https://gpui-query.freeoxide.com/blog",
-          description: "Announcements, deep dives, and updates about gpui-query.",
+          url: "https://gpui-query.freeoxide.com/blog/",
+          description:
+            "Deep dives on async state management for GPUI in Rust: cache policies, cooperative cancellation, and updates from the gpui-query project.",
           blogPost: getAllBlogPosts().map((post) => ({
             "@type": "BlogPosting",
             headline: post.frontmatter.title,

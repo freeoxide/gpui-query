@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 title: Observers
-description: Reactive subscriptions with status deduplication for queries, infinite queries, and mutations
+description: "Reactive subscriptions with status deduplication for queries, infinite queries, and mutations"
 ---
 
 Observers bridge gpui-query's resources to GPUI's reactivity. An observer attaches to a resource entity and calls `cx.notify()` to trigger a re-render — but only when the resource's **status** actually changes. This is the primitive that keeps `use_query`, `use_infinite_query`, and `use_mutation` from re-rendering your view on every internal state mutation.

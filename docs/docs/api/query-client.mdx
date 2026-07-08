@@ -1,7 +1,7 @@
 ---
 sidebar_position: 4
 title: QueryClient
-description: API reference for the QueryClient global registry
+description: "QueryClient API reference for gpui-query: the global registry that owns query resources, garbage collection, invalidation, and cache persistence."
 ---
 
 `QueryClient` is a GPUI [`Global`] that holds every [query](/api/queries), infinite query, and [mutation](/api/mutations) entity in your application. You set it up once during app initialization and access it from any GPUI context through `cx.global::<QueryClient>()`.

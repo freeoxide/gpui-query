@@ -7,6 +7,11 @@ const config: Config = {
   tagline: 'Zero-boilerplate async state management for GPUI',
   url: 'https://gpui-query.freeoxide.com',
   baseUrl: '/docs/',
+  // Emit flat files (page.html, served at /page) instead of directory
+  // indexes. Keeps served URLs identical to the canonical/sitemap URLs,
+  // which never use a trailing slash. See web/vite.config.ts for the same
+  // fix on the app side.
+  trailingSlash: false,
   favicon: 'img/favicon.ico',
 
   future: {

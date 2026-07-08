@@ -1,7 +1,7 @@
 ---
 sidebar_position: 4
 title: Persistence
-description: Save and restore cached query data across app restarts with QueryPersister
+description: "Save and restore cached query data across app restarts with QueryPersister"
 ---
 
 Persistence lets your app start with data already in the cache instead of an empty loading state. gpui-query provides a `QueryPersister` trait you implement against any backend — the filesystem, a database, an in-memory store — plus `dehydrate()` / `persist()` / `restore()` to drive snapshots in and out of the `QueryClient`.

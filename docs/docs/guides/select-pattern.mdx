@@ -1,7 +1,7 @@
 ---
 sidebar_position: 6
 title: The Select Pattern
-description: Derive multiple views from one cached query with SelectTransform and use_query_select
+description: "Derive multiple views from one cached query with SelectTransform and use_query_select"
 ---
 
 TanStack Query's `select` option transforms cached data into a derived shape, re-running only when the underlying data changes. gpui-query provides the same pattern through [`SelectTransform`] and the [`use_query_select`] hook. One cached query can feed several derived views without duplicating the cache entry.

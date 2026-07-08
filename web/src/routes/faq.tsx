@@ -105,12 +105,14 @@ export const Route = createFileRoute("/faq")({
       { title: "FAQ - gpui-query" },
       {
         name: "description",
-        content: "Frequently asked questions about gpui-query — async state management for GPUI.",
+        content:
+          "Common gpui-query questions answered: differences from TanStack Query, QueryClient setup, QuerySignal cancellation, persistence, and pagination.",
       },
       { property: "og:title", content: "FAQ - gpui-query" },
       {
         property: "og:description",
-        content: "Frequently asked questions about gpui-query — async state management for GPUI.",
+        content:
+          "Common gpui-query questions answered: differences from TanStack Query, QueryClient setup, QuerySignal cancellation, persistence, and pagination.",
       },
       { property: "og:type", content: "website" },
       { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
@@ -118,7 +120,8 @@ export const Route = createFileRoute("/faq")({
       { name: "twitter:title", content: "FAQ - gpui-query" },
       {
         name: "twitter:description",
-        content: "Frequently asked questions about gpui-query — async state management for GPUI.",
+        content:
+          "Common gpui-query questions answered: differences from TanStack Query, QueryClient setup, QuerySignal cancellation, persistence, and pagination.",
       },
       { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
     ],

@@ -1,7 +1,7 @@
 ---
 sidebar_position: 3
 title: Retry
-description: Configuring automatic retry behavior for failed queries and mutations
+description: "Configure automatic retries in gpui-query: fixed and exponential backoff RetryPolicy options, caps, and how retries interact with cancellation."
 ---
 
 Failed fetches are retried automatically. A `RetryPolicy` says how many times to retry, how long to wait between attempts, and whether to back off exponentially. Queries and mutations share the same policy type but start from different defaults.

@@ -2,6 +2,7 @@ User-agent: *
 Allow: /
 
 Sitemap: https://gpui-query.freeoxide.com/sitemap.xml
+Sitemap: https://gpui-query.freeoxide.com/docs/sitemap.xml
 
 # AI agent files
 # llms.txt: https://gpui-query.freeoxide.com/llms.txt

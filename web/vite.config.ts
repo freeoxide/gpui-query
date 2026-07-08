@@ -57,11 +57,26 @@ const config = defineConfig({
         enabled: true,
         crawlLinks: false,
         autoStaticPathsDiscovery: true,
+        // Emit flat files (faq.html) instead of directory indexes
+        // (faq/index.html). With directory indexes, Cloudflare serves pages
+        // at the trailing-slash URL and 308s the non-slash URL — but every
+        // canonical tag and sitemap entry uses the non-slash form, so Google
+        // saw all canonical URLs as redirects and kept pages out of the
+        // index ("crawled, currently not indexed").
+        autoSubfolderIndex: false,
       },
       // Explicitly enumerate dynamic /blog/$slug pages — TanStack Start's
       // `pages` array is a TOP-LEVEL option (sibling of `prerender`), not a
       // key inside it.
-      pages: blogRoutes().map((path) => ({ path })),
+      pages: [
+        ...blogRoutes().map((path) => ({ path })),
+        // The /v1–/v4 landing previews are noindex; keep them out of the
+        // sitemap so it never advertises pages that refuse indexing.
+        ...["/v1", "/v2", "/v3", "/v4"].map((path) => ({
+          path,
+          sitemap: { exclude: true },
+        })),
+      ],
       sitemap: {
         enabled: true,
         host: "https://gpui-query.freeoxide.com",
