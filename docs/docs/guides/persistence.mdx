@@ -122,7 +122,7 @@ The `QueryClient` partitions resources by `TypeId` of `(T, E)`. Once erased into
 - **As part of GC** — you can call `persist()` from the same place GC runs, so eviction and persistence stay in step. Be careful not to persist on every GC pass if your backend write is expensive.
 
 :::tip
-Sanitize errors before they reach persistence. A `QueryError` built from a raw server response can contain tokens or connection strings; once it is on a resource it can flow into a dehydrate snapshot. See [Error handling — Sanitizing errors](/guides/error-handling#sanitizing-errors).
+Sanitize errors before they reach persistence. A `QueryError` built from a raw server response can contain tokens or connection strings; once it is on a resource it can flow into a dehydrate snapshot. See [Error handling — Error sanitization](/guides/error-handling#error-sanitization).
 :::
 
 ## Next steps

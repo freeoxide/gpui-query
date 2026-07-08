@@ -1,4 +1,6 @@
-/** Floating switcher for comparing landing page previews. Remove once a winner ships. */
+import { LANDING_PREVIEWS_ENABLED } from "#/lib/flags";
+
+/** Floating switcher for comparing landing page previews. Renders nothing while previews are disabled. */
 const VERSIONS = [
   { id: "v1", label: "V1 signal path", href: "/v1" },
   { id: "v2", label: "V2 control room", href: "/v2" },
@@ -7,6 +9,7 @@ const VERSIONS = [
 ] as const;
 
 export function VersionSwitcher({ current }: { current: "v1" | "v2" | "v3" | "v4" }) {
+  if (!LANDING_PREVIEWS_ENABLED) return null;
   return (
     <nav
       aria-label="Landing page previews"

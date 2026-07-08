@@ -1,4 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
+import { LANDING_PREVIEWS_ENABLED } from "#/lib/flags";
 import { LandingV4 } from "#/components/landing/v4";
 import { softwareSourceCode } from "#/lib/seo";
 
@@ -9,6 +10,9 @@ const url = "https://gpui-query.freeoxide.com/v4";
 const image = "https://gpui-query.freeoxide.com/og-image.png";
 
 export const Route = createFileRoute("/v4")({
+  loader: () => {
+    if (!LANDING_PREVIEWS_ENABLED) throw notFound();
+  },
   head: () => ({
     meta: [
       { title },

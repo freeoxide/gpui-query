@@ -1,13 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  HeroSection,
-  FeatureShowcase,
-  QuickStart,
-  ComparisonSection,
-  ArchitectureSection,
-  CtaSection,
-} from "#/components/landing";
-import { useScrollReveal } from "#/hooks/use-scroll-reveal";
+import { LandingV4 } from "#/components/landing/v4";
 import { softwareSourceCode } from "#/lib/seo";
 
 export const Route = createFileRoute("/")({
@@ -50,19 +42,7 @@ export const Route = createFileRoute("/")({
       },
     ],
   }),
-  component: Home,
+  // V4 won the landing preview bake-off and now renders as the homepage.
+  // The /v1–/v4 preview routes are gated behind LANDING_PREVIEWS_ENABLED.
+  component: LandingV4,
 });
-
-function Home() {
-  const revealRef = useScrollReveal();
-  return (
-    <div ref={revealRef} className="flex flex-col">
-      <HeroSection />
-      <FeatureShowcase />
-      <QuickStart />
-      <ComparisonSection />
-      <ArchitectureSection />
-      <CtaSection />
-    </div>
-  );
-}

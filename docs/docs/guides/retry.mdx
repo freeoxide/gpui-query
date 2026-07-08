@@ -99,7 +99,7 @@ This is the reason retry can be aggressive by default without thrashing the UI: 
 
 ## Cancellation during retry
 
-A retry in progress is cancelled if a newer request supersedes it (`LatestWins`) or the resource is reset/unmounted. The signal is checked after the retry delay, so a cancelled fetch does not waste an attempt. See [Error handling — Cancellation](/guides/error-handling#cancellation) for how cancelled requests surface (`QueryStatus::Cancelled`, `QueryErrorKind::Cancelled`).
+A retry in progress is cancelled if a newer request supersedes it (`LatestWins`) or the resource is reset/unmounted. The signal is checked after the retry delay, so a cancelled fetch does not waste an attempt. See [Error handling — Error states in QueryStatus](/guides/error-handling#error-states-in-querystatus) for how cancelled requests surface (`QueryStatus::Cancelled`, `QueryErrorKind::Cancelled`).
 
 ## When not to retry
 

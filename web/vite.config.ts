@@ -12,6 +12,7 @@ import remarkGfm from "remark-gfm";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkMdxFrontmatter from "remark-mdx-frontmatter";
 import { readdirSync } from "node:fs";
+import { LANDING_PREVIEWS_ENABLED } from "./src/lib/flags";
 
 /**
  * Dynamic /blog/$slug routes are not statically discoverable by the file-based
@@ -64,6 +65,9 @@ const config = defineConfig({
         // saw all canonical URLs as redirects and kept pages out of the
         // index ("crawled, currently not indexed").
         autoSubfolderIndex: false,
+        // While the landing previews are disabled their routes throw
+        // notFound(), so skip them at prerender time too.
+        filter: (page) => LANDING_PREVIEWS_ENABLED || !/^\/v[1-4]$/.test(page.path),
       },
       // Explicitly enumerate dynamic /blog/$slug pages — TanStack Start's
       // `pages` array is a TOP-LEVEL option (sibling of `prerender`), not a
