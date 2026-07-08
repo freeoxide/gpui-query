@@ -1,6 +1,5 @@
 import { type ComponentType } from "react";
 
-import IntroducingGpuiQueryPost from "../content/blog/introducing-gpui-query";
 import WhyGpuiQueryPost from "../content/blog/why-gpui-query";
 import CooperativeCancellationPost from "../content/blog/cooperative-cancellation";
 import CachePoliciesExplainedPost from "../content/blog/cache-policies-explained";
@@ -32,18 +31,6 @@ export interface BlogPost {
  * problem. Frontmatter lives here alongside the component import.
  */
 const POSTS: BlogPost[] = [
-  {
-    slug: "introducing-gpui-query",
-    Content: IntroducingGpuiQueryPost,
-    frontmatter: {
-      title: "Introducing gpui-query",
-      description:
-        "Zero-boilerplate async state management for GPUI — inspired by TanStack Query, built for Rust.",
-      date: "2026-03-10",
-      author: "hmziqrs",
-      tags: ["gpui", "rust", "async", "introduction"],
-    },
-  },
   {
     slug: "why-gpui-query",
     Content: WhyGpuiQueryPost,

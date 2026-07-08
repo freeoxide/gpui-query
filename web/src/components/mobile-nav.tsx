@@ -6,7 +6,6 @@ const navLinks = [
   { href: "/docs/", label: "Docs" },
   { href: "/blog", label: "Blog" },
   { href: "/faq", label: "FAQ" },
-  { href: "/about", label: "About" },
 ];
 
 interface MobileNavProps {

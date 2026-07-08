@@ -77,10 +77,10 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  to="/about"
+                  to="/changelog"
                   className="inline-block text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
                 >
-                  About
+                  Changelog
                 </Link>
               </li>
             </ul>
@@ -93,7 +93,30 @@ export function Footer() {
             </h3>
             <ul className="space-y-2.5">
               <li>
-                <span className="text-sm text-muted-foreground">MIT License</span>
+                <Link
+                  to="/privacy"
+                  className="inline-block text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
+                >
+                  Privacy Policy
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/terms"
+                  className="inline-block text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
+                >
+                  Terms of Service
+                </Link>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/freeoxide/gpui-query/blob/master/LICENSE"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-sm text-muted-foreground transition-colors duration-200 hover:text-primary"
+                >
+                  MIT License
+                </a>
               </li>
             </ul>
           </div>
