@@ -74,7 +74,7 @@ Long-running scans and paginated fetches should also poll `is_cancelled()` at th
 
 ## How LatestWins uses it
 
-`RequestPolicy::LatestWins` is built on this primitive. When a new request arrives for a key while an older one is still in flight, the older request's signal is cancelled and the client waits only on the newest result. That closes the classic query-cache race where stale data clobbers fresh data, and it does so without the framework aborting futures it doesn't own. (For why the library is structured around small primitives like this, see [Why gpui-query](/blog/why-gpui-query).)
+`RequestPolicy::LatestWins` is built on this primitive. When a new request arrives for a key while an older one is still in flight, the older request's signal is cancelled and the client waits only on the newest result. That closes the classic query-cache race where stale data clobbers fresh data, and it does so without the framework aborting futures it doesn't own.
 
 ## Takeaways
 

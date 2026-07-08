@@ -21,11 +21,11 @@ test-feature feature:
 
 # Build the Docusaurus docs site
 docs-build:
-    cd website && npm run build
+    cd docs && npm run build
 
 # Start the docs dev server
 docs-dev:
-    cd website && npm run start
+    cd docs && npm run start
 
 # ---- Website (TanStack Start) ----
 

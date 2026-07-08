@@ -5,7 +5,7 @@ on:
     branches: [master]
     paths:
       - 'web/**'
-      - 'website/**'
+      - 'docs/**'
       - 'shared/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
@@ -34,8 +34,8 @@ jobs:
       - name: Install web dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install website dependencies
-        working-directory: website
+      - name: Install docs dependencies
+        working-directory: docs
         run: npm ci
 
       - name: Build

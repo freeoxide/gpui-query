@@ -3,7 +3,7 @@
  * Generate clean .md alternatives for Docusaurus documentation pages.
  * AI crawlers can fetch these directly for plain markdown content.
  *
- * Source: Docusaurus docs at ../website/docs (all .md and .mdx files).
+ * Source: Docusaurus docs at ../docs/docs (all .md and .mdx files).
  * Previously read src/content/, which no longer exists.
  *
  * Output: {output}/docs/{route}.md
@@ -19,7 +19,7 @@ const outputDir = process.argv.includes("--output")
   : ".output/public";
 
 // Scripts run from web/, so the Docusaurus docs live one level up.
-const docsRoot = resolve("..", "website", "docs");
+const docsRoot = resolve("..", "docs", "docs");
 
 /**
  * Recursively collect every .md and .mdx file under `dir`.

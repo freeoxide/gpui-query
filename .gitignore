@@ -9,7 +9,7 @@ dist/
 .output/
 .tanstack/
 
-# Generated docs (built from website/ by build-docs.mjs)
+# Generated docs (built from docs/ by build-docs.mjs)
 web/public/docs/
 
 # OS

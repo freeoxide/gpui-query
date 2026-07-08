@@ -3,7 +3,7 @@
  * Generate llms.txt and llms-full.txt for AI agent optimization.
  * Follows the llmstxt.org specification.
  *
- * Source: Docusaurus docs at ../website/docs (all .md and .mdx files).
+ * Source: Docusaurus docs at ../docs/docs (all .md and .mdx files).
  * Previously read src/content/, which no longer exists.
  *
  * Usage: node scripts/generate-llms-txt.mjs [--output .output/public]
@@ -17,7 +17,7 @@ const outputDir = process.argv.includes("--output")
   : ".output/public";
 
 // Scripts run from web/, so the Docusaurus docs live one level up.
-const docsRoot = resolve("..", "website", "docs");
+const docsRoot = resolve("..", "docs", "docs");
 const siteUrl = "https://gpui-query.freeoxide.com";
 
 /**
