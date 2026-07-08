@@ -96,11 +96,11 @@ fn max_pages_50_allows_50_pages_and_evicts_on_51st() {
     ];
 
     // Load 50 pages — all with has_more=true so has_next_page stays true
-    for i in 0..50 {
+    for (i, label) in P_LABELS.iter().enumerate().take(50) {
         let id = r.begin_fetch_next(&mut seq, (i * 100) as u64).unwrap();
         r.complete_page_success(
             id,
-            vec![P_LABELS[i]],
+            vec![*label],
             true, // always report more pages available
             true,
             ((i + 1) * 100) as u64,

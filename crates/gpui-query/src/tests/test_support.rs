@@ -118,6 +118,7 @@ pub fn test_sequencer() -> RequestSequencer {
 /// Uses `CachePolicy::NoCache` so every `begin_request` returns `Started`
 /// (never `CacheHit`), giving deterministic control over each fetch lifecycle
 /// step without worrying about TTL freshness windows.
+#[expect(dead_code, reason = "kept as a shared lifecycle-test helper")]
 pub fn resource_with_sequencer(
     key: impl Into<QueryKey>,
 ) -> (QueryResource<&'static str>, RequestSequencer) {

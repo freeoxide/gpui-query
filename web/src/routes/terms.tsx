@@ -47,8 +47,8 @@ function TermsPage() {
             MIT License
           </a>
           . That license — not these terms — governs your use of the source code and the published
-          crate. You can use it in personal and commercial projects, modify it, and redistribute
-          it, subject to the license's conditions.
+          crate. You can use it in personal and commercial projects, modify it, and redistribute it,
+          subject to the license's conditions.
         </p>
 
         <h2>Site content</h2>
@@ -62,30 +62,30 @@ function TermsPage() {
         <p>
           The site and its content are provided as-is. We work to keep the documentation accurate,
           but APIs change between releases and pages can lag behind the code. Nothing on this site
-          is a guarantee that the library is fit for a particular purpose, and we are not liable
-          for damages arising from your use of the site or the library — the same disclaimer the
-          MIT License makes for the code.
+          is a guarantee that the library is fit for a particular purpose, and we are not liable for
+          damages arising from your use of the site or the library — the same disclaimer the MIT
+          License makes for the code.
         </p>
 
         <h2>Acceptable use</h2>
         <p>
-          Don't attempt to disrupt the site, scrape it at a rate that degrades it for others, or
-          use it to distribute malware or spam. That's it.
+          Don't attempt to disrupt the site, scrape it at a rate that degrades it for others, or use
+          it to distribute malware or spam. That's it.
         </p>
 
         <h2>Third-party services and links</h2>
         <p>
-          The site links to third-party sites (GitHub, crates.io, docs.rs, and others) and relies
-          on the services described in the <Link to="/privacy">Privacy Policy</Link>, including
+          The site links to third-party sites (GitHub, crates.io, docs.rs, and others) and relies on
+          the services described in the <Link to="/privacy">Privacy Policy</Link>, including
           Firebase Analytics, Google Fonts, and Cloudflare. We don't control those services and
           aren't responsible for their content or conduct.
         </p>
 
         <h2>Changes</h2>
         <p>
-          We may update these terms as the site evolves. Material changes will be reflected on
-          this page with a new date at the top. Continuing to use the site after a change means
-          you accept the updated terms.
+          We may update these terms as the site evolves. Material changes will be reflected on this
+          page with a new date at the top. Continuing to use the site after a change means you
+          accept the updated terms.
         </p>
 
         <h2>Contact</h2>

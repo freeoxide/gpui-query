@@ -1,12 +1,12 @@
 /** Floating switcher for comparing landing page previews. Remove once a winner ships. */
-export function VersionSwitcher({ current }: { current: "v1" | "v2" | "v3" | "v4" }) {
-  const versions = [
-    { id: "v1", label: "V1 signal path", href: "/v1" },
-    { id: "v2", label: "V2 control room", href: "/v2" },
-    { id: "v3", label: "V3 blueprint", href: "/v3" },
-    { id: "v4", label: "V4 combined", href: "/v4" },
-  ] as const;
+const VERSIONS = [
+  { id: "v1", label: "V1 signal path", href: "/v1" },
+  { id: "v2", label: "V2 control room", href: "/v2" },
+  { id: "v3", label: "V3 blueprint", href: "/v3" },
+  { id: "v4", label: "V4 combined", href: "/v4" },
+] as const;
 
+export function VersionSwitcher({ current }: { current: "v1" | "v2" | "v3" | "v4" }) {
   return (
     <nav
       aria-label="Landing page previews"
@@ -15,7 +15,7 @@ export function VersionSwitcher({ current }: { current: "v1" | "v2" | "v3" | "v4
       <span className="border-r border-border px-3 py-2 tracking-[0.2em] uppercase text-muted-foreground">
         Preview
       </span>
-      {versions.map((v) => (
+      {VERSIONS.map((v) => (
         <a
           key={v.id}
           href={v.href}

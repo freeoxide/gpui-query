@@ -56,9 +56,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
                     if entry.loading {
                         return None;
                     }
-                    if entry.entity.upgrade().is_none() {
-                        return None;
-                    }
+                    entry.entity.upgrade()?;
                     Some((key, entry.last_updated_ms.unwrap_or(0)))
                 })
                 .min_by_key(|&(_, age)| age);

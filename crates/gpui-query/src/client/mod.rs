@@ -216,7 +216,7 @@ impl QueryClient {
             self.last_gc_ms = now_ms;
             return;
         }
-        if now_ms.saturating_sub(self.last_gc_ms) < MIN_GC_TIME_MS as u64 {
+        if now_ms.saturating_sub(self.last_gc_ms) < MIN_GC_TIME_MS {
             return;
         }
         self.last_gc_ms = now_ms;
@@ -327,11 +327,11 @@ impl QueryClient {
     /// Downcast an erased query bucket to `&mut QueryBucket<T, E>`, recreating
     /// it in place on the (impossible) type mismatch.
     ///
-    /// **M4**: this replaces the 5x duplicated `TypeId` pre-check + `eprintln`
-    /// + fresh-bucket + `downcast_mut` match block. `Any::downcast_mut` checks
+    /// **M4**: this replaces the 5x duplicated `TypeId` pre-check, `eprintln`,
+    /// fresh-bucket, and `downcast_mut` match block. `Any::downcast_mut` checks
     /// `TypeId` internally, so the explicit pre-check was redundant; we now
     /// downcast once and, only on the (impossible-after-construction) `None`,
-    /// log + swap in a fresh typed bucket and downcast *that* (which always
+    /// log, swap in a fresh typed bucket, and downcast *that* (which always
     /// succeeds). No production panic.
     fn bucket_or_recreate<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
         bucket: &mut Box<dyn ErasedBucket>,

@@ -15,9 +15,10 @@ use super::strategies::*;
 // default `cargo test` run cheap. The heavyweight long-key / very-long-string
 // invariants are also covered by the deterministic_tests module.
 fn test_config() -> ProptestConfig {
-    let mut config = ProptestConfig::default();
-    config.cases = 64;
-    config
+    ProptestConfig {
+        cases: 64,
+        ..ProptestConfig::default()
+    }
 }
 
 // ── 1. Equality ─────────────────────────────────────────────────────────

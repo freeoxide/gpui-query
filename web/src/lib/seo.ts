@@ -114,7 +114,7 @@ export function blogPost(data: BlogPostData) {
     description: data.description,
     ...(data.author && { author: { "@type": "Person", name: data.author } }),
     ...(data.datePublished && { datePublished: data.datePublished }),
-    ...(data.url && { url: data.url }),
+    ...(data.url && { url: data.url, mainEntityOfPage: data.url }),
     ...(data.image && { image: data.image }),
   };
 }

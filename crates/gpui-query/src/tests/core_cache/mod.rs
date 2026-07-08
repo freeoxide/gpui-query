@@ -37,9 +37,9 @@ pub(crate) const STALE_MS: u64 = 2_000;
 pub(crate) const SWR_TOTAL_MS: u64 = TTL_MS + STALE_MS; // 3_000
 
 // Derived boundary offsets from STORED_AT_MS:
-pub(crate) const AT_TTL_BOUNDARY: u64 = STORED_AT_MS + TTL_MS as u64; // 2_000 — exactly at TTL edge
+pub(crate) const AT_TTL_BOUNDARY: u64 = STORED_AT_MS + TTL_MS; // 2_000 — exactly at TTL edge
 pub(crate) const ONE_MS_PAST_TTL: u64 = AT_TTL_BOUNDARY + 1; // 2_001 — just past TTL
-pub(crate) const AT_SWR_BOUNDARY: u64 = STORED_AT_MS + SWR_TOTAL_MS as u64; // 4_000 — exactly at total edge
+pub(crate) const AT_SWR_BOUNDARY: u64 = STORED_AT_MS + SWR_TOTAL_MS; // 4_000 — exactly at total edge
 pub(crate) const ONE_MS_PAST_SWR: u64 = AT_SWR_BOUNDARY + 1; // 4_001 — fully expired
 
 // ── Helpers ──────────────────────────────────────────────────────────────

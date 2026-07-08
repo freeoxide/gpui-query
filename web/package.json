@@ -11,8 +11,7 @@
     "build": "node scripts/build-docs.mjs && vp build && npx pagefind --site dist/client && node scripts/generate-llms-txt.mjs --output dist/client && node scripts/generate-md-alt.mjs --output dist/client",
     "preview": "vp preview",
     "test": "vp test run",
-    "deploy": "bun run build && npx wrangler pages deploy dist/client --project-name=gpui-query",
-    "prepare": "vp config"
+    "deploy": "bun run build && npx wrangler pages deploy dist/client --project-name=gpui-query"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

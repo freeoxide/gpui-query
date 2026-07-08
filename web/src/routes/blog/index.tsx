@@ -27,6 +27,26 @@ export const Route = createFileRoute("/blog/")({
       { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/blog" }],
+    scripts: [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "Blog",
+          name: "gpui-query Blog",
+          url: "https://gpui-query.freeoxide.com/blog",
+          description: "Announcements, deep dives, and updates about gpui-query.",
+          blogPost: getAllBlogPosts().map((post) => ({
+            "@type": "BlogPosting",
+            headline: post.frontmatter.title,
+            description: post.frontmatter.description,
+            datePublished: post.frontmatter.date,
+            author: { "@type": "Person", name: post.frontmatter.author },
+            url: `https://gpui-query.freeoxide.com/blog/${post.slug}`,
+          })),
+        }),
+      },
+    ],
   }),
   component: BlogPage,
 });

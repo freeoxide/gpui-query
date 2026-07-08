@@ -1,9 +1,5 @@
 import { type ComponentType } from "react";
 
-import WhyGpuiQueryPost from "../content/blog/why-gpui-query";
-import CooperativeCancellationPost from "../content/blog/cooperative-cancellation";
-import CachePoliciesExplainedPost from "../content/blog/cache-policies-explained";
-
 /* ─── Frontmatter schema ────────────────────────────────────────────── */
 
 export interface BlogFrontmatter {
@@ -23,51 +19,44 @@ export interface BlogPost {
 
 /* ─── Post registry ─────────────────────────────────────────────────── */
 
+interface BlogModule {
+  default: ComponentType;
+  frontmatter?: Partial<BlogFrontmatter>;
+}
+
 /**
- * Static post registry. Blog bodies are authored as TSX components (see
- * `src/content/blog/*.tsx`) so they prerender cleanly under TanStack Start's
- * SSR environment. MDX + `import.meta.glob` did not resolve module exports
- * during prerender, leaving posts empty — TSX components do not have that
- * problem. Frontmatter lives here alongside the component import.
+ * Posts are MDX documents in `src/content/blog/*.mdx`. YAML frontmatter is
+ * exposed as each module's `frontmatter` export by remark-mdx-frontmatter
+ * (see vite.config.ts). The glob MUST stay `eager` — an eager glob compiles
+ * to static imports, which resolve during TanStack Start's prerender exactly
+ * like hand-written imports. A lazy glob leaves posts empty at prerender
+ * time, which is the failure that originally pushed the blog to TSX bodies.
  */
-const POSTS: BlogPost[] = [
-  {
-    slug: "why-gpui-query",
-    Content: WhyGpuiQueryPost,
+const modules = import.meta.glob<BlogModule>("../content/blog/*.mdx", { eager: true });
+
+const POSTS: BlogPost[] = Object.entries(modules).map(([path, mod]) => {
+  const slug = path
+    .split("/")
+    .pop()!
+    .replace(/\.mdx$/, "");
+  const fm = mod.frontmatter;
+  if (!fm?.title || !fm.description || !fm.date || !fm.author) {
+    throw new Error(
+      `Blog post "${slug}" is missing required frontmatter (title, description, date, author)`,
+    );
+  }
+  return {
+    slug,
+    Content: mod.default,
     frontmatter: {
-      title: "Why gpui-query",
-      description:
-        "Bringing TanStack Query's battle-tested async state patterns to GPUI and Rust — without the boilerplate.",
-      date: "2026-03-12",
-      author: "hmziqrs",
-      tags: ["gpui", "rust", "async", "introduction"],
+      title: fm.title,
+      description: fm.description,
+      date: fm.date,
+      author: fm.author,
+      tags: fm.tags,
     },
-  },
-  {
-    slug: "cooperative-cancellation",
-    Content: CooperativeCancellationPost,
-    frontmatter: {
-      title: "Cooperative Cancellation in gpui-query",
-      description:
-        "How QuerySignal uses Arc<AtomicBool> to cancel in-flight queries cleanly when components unmount.",
-      date: "2026-04-08",
-      author: "hmziqrs",
-      tags: ["gpui", "rust", "concurrency", "cancellation"],
-    },
-  },
-  {
-    slug: "cache-policies-explained",
-    Content: CachePoliciesExplainedPost,
-    frontmatter: {
-      title: "Cache Policies, Explained",
-      description:
-        "NoCache vs Ttl vs StaleWhileRevalidate — when each CachePolicy variant is the right choice, and how they interact with retries and observers.",
-      date: "2026-05-02",
-      author: "hmziqrs",
-      tags: ["gpui", "rust", "caching", "performance"],
-    },
-  },
-];
+  };
+});
 
 /** All blog posts, sorted by date descending. */
 export function getAllBlogPosts(): BlogPost[] {

@@ -2,7 +2,7 @@ import { ArrowRightIcon, GithubLogoIcon } from "@phosphor-icons/react";
 import { useCallback, useRef, useState } from "react";
 import { Button } from "#/components/ui/button";
 import { CommandLine } from "./decor";
-import { tintRust } from "./rust-code";
+import { tintRust } from "./rust-tint";
 import { VersionSwitcher } from "./version-switcher";
 
 /* ══ V3 · BLUEPRINT ═════════════════════════════════════════════════

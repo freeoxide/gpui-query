@@ -120,10 +120,7 @@ impl<B: HttpBackend> HttpCache<B> {
             && meta.stored_at + meta.fresh_for > SystemTime::now()
         {
             let body = {
-                let guard = self
-                    .bodies
-                    .lock()
-                    .map_err(|_| HttpError::Poisoned)?;
+                let guard = self.bodies.lock().map_err(|_| HttpError::Poisoned)?;
                 guard.get(url).cloned()
             };
             if let Some(body) = body {
@@ -148,10 +145,7 @@ impl<B: HttpBackend> HttpCache<B> {
         // (e) 304 — revalidation succeeded: serve the cached body.
         if resp.status == 304 {
             let body = {
-                let guard = self
-                    .bodies
-                    .lock()
-                    .map_err(|_| HttpError::Poisoned)?;
+                let guard = self.bodies.lock().map_err(|_| HttpError::Poisoned)?;
                 guard.get(url).cloned()
             };
             let Some(body) = body else {
@@ -207,17 +201,11 @@ impl<B: HttpBackend> HttpCache<B> {
 
         // Store under both locks, dropping each guard before yielding.
         {
-            let mut bodies = self
-                .bodies
-                .lock()
-                .map_err(|_| HttpError::Poisoned)?;
+            let mut bodies = self.bodies.lock().map_err(|_| HttpError::Poisoned)?;
             bodies.insert(url.to_string(), body.clone());
         }
         {
-            let mut meta_guard = self
-                .meta
-                .lock()
-                .map_err(|_| HttpError::Poisoned)?;
+            let mut meta_guard = self.meta.lock().map_err(|_| HttpError::Poisoned)?;
             meta_guard.insert(url.to_string(), meta.clone());
         }
 

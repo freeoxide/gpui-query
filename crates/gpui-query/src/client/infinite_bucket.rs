@@ -114,9 +114,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
     /// Evict the oldest (least-recently-updated) entry to make room (#1 fix).
     ///
     /// **M2 (O(n)→O(1) entity reads)**: scans entry MIRRORS (no `entity.read`)
-    /// + `WeakEntity::upgrade` liveness, then one `entity.read` on the winner
-    /// to confirm `!is_loading()` (guards #109 against a stale mirror) and
-    /// read the authoritative timestamp. Mirrors
+    /// plus `WeakEntity::upgrade` liveness, then one `entity.read` on the
+    /// winner to confirm `!is_loading()` (guards #109 against a stale mirror)
+    /// and read the authoritative timestamp. Mirrors
     /// [`QueryBucket::evict_oldest`](super::QueryBucket::evict_oldest).
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
@@ -127,9 +127,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
                     if entry.loading {
                         return None;
                     }
-                    if entry.entity.upgrade().is_none() {
-                        return None;
-                    }
+                    entry.entity.upgrade()?;
                     Some((key, entry.last_updated_ms.unwrap_or(0)))
                 })
                 .min_by_key(|&(_, age)| age);

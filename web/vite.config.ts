@@ -17,7 +17,7 @@ import { readdirSync } from "node:fs";
  * Dynamic /blog/$slug routes are not statically discoverable by the file-based
  * router, and crawlLinks must stay false (crawling would follow the navbar
  * /docs/ link into the static Docusaurus content, which 404s). So enumerate
- * the blog post paths explicitly from the TSX post filenames, resolved
+ * the blog post paths explicitly from the MDX post filenames, resolved
  * relative to this config file (not process.cwd()) for robustness. The list
  * feeds the top-level `pages` option below.
  */
@@ -25,8 +25,8 @@ function blogRoutes(): string[] {
   try {
     const dir = new URL("./src/content/blog", import.meta.url);
     return readdirSync(dir)
-      .filter((f) => f.endsWith(".tsx"))
-      .map((f) => `/blog/${f.replace(/\.tsx$/, "")}`);
+      .filter((f) => f.endsWith(".mdx"))
+      .map((f) => `/blog/${f.replace(/\.mdx$/, "")}`);
   } catch {
     return [];
   }
@@ -42,9 +42,6 @@ function blogRoutes(): string[] {
 const isVitest = !!process.env.VITEST;
 
 const config = defineConfig({
-  staged: {
-    "*": "vp check --fix",
-  },
   lint: { options: { typeAware: true, typeCheck: true } },
   resolve: { tsconfigPaths: true },
   plugins: [
