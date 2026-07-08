@@ -1,7 +1,10 @@
 import { ArrowRightIcon, GithubLogoIcon } from "@phosphor-icons/react";
 import { useCallback, useRef } from "react";
 import { Button } from "#/components/ui/button";
+import { ArchitectureSection } from "./architecture-section";
+import { ComparisonSection } from "./comparison-section";
 import { CommandLine } from "./decor";
+import { FeatureShowcase } from "./feature-showcase";
 import { HookTabs, SchematicPanel } from "./v1";
 import { BeforeAfter, CacheDeck } from "./v2";
 import { AnnotatedFigure } from "./v3";
@@ -136,10 +139,13 @@ export function LandingV4() {
   return (
     <div className="flex flex-col">
       <HeroV4 />
+      <FeatureShowcase />
       <QueryClientLiveSection />
       <HookTabs />
       <BeforeAfter />
+      <ComparisonSection />
       <AnnotatedFigure />
+      <ArchitectureSection />
       <CtaV4 />
       <VersionSwitcher current="v4" />
     </div>
