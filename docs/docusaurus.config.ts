@@ -13,6 +13,7 @@ const config: Config = {
   // fix on the app side.
   trailingSlash: false,
   favicon: 'img/favicon.ico',
+  clientModules: ['./src/firebaseAnalytics.ts'],
 
   future: {
     v4: true,

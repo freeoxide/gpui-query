@@ -5,6 +5,7 @@ import { Navbar } from "#/components/navbar";
 import { Footer } from "#/components/footer";
 import { HouseIcon, BookOpenIcon } from "@phosphor-icons/react";
 import { Button } from "#/components/ui/button";
+import { FirebaseAnalytics } from "#/components/firebase-analytics";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -61,6 +62,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           </main>
           <Footer />
         </div>
+        <FirebaseAnalytics />
         {import.meta.env.DEV && <DevTools />}
         <Scripts />
       </body>
