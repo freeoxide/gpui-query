@@ -11,7 +11,7 @@ import rehypePrettyCode from "rehype-pretty-code";
 import remarkGfm from "remark-gfm";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkMdxFrontmatter from "remark-mdx-frontmatter";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { LANDING_PREVIEWS_ENABLED } from "./src/lib/flags";
 
 /**
@@ -20,14 +20,20 @@ import { LANDING_PREVIEWS_ENABLED } from "./src/lib/flags";
  * /docs/ link into the static Docusaurus content, which 404s). So enumerate
  * the blog post paths explicitly from the MDX post filenames, resolved
  * relative to this config file (not process.cwd()) for robustness. The list
- * feeds the top-level `pages` option below.
+ * feeds the top-level `pages` option below. Each post's frontmatter date
+ * becomes its sitemap lastmod, so entries don't all claim the build date.
  */
-function blogRoutes(): string[] {
+function blogPages(): Array<{ path: string; sitemap?: { lastmod: string } }> {
   try {
     const dir = new URL("./src/content/blog", import.meta.url);
     return readdirSync(dir)
       .filter((f) => f.endsWith(".mdx"))
-      .map((f) => `/blog/${f.replace(/\.mdx$/, "")}`);
+      .map((f) => {
+        const path = `/blog/${f.replace(/\.mdx$/, "")}`;
+        const source = readFileSync(new URL(`./src/content/blog/${f}`, import.meta.url), "utf8");
+        const date = source.match(/^date:\s*["']?(\d{4}-\d{2}-\d{2})/m)?.[1];
+        return date ? { path, sitemap: { lastmod: date } } : { path };
+      });
   } catch {
     return [];
   }
@@ -66,14 +72,25 @@ const config = defineConfig({
         // index ("crawled, currently not indexed").
         autoSubfolderIndex: false,
         // While the landing previews are disabled their routes throw
-        // notFound(), so skip them at prerender time too.
-        filter: (page) => LANDING_PREVIEWS_ENABLED || !/^\/v[1-4]$/.test(page.path),
+        // notFound(), so skip them at prerender time too. Also drop the
+        // auto-discovered "/blog/" index page: it would emit blog/index.html
+        // (a directory index served at the trailing-slash URL), while the
+        // canonical/sitemap scheme is non-slash. The explicit "/blog" entry
+        // in `pages` below replaces it and emits a flat blog.html.
+        filter: (page) =>
+          (LANDING_PREVIEWS_ENABLED || !/^\/v[1-4]$/.test(page.path)) && page.path !== "/blog/",
       },
       // Explicitly enumerate dynamic /blog/$slug pages — TanStack Start's
       // `pages` array is a TOP-LEVEL option (sibling of `prerender`), not a
       // key inside it.
       pages: [
-        ...blogRoutes().map((path) => ({ path })),
+        { path: "/blog" },
+        // The auto-discovered "/blog/" (trailing-slash) variant is dropped
+        // from prerendering by the filter above, but sitemap generation still
+        // picks it up from route discovery — exclude it there too so only the
+        // non-slash /blog is advertised.
+        { path: "/blog/", sitemap: { exclude: true } },
+        ...blogPages(),
         // The /v1–/v4 landing previews are noindex; keep them out of the
         // sitemap so it never advertises pages that refuse indexing.
         ...["/v1", "/v2", "/v3", "/v4"].map((path) => ({

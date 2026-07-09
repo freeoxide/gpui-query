@@ -51,7 +51,7 @@ const categories: FaqCategory[] = [
       {
         question: "Why does use_query return a tuple instead of an object?",
         answer:
-          "Following Rust convention, use_query returns a tuple (data, status) for ergonomic destructuring. The status enum provides complete lifecycle information.",
+          "use_query returns (Entity<QueryResource<T, E>>, Subscription). Read data and status from the resource entity during render, and store the Subscription to keep the observation alive: dropping it stops updates, which is GPUI's standard lifecycle convention.",
       },
       {
         question: "What happens if my component unmounts during a fetch?",
@@ -179,9 +179,13 @@ function FAQPage() {
                   </h2>
                 </div>
 
-                {/* Accordion for this category */}
+                {/* Accordion for this category. keepMounted keeps closed
+                    panels in the DOM so the answers are crawlable — Google's
+                    FAQPage structured-data policy requires the marked-up
+                    content to be present on the page, and the prerendered
+                    HTML otherwise contains only the questions. */}
                 <div className="mt-6">
-                  <Accordion multiple>
+                  <Accordion multiple keepMounted>
                     {category.items.map((item, idx) => (
                       <AccordionItem
                         key={idx}

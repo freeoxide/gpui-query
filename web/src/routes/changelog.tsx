@@ -1,9 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge";
+import { changelogPage } from "#/lib/seo";
 
 /* ─── Changelog Data ────────────────────────────────────────────── */
+/*
+ * Mirrors the crate's CHANGELOG.md at the repo root. That file is the source
+ * of truth — when a release lands, copy its entry here. Never invent
+ * versions, dates, or features that aren't in CHANGELOG.md.
+ */
 
-type Category = "Added" | "Changed" | "Fixed";
+type Category = "Added" | "Changed" | "Fixed" | "Removed";
 
 interface ChangelogSubItem {
   category: Category;
@@ -27,49 +33,120 @@ const categoryConfig: Record<Category, { bullet: string; color: string }> = {
   Added: { bullet: "+", color: "text-emerald-600 dark:text-emerald-400" },
   Changed: { bullet: "~", color: "text-amber-600 dark:text-amber-400" },
   Fixed: { bullet: "!", color: "text-sky-600 dark:text-sky-400" },
+  Removed: { bullet: "-", color: "text-rose-600 dark:text-rose-400" },
 };
 
 const changelogEntries: ChangelogEntry[] = [
   {
-    version: "v0.3.0",
-    date: "2026-05-15",
-    description: "Added infinite queries, persistence API, and expanded diagnostics.",
+    version: "v0.1.4",
+    date: "2026-06-17",
+    description: "Crate metadata and README improvements on crates.io.",
     items: [
-      { category: "Added", text: "Infinite query support with bidirectional fetching" },
-      { category: "Added", text: "Persistence API with custom serialization backends" },
-      { category: "Added", text: "Expanded diagnostics and devtools integration" },
-      { category: "Changed", text: "Improved cache garbage collection heuristics" },
-      { category: "Fixed", text: "Race condition when multiple observers share a query key" },
-    ],
-    links: [
-      { label: "Infinite Queries", slug: "/docs/api/infinite-queries/" },
-      { label: "Persistence", slug: "/docs/guides/persistence/" },
+      {
+        category: "Added",
+        text: "Author metadata and an Author section in both crate READMEs",
+      },
+      {
+        category: "Added",
+        text: "readme field on gpui-query-legacy so its README renders on crates.io",
+      },
     ],
   },
   {
-    version: "v0.2.0",
-    date: "2026-04-20",
-    description: "Introduced mutation system, query observers, and select pattern.",
+    version: "v0.1.3",
+    date: "2026-06-14",
+    description: "Decoupled the legacy crate and fixed gpui version compatibility.",
     items: [
-      { category: "Added", text: "First-class mutation system with success/error callbacks" },
-      { category: "Added", text: "Query observers for fine-grained subscription" },
-      { category: "Added", text: "Select pattern for derived query data" },
-      { category: "Changed", text: "Refactored internal registry for lower memory footprint" },
-      { category: "Fixed", text: "Stale-While-Revalidate returning stale data on error" },
+      {
+        category: "Changed",
+        text: "gpui-query-legacy is fully decoupled from the main crate, with standalone docs, tests, and improved hook error handling; it publishes independently",
+      },
+      { category: "Added", text: "Crate-level README for gpui-query on crates.io" },
+      {
+        category: "Fixed",
+        text: "read_with calls in the hook module are now source-compatible across gpui versions",
+      },
     ],
-    links: [{ label: "Mutations", slug: "/docs/api/mutations/" }],
+    links: [{ label: "Migrating from v1 to v2", slug: "/docs/advanced/migration" }],
+  },
+  {
+    version: "v0.1.2",
+    date: "2025-06-13",
+    description: "Single-workflow releases and an independent legacy crate.",
+    items: [
+      {
+        category: "Changed",
+        text: "CI publishes both crates in one workflow run, covering tag, GitHub Release, crates.io publish, and website deploy",
+      },
+      {
+        category: "Changed",
+        text: "gpui-query-legacy is an independent crate on crates.io; the legacy feature flag and re-export were removed from gpui-query",
+      },
+      {
+        category: "Changed",
+        text: "Legacy crate publish step tolerates 'already uploaded' errors on workflow re-runs",
+      },
+    ],
+  },
+  {
+    version: "v0.1.1",
+    date: "2025-06-12",
+    description: "The v2 rewrite became the main crate; v1 lives on as gpui-query-legacy.",
+    items: [
+      {
+        category: "Changed",
+        text: "The v2 rewrite at crates/gpui-query-v2 is now the main crate; the v1 code moved to crates/gpui-query-legacy",
+      },
+      {
+        category: "Fixed",
+        text: "read_with calls in the hook module returning Result instead of the raw value from AsyncApp context (9 call sites)",
+      },
+      {
+        category: "Added",
+        text: "#![deprecated] on the legacy crate, with a README pointing to v2",
+      },
+      { category: "Added", text: "Real content on all 12 documentation pages" },
+      {
+        category: "Removed",
+        text: "All gpui_query_v2 references in source and docs, replaced with gpui_query",
+      },
+    ],
+    links: [{ label: "Migrating from v1 to v2", slug: "/docs/advanced/migration" }],
   },
   {
     version: "v0.1.0",
-    date: "2026-03-10",
-    description: "Initial release with core query system, caching, and retry policies.",
+    date: "2025-06-10",
+    description: "Initial public release: core query system, client registry, and GPUI hooks.",
     items: [
-      { category: "Added", text: "Core use_query hook with automatic fetching and caching" },
-      { category: "Added", text: "Configurable retry policies with exponential backoff" },
-      { category: "Added", text: "TTL and Stale-While-Revalidate cache policies" },
-      { category: "Added", text: "Cooperative cancellation via Arc<AtomicBool>" },
+      {
+        category: "Added",
+        text: "QueryResource reactive state container with the QueryStatus lifecycle (Idle, Loading, Success, Failure)",
+      },
+      {
+        category: "Added",
+        text: "CachePolicy (TTL, Stale-While-Revalidate), RequestPolicy, and RetryPolicy with configurable backoff",
+      },
+      {
+        category: "Added",
+        text: "QuerySignal cooperative cancellation via Arc<AtomicBool>",
+      },
+      {
+        category: "Added",
+        text: "QueryClient global registry with typed buckets, observers, and garbage collection",
+      },
+      {
+        category: "Added",
+        text: "use_query, use_mutation, and use_infinite_query hooks for GPUI components",
+      },
+      {
+        category: "Added",
+        text: "Experimental options-first v2 rewrite with QueryPersister, use_query_select, and ClientDiagnostic devtools",
+      },
     ],
-    links: [{ label: "Getting Started", slug: "/docs/getting-started/installation/" }],
+    links: [
+      { label: "Getting Started", slug: "/docs/getting-started/installation" },
+      { label: "Queries", slug: "/docs/api/queries" },
+    ],
   },
 ];
 
@@ -82,13 +159,13 @@ export const Route = createFileRoute("/changelog")({
       {
         name: "description",
         content:
-          "gpui-query release history: new features like infinite queries, mutations, and persistence, plus breaking changes and fixes in every version.",
+          "gpui-query release history: the v1 to v2 rewrite, crate reorganization, fixes, and docs updates in every published version.",
       },
       { property: "og:title", content: "Changelog - gpui-query" },
       {
         property: "og:description",
         content:
-          "gpui-query release history: new features like infinite queries, mutations, and persistence, plus breaking changes and fixes in every version.",
+          "gpui-query release history: the v1 to v2 rewrite, crate reorganization, fixes, and docs updates in every published version.",
       },
       { property: "og:type", content: "website" },
       { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
@@ -97,11 +174,27 @@ export const Route = createFileRoute("/changelog")({
       {
         name: "twitter:description",
         content:
-          "gpui-query release history: new features like infinite queries, mutations, and persistence, plus breaking changes and fixes in every version.",
+          "gpui-query release history: the v1 to v2 rewrite, crate reorganization, fixes, and docs updates in every published version.",
       },
       { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/changelog" }],
+    scripts: [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify(
+          changelogPage({
+            name: "gpui-query Changelog",
+            description:
+              "Release history for gpui-query, the async state management library for GPUI.",
+            url: "https://gpui-query.freeoxide.com/changelog",
+            softwareVersion: changelogEntries[0].version.replace(/^v/, ""),
+            datePublished: changelogEntries[changelogEntries.length - 1].date,
+            dateModified: changelogEntries[0].date,
+          }),
+        ),
+      },
+    ],
   }),
   component: ChangelogPage,
 });
