@@ -115,7 +115,8 @@ export const Route = createFileRoute("/faq")({
           "Common gpui-query questions answered: differences from TanStack Query, QueryClient setup, QuerySignal cancellation, persistence, and pagination.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
+      { property: "og:image", content: "https://gpui-query.freeoxide.com/og/faq.png" },
+      { property: "og:image:alt", content: "gpui-query FAQ" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "FAQ - gpui-query" },
       {
@@ -123,7 +124,7 @@ export const Route = createFileRoute("/faq")({
         content:
           "Common gpui-query questions answered: differences from TanStack Query, QueryClient setup, QuerySignal cancellation, persistence, and pagination.",
       },
-      { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
+      { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og/faq.png" },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/faq" }],
     scripts: [

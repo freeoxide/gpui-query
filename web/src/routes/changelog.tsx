@@ -168,7 +168,8 @@ export const Route = createFileRoute("/changelog")({
           "gpui-query release history: the v1 to v2 rewrite, crate reorganization, fixes, and docs updates in every published version.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
+      { property: "og:image", content: "https://gpui-query.freeoxide.com/og/changelog.png" },
+      { property: "og:image:alt", content: "gpui-query Changelog" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Changelog - gpui-query" },
       {
@@ -176,7 +177,7 @@ export const Route = createFileRoute("/changelog")({
         content:
           "gpui-query release history: the v1 to v2 rewrite, crate reorganization, fixes, and docs updates in every published version.",
       },
-      { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
+      { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og/changelog.png" },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/changelog" }],
     scripts: [

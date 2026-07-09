@@ -8,8 +8,8 @@
   "scripts": {
     "dev": "vp dev --port 3000",
     "build:docs": "node scripts/build-docs.ts",
-    "og:blog": "node scripts/generate-blog-og-images.ts",
-    "build": "node scripts/build-docs.ts && node scripts/generate-blog-og-images.ts && vp build && npx pagefind --site dist/client && node scripts/generate-llms-txt.ts --output dist/client && node scripts/generate-md-alt.ts --output dist/client",
+    "og": "node scripts/generate-og-images.ts",
+    "build": "node scripts/generate-og-images.ts && node scripts/build-docs.ts && vp build && npx pagefind --site dist/client && node scripts/generate-llms-txt.ts --output dist/client && node scripts/generate-md-alt.ts --output dist/client",
     "preview": "vp preview",
     "test": "vp test run",
     "deploy": "bun run build && npx wrangler pages deploy dist/client --project-name=gpui-query"

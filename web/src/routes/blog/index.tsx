@@ -19,7 +19,8 @@ export const Route = createFileRoute("/blog/")({
           "Deep dives on async state management for GPUI in Rust: cache policies, cooperative cancellation, and updates from the gpui-query project.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
+      { property: "og:image", content: "https://gpui-query.freeoxide.com/og/blog.png" },
+      { property: "og:image:alt", content: "gpui-query Blog" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Blog - gpui-query" },
       {
@@ -27,7 +28,7 @@ export const Route = createFileRoute("/blog/")({
         content:
           "Deep dives on async state management for GPUI in Rust: cache policies, cooperative cancellation, and updates from the gpui-query project.",
       },
-      { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
+      { name: "twitter:image", content: "https://gpui-query.freeoxide.com/og/blog.png" },
     ],
     links: [{ rel: "canonical", href: "https://gpui-query.freeoxide.com/blog" }],
     scripts: [

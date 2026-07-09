@@ -20,6 +20,7 @@ export const Route = createFileRoute("/")({
       { property: "og:type", content: "website" },
       { property: "og:url", content: "https://gpui-query.freeoxide.com" },
       { property: "og:image", content: "https://gpui-query.freeoxide.com/og-image.png" },
+      { property: "og:image:alt", content: "gpui-query - Async State Management for GPUI" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "gpui-query — Async State Management for GPUI" },
       { name: "twitter:description", content: "Zero-boilerplate async state management for GPUI." },
