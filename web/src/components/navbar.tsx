@@ -2,9 +2,14 @@ import { Link } from "@tanstack/react-router";
 import { ListIcon, GithubLogoIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { Button } from "#/components/ui/button";
 import { ThemeToggle } from "#/components/theme-toggle";
-import { MobileNav } from "#/components/mobile-nav";
-import { SearchDialog } from "#/components/search-dialog";
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
+
+const MobileNav = lazy(() =>
+  import("#/components/mobile-nav").then((module) => ({ default: module.MobileNav })),
+);
+const SearchDialog = lazy(() =>
+  import("#/components/search-dialog").then((module) => ({ default: module.SearchDialog })),
+);
 
 const navLinks: { href: string; label: string; external?: boolean }[] = [
   { href: "/docs/", label: "Docs" },
@@ -122,10 +127,18 @@ export function Navbar() {
           </div>
         </div>
 
-        <MobileNav open={mobileOpen} onClose={() => setMobileOpen(false)} />
+        {mobileOpen && (
+          <Suspense fallback={null}>
+            <MobileNav open={mobileOpen} onClose={() => setMobileOpen(false)} />
+          </Suspense>
+        )}
       </header>
 
-      <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {searchOpen && (
+        <Suspense fallback={null}>
+          <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+        </Suspense>
+      )}
     </>
   );
 }
