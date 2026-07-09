@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { LegalPage, LegalSection } from "#/components/legal-page";
 
 const title = "Privacy Policy - gpui-query";
 const description =
@@ -22,13 +23,12 @@ export const Route = createFileRoute("/privacy")({
 
 function PrivacyPage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-16 lg:px-8">
-      <header className="border-l-4 border-primary pl-5">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Privacy Policy</h1>
-        <p className="mt-2 text-muted-foreground">Last updated: July 9, 2026</p>
-      </header>
-
-      <article className="prose prose-sm mt-10 max-w-none dark:prose-invert sm:prose-base">
+    <LegalPage
+      title="Privacy Policy"
+      description="How the gpui-query website handles analytics, hosting logs, fonts, and local storage."
+      updatedAt="July 9, 2026"
+    >
+      <LegalSection title="Scope">
         <p>
           This policy covers the gpui-query website at{" "}
           <a href="https://gpui-query.freeoxide.com">gpui-query.freeoxide.com</a>, including the
@@ -36,8 +36,9 @@ function PrivacyPage() {
           newsletter. We do not ask you for personal information anywhere on it. The data described
           below is what the services we build on collect.
         </p>
+      </LegalSection>
 
-        <h2>Analytics</h2>
+      <LegalSection title="Analytics">
         <p>
           We use <strong>Firebase Analytics</strong> (part of Google Firebase, operated by Google
           LLC) to understand how the site is used — which pages are visited, roughly where visitors
@@ -61,8 +62,9 @@ function PrivacyPage() {
           . Most content blockers block Firebase Analytics; the site works exactly the same with it
           blocked.
         </p>
+      </LegalSection>
 
-        <h2>Hosting</h2>
+      <LegalSection title="Hosting">
         <p>
           The site is served by <strong>Cloudflare</strong>. Like any web host, Cloudflare sees your
           IP address and request details and keeps short-lived server logs for security and
@@ -76,8 +78,9 @@ function PrivacyPage() {
           </a>
           .
         </p>
+      </LegalSection>
 
-        <h2>Fonts</h2>
+      <LegalSection title="Fonts">
         <p>
           Fonts are loaded from <strong>Google Fonts</strong>. When your browser fetches a font
           file, your IP address is sent to Google as part of that request. Details are in Google's{" "}
@@ -90,32 +93,37 @@ function PrivacyPage() {
           </a>
           .
         </p>
+      </LegalSection>
 
-        <h2>Local storage</h2>
+      <LegalSection title="Local storage">
         <p>
           Your light/dark theme choice is saved in your browser's <code>localStorage</code>. It
           never leaves your device and you can clear it at any time through your browser settings.
         </p>
+      </LegalSection>
 
-        <h2>External links</h2>
+      <LegalSection title="External links">
         <p>
           The site links out to GitHub, crates.io, docs.rs, and other third-party sites. Once you
           follow one of those links, that site's privacy policy applies, not this one.
         </p>
+      </LegalSection>
 
-        <h2>Children</h2>
+      <LegalSection title="Children">
         <p>
           The site is developer documentation and is not directed at children under 13. We do not
           knowingly collect any information from them.
         </p>
+      </LegalSection>
 
-        <h2>Changes</h2>
+      <LegalSection title="Changes">
         <p>
           If we change what the site collects — for example by adding or removing a service — we
           will update this page and the date at the top.
         </p>
+      </LegalSection>
 
-        <h2>Contact</h2>
+      <LegalSection title="Contact">
         <p>
           Questions about this policy? Open an issue on{" "}
           <a
@@ -127,7 +135,7 @@ function PrivacyPage() {
           </a>{" "}
           or email <a href="mailto:hmziqrs@gmail.com">hmziqrs@gmail.com</a>.
         </p>
-      </article>
-    </div>
+      </LegalSection>
+    </LegalPage>
   );
 }
