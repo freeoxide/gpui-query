@@ -47,6 +47,7 @@ export const Route = createFileRoute("/blog/")({
             datePublished: post.frontmatter.date,
             author: { "@type": "Person", name: post.frontmatter.author },
             url: `https://gpui-query.freeoxide.com/blog/${post.slug}`,
+            image: `https://gpui-query.freeoxide.com/og/blog/${post.slug}.png`,
           })),
         }),
       },

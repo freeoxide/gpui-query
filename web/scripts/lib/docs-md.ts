@@ -1,31 +1,28 @@
-#!/usr/bin/env node
 /**
- * Generate clean .md alternatives for Docusaurus documentation pages.
- * AI crawlers can fetch these directly for plain markdown content.
- *
- * Source: Docusaurus docs at ../docs/docs (all .md and .mdx files).
- * Previously read src/content/, which no longer exists.
- *
- * Output: {output}/docs/{route}.md
- *
- * Usage: node scripts/generate-md-alt.mjs [--output .output/public]
+ * Shared helpers for scripts that read the Docusaurus docs (../docs/docs)
+ * and turn them into plain markdown: generate-llms-txt.ts and
+ * generate-md-alt.ts.
  */
 
-import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative, sep } from "node:path";
 
-const outputDir = process.argv.includes("--output")
-  ? process.argv[process.argv.indexOf("--output") + 1]
-  : ".output/public";
+export interface DocFrontmatter {
+  [key: string]: string;
+}
 
-// Scripts run from web/, so the Docusaurus docs live one level up.
-const docsRoot = resolve("..", "docs", "docs");
+export interface ParsedDoc {
+  /** Path relative to the docs root, e.g. "guides/caching.mdx". */
+  relPath: string;
+  /** Docusaurus route without leading slash, e.g. "guides/caching". "" is the root. */
+  route: string;
+  frontmatter: DocFrontmatter;
+  /** Body stripped down to prose markdown (no MDX/JSX/admonition syntax). */
+  plain: string;
+}
 
-/**
- * Recursively collect every .md and .mdx file under `dir`.
- * Returns absolute paths.
- */
-async function collectDocs(dir) {
+/** Recursively collect every .md and .mdx file under `dir`, as absolute paths. */
+export async function collectDocs(dir: string): Promise<string[]> {
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -33,7 +30,7 @@ async function collectDocs(dir) {
     return [];
   }
 
-  const files = [];
+  const files: string[] = [];
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -49,10 +46,10 @@ async function collectDocs(dir) {
  * Parse a YAML frontmatter block delimited by leading `---` fences.
  * Only handles the flat `key: value` shape used by the docs.
  */
-function parseFrontmatter(text) {
+export function parseFrontmatter(text: string): { frontmatter: DocFrontmatter; body: string } {
   const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  const frontmatter = {};
-  if (!fmMatch) return { frontmatter, body: text };
+  const frontmatter: DocFrontmatter = {};
+  if (!fmMatch) return { frontmatter, body: text.replace(/^﻿/, "") };
 
   for (const line of fmMatch[1].split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -60,7 +57,7 @@ function parseFrontmatter(text) {
     const idx = trimmed.indexOf(":");
     if (idx === -1) continue;
     const key = trimmed.slice(0, idx).trim();
-    let value = trimmed
+    const value = trimmed
       .slice(idx + 1)
       .trim()
       .replace(/^["']|["']$/g, "");
@@ -77,7 +74,7 @@ function parseFrontmatter(text) {
  * to docs/, without extension, using forward slashes, with index.* -> "" and
  * honoring an explicit `slug:` frontmatter override.
  */
-function resolveRoute(relPath, frontmatter) {
+export function resolveRoute(relPath: string, frontmatter: DocFrontmatter): string {
   if (frontmatter.slug) {
     // slug: / -> "" (root); otherwise strip leading slash.
     if (frontmatter.slug === "/") return "";
@@ -88,6 +85,7 @@ function resolveRoute(relPath, frontmatter) {
     .replace(/\.(mdx?|md)$/, "")
     .split(sep)
     .join("/");
+  // index files map to their directory route.
   if (route.endsWith("/index")) route = route.slice(0, -"/index".length);
   return route;
 }
@@ -97,7 +95,7 @@ function resolveRoute(relPath, frontmatter) {
  * markdown. Admonitions become blockquotes; JSX components and imports
  * are removed.
  */
-function toPlainMarkdown(body) {
+export function toPlainMarkdown(body: string): string {
   return (
     body
       // Drop ES import / export statements (MDX).
@@ -107,9 +105,9 @@ function toPlainMarkdown(body) {
       // -> keep inner content as a blockquote.
       .replace(
         /:::[A-Za-z]+(?:\[([^\]]*)\])?(?:\s*\{[^}]*\})?\r?\n([\s\S]*?):::/g,
-        (_m, title, inner) => {
+        (_m, title: string | undefined, inner: string) => {
           const header = title ? `> **${title.trim()}**\n>\n` : "";
-          const quoted = String(inner)
+          const quoted = inner
             .replace(/\r?\n$/, "")
             .split(/\r?\n/)
             .map((line) => `> ${line}`)
@@ -131,35 +129,20 @@ function toPlainMarkdown(body) {
   );
 }
 
-async function main() {
+/** Read and parse every doc under `docsRoot`. */
+export async function loadDocs(docsRoot: string): Promise<ParsedDoc[]> {
   const files = await collectDocs(docsRoot);
-  if (files.length === 0) {
-    console.log("No Docusaurus docs found, skipping .md generation");
-    return;
-  }
-
-  const docsOutDir = join(outputDir, "docs");
-  await mkdir(docsOutDir, { recursive: true });
-
-  let generated = 0;
+  const docs: ParsedDoc[] = [];
   for (const file of files) {
     const raw = await readFile(file, "utf-8");
     const { frontmatter, body } = parseFrontmatter(raw);
     const relPath = relative(docsRoot, file);
-    const route = resolveRoute(relPath, frontmatter);
-    const plain = toPlainMarkdown(body);
-
-    // route may contain subdirectory segments (e.g. "guides/caching").
-    const outFile = join(docsOutDir, `${route || "index"}.md`);
-    await mkdir(dirname(outFile), { recursive: true });
-    await writeFile(outFile, `${plain}\n`, "utf-8");
-    generated++;
+    docs.push({
+      relPath,
+      route: resolveRoute(relPath, frontmatter),
+      frontmatter,
+      plain: toPlainMarkdown(body),
+    });
   }
-
-  console.log(`Generated ${generated} .md alternative files in ${docsOutDir}`);
+  return docs;
 }
-
-main().catch((err) => {
-  console.error("Failed to generate .md alternatives:", err);
-  process.exit(1);
-});

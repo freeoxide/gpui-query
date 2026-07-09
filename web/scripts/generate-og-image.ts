@@ -7,12 +7,13 @@
  * referenced by og:image / twitter:image meta tags across the routes.
  *
  * Usage:
- *   node scripts/generate-og-image.mjs                # writes to public/
- *   node scripts/generate-og-image.mjs --output dist  # writes to dist/
+ *   node scripts/generate-og-image.ts                # writes to public/
+ *   node scripts/generate-og-image.ts --output dist  # writes to dist/
  */
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
+import process from "node:process";
 import sharp from "sharp";
 
 // OG image spec: 1200x630 (matches the SVG's intrinsic viewBox).
@@ -26,7 +27,7 @@ const outputDir = outputArgIndex !== -1 ? process.argv[outputArgIndex + 1] : "pu
 const svgPath = resolve("public/og-image.svg");
 const outPath = resolve(outputDir, "og-image.png");
 
-async function main() {
+async function main(): Promise<void> {
   const svgBuffer = await readFile(svgPath);
 
   const pngBuffer = await sharp(svgBuffer, {
@@ -43,7 +44,7 @@ async function main() {
   console.log(`Generated og-image.png (${WIDTH}x${HEIGHT}) -> ${outPath}`);
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   console.error("Failed to generate OG image:", err);
   process.exit(1);
 });
