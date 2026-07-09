@@ -3,6 +3,7 @@ import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { getAllBlogPosts, getBlogBySlug, type BlogFrontmatter } from "#/lib/blog";
+import { getBlogContent } from "#/lib/blog-content";
 import { blogPost } from "#/lib/seo";
 
 /* ─── Route ─────────────────────────────────────────────────────────── */
@@ -83,12 +84,12 @@ function BlogPostPage() {
   const data = Route.useLoaderData() as { slug: string; frontmatter: BlogFrontmatter } | undefined;
   if (!data) return <PostNotFound />;
   // Resolve the (non-serializable) MDX component at render time.
-  const post = getBlogBySlug(data.slug);
-  if (!post) return <PostNotFound />;
+  const Content = getBlogContent(data.slug);
+  if (!Content) return <PostNotFound />;
 
-  const { Content, frontmatter } = post;
+  const { frontmatter } = data;
   const posts = getAllBlogPosts();
-  const index = posts.findIndex((p) => p.slug === post.slug);
+  const index = posts.findIndex((p) => p.slug === data.slug);
   const newer = index > 0 ? posts[index - 1] : undefined;
   const older = index >= 0 && index < posts.length - 1 ? posts[index + 1] : undefined;
 

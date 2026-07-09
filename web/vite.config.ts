@@ -12,7 +12,39 @@ import remarkGfm from "remark-gfm";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkMdxFrontmatter from "remark-mdx-frontmatter";
 import { readdirSync, readFileSync } from "node:fs";
+import type { Plugin } from "vite";
+import { parse as parseYaml } from "yaml";
 import { LANDING_PREVIEWS_ENABLED } from "./src/lib/flags";
+
+/**
+ * Serves `*.mdx?frontmatter-only` imports as tiny modules exporting just the
+ * parsed YAML frontmatter, without compiling the post body. Route loaders and
+ * head functions live in the router's non-split tree (the entry chunk), so if
+ * they imported the real MDX modules — even only for the `frontmatter`
+ * export — Rollup would place every compiled post body in the entry chunk
+ * shipped to all pages. The query string makes these distinct modules, so the
+ * bodies chunk with the code-split blog components instead (see
+ * src/lib/blog.ts vs src/lib/blog-content.ts).
+ */
+function mdxFrontmatterOnly(): Plugin {
+  return {
+    name: "mdx-frontmatter-only",
+    // Runs after @mdx-js/rollup (whose filter matches these ids too) and
+    // discards its compiled output, re-emitting only the frontmatter. A
+    // `pre` load hook doesn't work here: the mdx transform would treat the
+    // emitted JS as MDX source and collide with remark-mdx-frontmatter's
+    // own `frontmatter` export.
+    enforce: "post",
+    transform(_code, id) {
+      const [path, query] = id.split("?");
+      if (!path.endsWith(".mdx") || !query?.includes("frontmatter-only")) return;
+      const source = readFileSync(path, "utf8");
+      const fm = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      const data: unknown = fm ? parseYaml(fm[1]) : {};
+      return { code: `export const frontmatter = ${JSON.stringify(data)};`, map: null };
+    },
+  };
+}
 
 /**
  * Dynamic /blog/$slug routes are not statically discoverable by the file-based
@@ -55,6 +87,7 @@ const config = defineConfig({
     devtools(),
     ...(isVitest ? [] : [cloudflare({ viteEnvironment: { name: "ssr" }, assetsOnly: true })]),
     tailwindcss(),
+    mdxFrontmatterOnly(),
     mdx({
       remarkPlugins: [remarkGfm, remarkFrontmatter, remarkMdxFrontmatter],
       rehypePlugins: [[rehypePrettyCode, { theme: "github-dark-default" }]],

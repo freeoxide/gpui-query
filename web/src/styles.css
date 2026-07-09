@@ -1,3 +1,6 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/oxanium";
 @import "../../shared/tokens.css";
 @import "tailwindcss";
 
@@ -42,7 +45,20 @@
   --radius-xl: var(--radius-xl);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
-  --font-display: "Oxanium", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Oxanium Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Self-hosted variable fonts (fontsource). Shared tokens declare the static
+   Google Fonts family names; fontsource registers "<Family> Variable", so
+   override the stacks here rather than in shared/tokens.css, which the docs
+   site also consumes. */
+:root {
+  --font-sans:
+    "Inter Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono:
+    "JetBrains Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
 }
 
 /* Chart colors (not in shared tokens — web-only) */

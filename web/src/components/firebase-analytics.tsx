@@ -1,11 +1,13 @@
 import { useEffect } from "react";
-import { logFirebasePageView } from "#/lib/firebase";
 
 export function FirebaseAnalytics() {
   useEffect(() => {
     const logAfterNavigation = () => {
       window.setTimeout(() => {
-        void logFirebasePageView();
+        // Import lazily: a static import would pull every @firebase/*
+        // package (and its module-scope initializeApp) into the entry
+        // chunk, ahead of hydration.
+        void import("#/lib/firebase").then(({ logFirebasePageView }) => logFirebasePageView());
       }, 0);
     };
 
