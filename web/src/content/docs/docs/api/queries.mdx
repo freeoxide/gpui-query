@@ -1,0 +1,411 @@
+---
+sidebar_position: 1
+title: Queries
+description: "use_query API reference for gpui-query: query keys, fetchers, cache and request policies, status handling, and reactive updates in GPUI components."
+---
+
+Queries are the core primitive. You define a key, a fetcher, and some options. The library handles caching, deduplication, retry, and reactive updates.
+
+Every query produces an `Entity<QueryResource<T, E>>` that you read during render. When the entity's state changes, your component re-renders.
+
+## use_query
+
+```rust
+fn use_query<T, E, C, F, Fut>(
+    options: impl Into<QueryOptions>,
+    fetcher: F,
+    cx: &mut Context<C>,
+) -> (Entity<QueryResource<T, E>>, Subscription)
+where
+    F: Fn(QuerySignal) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
+```
+
+This is the primary hook. Call it in your component's constructor, not in `render`. It gets or creates a `QueryResource` entity from the global `QueryClient`, sets up an observer so your component re-renders on state changes, and spawns an async fetch if the resource is idle.
+
+The fetcher receives a `QuerySignal` for cooperative cancellation. Check `signal.is_cancelled()` periodically in long-running fetchers and abort early when possible.
+
+Returns a tuple of `(Entity<QueryResource<T, E>>, Subscription)`. Store the entity to read state during render. Store the subscription to keep the observation alive. Drop the subscription and the observation stops.
+
+```rust
+use gpui_query::{use_query, QueryOptions, CachePolicy, RetryPolicy};
+
+struct UserList {
+    users: Entity<QueryResource<Vec<User>, MyError>>,
+    _sub: Subscription,
+}
+
+impl UserList {
+    fn new(cx: &mut Context<Self>) -> Self {
+        // Simple: just a string key
+        let (users, _sub) = use_query("users", |signal| async move {
+            let resp = reqwest::get("/api/users").await?;
+            let users: Vec<User> = resp.json().await?;
+            Ok(users)
+        }, cx);
+
+        Self { users, _sub }
+    }
+}
+```
+
+With options:
+
+```rust
+let (users, _sub) = use_query(
+    QueryOptions::new("users")
+        .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
+        .retry_policy(RetryPolicy::new(5).with_exponential_backoff()),
+    |signal| async move {
+        let resp = reqwest::get("/api/users").await?;
+        Ok::<_, MyError>(resp.json().await?)
+    },
+    cx,
+);
+```
+
+You can pass a `&str`, `String`, or `QueryKey` directly as the first argument because `QueryOptions` implements `From` for all three.
+
+:::caution
+The `QueryClient` must be initialized before calling `use_query`. In debug builds, the hook panics if `cx.set_global::<QueryClient>()` was never called. In release builds, it falls back to a standalone entity with no shared caching or garbage collection.
+:::
+
+## use_query_unsignalled
+
+```rust
+fn use_query_unsignalled<T, E, C, F, Fut>(
+    key: QueryKey,
+    cache_policy: CachePolicy,
+    request_policy: RequestPolicy,
+    fetcher: F,
+    cx: &mut Context<C>,
+) -> (Entity<QueryResource<T, E>>, Subscription)
+where
+    F: Fn() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
+```
+
+The backward-compatible variant. The fetcher takes no signal argument: `Fn() -> Fut` instead of `Fn(QuerySignal) -> Fut`. This means your fetcher cannot observe cancellation.
+
+Use this if you have existing fetch closures that do not need signal awareness. For new code, prefer `use_query` (the signal-accepting version).
+
+```rust
+use gpui_query::{use_query_unsignalled, CachePolicy, RequestPolicy};
+
+let (entity, sub) = use_query_unsignalled(
+    "settings",
+    CachePolicy::Ttl { ttl_ms: 60_000 },
+    RequestPolicy::LatestWins,
+    || async {
+        let resp = reqwest::get("/api/settings").await?;
+        Ok::<_, MyError>(resp.json().await?)
+    },
+    cx,
+);
+```
+
+## use_query_manual
+
+```rust
+fn use_query_manual<T, E, C>(
+    key: QueryKey,
+    cache_policy: CachePolicy,
+    request_policy: RequestPolicy,
+    cx: &mut Context<C>,
+) -> (Entity<QueryResource<T, E>>, Subscription)
+```
+
+Sets up the entity and observation without starting a fetch. Use this when you need full control over when and how fetching happens. The returned entity starts in `Idle` status with no data.
+
+You would call `fetch_query` or `fetch_query_with_signal` later to trigger a fetch on your own schedule.
+
+```rust
+use gpui_query::{use_query_manual, fetch_query_with_signal, CachePolicy, RequestPolicy};
+
+struct Dashboard {
+    stats: Entity<QueryResource<Stats, MyError>>,
+    _sub: Subscription,
+}
+
+impl Dashboard {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let (stats, _sub) = use_query_manual(
+            "dashboard-stats",
+            CachePolicy::Ttl { ttl_ms: 30_000 },
+            RequestPolicy::LatestWins,
+            cx,
+        );
+
+        Self { stats, _sub }
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        fetch_query_with_signal(&self.stats, |signal| async move {
+            let resp = reqwest::get("/api/stats").await?;
+            Ok::<_, MyError>(resp.json().await?)
+        }, cx);
+    }
+}
+```
+
+## fetch_query
+
+```rust
+fn fetch_query<T, E, C, F, Fut>(
+    entity: &Entity<QueryResource<T, E>>,
+    fetcher: F,
+    cx: &mut Context<C>,
+) where
+    F: Fn() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
+```
+
+Imperative refetch on an existing entity. Call this on button click, timer, or any event that should trigger a refresh. The fetcher takes no signal. On failure, retries according to the entity's retry policy.
+
+```rust
+fn handle_refresh(&mut self, cx: &mut Context<MyView>) {
+    fetch_query(&self.users, || async {
+        let resp = reqwest::get("/api/users").await?;
+        Ok::<_, MyError>(resp.json().await?)
+    }, cx);
+}
+```
+
+## fetch_query_with_signal
+
+```rust
+fn fetch_query_with_signal<T, E, C, F, Fut>(
+    entity: &Entity<QueryResource<T, E>>,
+    fetcher: F,
+    cx: &mut Context<C>,
+) where
+    F: FnOnce(QuerySignal) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
+```
+
+Like `fetch_query`, but the fetcher receives a `QuerySignal`. The fetcher signature is `FnOnce(QuerySignal) -> Fut`.
+
+Because the closure is `FnOnce`, it is consumed on the first call. Retries are not possible. If you need retry logic, use `fetch_query` or `use_query` with a retry policy instead.
+
+```rust
+fn handle_refresh(&mut self, cx: &mut Context<MyView>) {
+    fetch_query_with_signal(&self.users, |signal| async move {
+        let resp = reqwest::get("/api/users").await?;
+        // signal.is_cancelled() can be checked for long operations
+        Ok::<_, MyError>(resp.json().await?)
+    }, cx);
+}
+```
+
+## QueryResource
+
+`QueryResource<T, E>` is the state container for a single query. It is stored as a GPUI entity and read during render. The type parameters are your data type `T` and error type `E` (defaults to `QueryError`).
+
+### Reading state
+
+| Method | Return type | Description |
+|--------|-------------|-------------|
+| `data()` | `Option<&T>` | The fetched data, if available |
+| `error()` | `Option<&E>` | The last error, if any |
+| `status()` | `QueryStatus` | Current lifecycle status |
+| `is_loading()` | `bool` | `true` when status is `LoadingEmpty` or `LoadingWithData` |
+| `has_data()` | `bool` | `true` when data is `Some` |
+| `display_data()` | `Option<&T>` | Data if present, otherwise placeholder data |
+| `key()` | `&QueryKey` | The query's cache key |
+| `cache_age_ms(now_ms)` | `Option<u128>` | Milliseconds since last successful update |
+| `retry_count()` | `u32` | How many retries have been attempted in this cycle |
+
+`display_data()` is the recommended accessor for UI rendering. It returns actual data when available, falling back to placeholder data during loading transitions.
+
+```rust
+fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let users = self.users.read(cx);
+
+    match users.status() {
+        QueryStatus::LoadingEmpty => div().child("Loading..."),
+        QueryStatus::Failure => div().child(format!("Error: {:?}", users.error())),
+        _ => {
+            if let Some(data) = users.display_data() {
+                div().children(data.iter().map(|u| /* render user */ ))
+            } else {
+                div().child("No data")
+            }
+        }
+    }
+}
+```
+
+### Data lifecycle methods
+
+| Method | Description |
+|--------|-------------|
+| `placeholder_data()` | Returns the placeholder data, if set |
+| `previous_data()` | Returns the previous data before the last successful update |
+| `initial_data()` | Returns the seeded initial data, if any |
+| `rollback_to_previous()` | Restores previous data, transitions to `Success`. Returns `false` if no previous data exists |
+| `set_data(data)` | Optimistic update: stores current data as previous, sets new data |
+| `set_placeholder_data(data)` | Sets placeholder data shown by `display_data()` during loading |
+| `set_initial_data(data, now_ms)` | Seeds data when status is `Idle` and data is `None` |
+
+`set_data()` is the core mechanism for optimistic updates. It stores the current data in `previous_data` so you can call `rollback_to_previous()` if the mutation fails.
+
+```rust
+// Optimistic update before a mutation
+entity.update(cx, |r, _| {
+    r.set_data(optimistic_users.clone());
+});
+
+// If mutation fails, roll back
+entity.update(cx, |r, _| {
+    r.rollback_to_previous();
+});
+```
+
+### Cache and request control
+
+| Method | Description |
+|--------|-------------|
+| `invalidate()` | Clears `last_updated_at`, causing the next fetch to bypass cache |
+| `reset()` | Resets everything to `Idle`: data, error, status, retry count, signal |
+| `cancel(error)` | Cancels the active request, sets status to `Cancelled`, stores the error |
+| `cache_policy()` | Returns the current `CachePolicy` |
+| `request_policy()` | Returns the current `RequestPolicy` |
+| `cache_hits()` | Number of times cache short-circuited a fetch |
+| `cancelled_count()` | Number of cancelled requests |
+| `active_request_id()` | The `RequestId` of the in-flight request, if any |
+
+```rust
+// Invalidate to force a refetch on next mount
+entity.update(cx, |r, _| {
+    r.invalidate();
+});
+
+// Cancel an in-flight request
+entity.update(cx, |r, _| {
+    r.cancel(MyError::Cancelled);
+});
+```
+
+## QueryStatus
+
+```rust
+pub enum QueryStatus {
+    Idle,              // No fetch has started
+    LoadingEmpty,      // Fetch in progress, no data yet
+    LoadingWithData,   // Fetch in progress, previous data still available
+    Success,           // Fetch completed successfully
+    Failure,           // Fetch failed
+    Cancelled,         // Fetch was cancelled
+}
+```
+
+The `is_loading()` method returns `true` for both `LoadingEmpty` and `LoadingWithData`. The distinction matters for UI: `LoadingWithData` means you can still show stale data while the fresh data loads.
+
+## QueryOptions
+
+```rust
+let opts = QueryOptions::new("users")
+    .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
+    .request_policy(RequestPolicy::LatestWins)
+    .retry_policy(RetryPolicy::new(3).with_exponential_backoff())
+    .gc_time(600_000)
+    .force()
+    .keep_previous();
+```
+
+`QueryOptions` implements `From<&str>`, `From<String>`, and `From<QueryKey>`, so you can pass a plain string when you do not need any customization.
+
+| Builder method | Default | Description |
+|---------------|---------|-------------|
+| `cache_policy(p)` | `Ttl { ttl_ms: 60_000 }` | How cached data is treated |
+| `request_policy(p)` | `LatestWins` | How concurrent requests are handled |
+| `retry_policy(p)` | 3 retries, exponential backoff | Automatic retry on failure |
+| `gc_time(ms)` | `300_000` (5 min) | How long idle resources stay in cache |
+| `force()` | `false` | Bypass cache on the next fetch |
+| `keep_previous()` | `false` | Use previous data as placeholder when key changes |
+
+See [Caching](/docs/guides/caching) for details on cache policies and GC behavior. See [Retry](/docs/guides/retry) for retry configuration.
+
+## QuerySignal
+
+```rust
+pub struct QuerySignal { /* Arc<AtomicBool> */ }
+
+impl QuerySignal {
+    pub fn cancel(&self);
+    pub fn is_cancelled(&self) -> bool;
+}
+```
+
+A cooperative cancellation token backed by `Arc<AtomicBool>`. Clones share the same underlying flag. When any clone calls `cancel()`, all clones observe `is_cancelled() == true`.
+
+The library creates a fresh signal each time a fetch begins. The fetcher should check `is_cancelled()` periodically and abort early when possible.
+
+```rust
+use_query("large-dataset", |signal| async move {
+    let mut results = vec![];
+    for page in 0..100 {
+        if signal.is_cancelled() {
+            return Err(MyError::Cancelled);
+        }
+        let chunk = fetch_page(page).await?;
+        results.extend(chunk);
+    }
+    Ok(results)
+}, cx);
+```
+
+Signals are cancelled automatically when a newer request replaces an older one (the `LatestWins` request policy), or when you call `cancel()` or `reset()` on the resource.
+
+## CachePolicy
+
+```rust
+pub enum CachePolicy {
+    NoCache,                                    // Never cache
+    Ttl { ttl_ms: u64 },                        // Cache for N milliseconds
+    StaleWhileRevalidate { ttl_ms: u64 },       // Serve stale, refetch in background
+}
+```
+
+The default is `Ttl { ttl_ms: 60_000 }` (one minute).
+
+- **NoCache**: every mount triggers a fresh fetch.
+- **Ttl**: cached data is served if `cache_age_ms` is within `ttl_ms`. Once expired, a new fetch starts.
+- **StaleWhileRevalidate**: cached data is always served (even after TTL expires), and a background refetch is triggered. The UI never shows a loading state for cached data.
+
+See [Caching](/docs/guides/caching) for the full picture.
+
+## RequestPolicy
+
+```rust
+pub enum RequestPolicy {
+    LatestWins,           // New requests cancel older in-flight ones
+    IgnoreWhileLoading,   // New requests are dropped while one is in-flight
+}
+```
+
+The default is `LatestWins`. Use `IgnoreWhileLoading` when you want to avoid redundant network traffic and the first response is good enough.
+
+## QueryFetchMode
+
+```rust
+pub enum QueryFetchMode {
+    Normal,  // Respect cache policy
+    Force,   // Always fetch, ignore cache
+}
+```
+
+Set through `QueryOptions::force()`. `Normal` is the default. `Force` bypasses cache freshness checks and always starts a new fetch.
+
+## QueryKey
+
+```rust
+let simple: QueryKey = QueryKey::from("users");
+let compound: QueryKey = QueryKey::from(["users", "42", "posts"]);
+```
+
+Keys are hierarchical, modeled after TanStack Query's array keys. Internally stored as `Arc<[Arc<str>]>`, so cloning is a single atomic ref-count increment.
+
+Two operations use this structure: exact match for cache lookups, and prefix match via `starts_with()` for cache invalidation. A key like `["users", "42"]` matches the prefix `["users"]` but not `["users", "43"]`.
+
+`QueryKey` implements `From<&str>`, `From<String>`, `From<[&str; N]>`, `From<Vec<&str>>`, and `From<Vec<String>>`.

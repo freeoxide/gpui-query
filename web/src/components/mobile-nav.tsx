@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "#/components/ui/sheet";
 import { GithubLogoIcon } from "@phosphor-icons/react";
 
@@ -32,14 +31,14 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
                 {link.label}
               </a>
             ) : (
-              <Link
+              <a
                 key={link.href}
-                to={link.href}
+                href={link.href}
                 onClick={onClose}
                 className="text-lg font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
                 {link.label}
-              </Link>
+              </a>
             ),
           )}
           <a

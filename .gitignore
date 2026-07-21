@@ -22,3 +22,5 @@ Thumbs.db
 .playwright-mcp/
 
 .wrangler/cache
+
+.astro-migration-baseline/

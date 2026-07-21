@@ -17,29 +17,23 @@ test:
 test-feature feature:
     cargo test --features "{{ feature }}"
 
-# ---- Docs ----
-
-# Build the Docusaurus docs site
-docs-build:
-    cd docs && npm run build
-
-# Start the docs dev server
-docs-dev:
-    cd docs && npm run start
-
-# ---- Website (TanStack Start) ----
+# ---- Website (Astro + Starlight) ----
 
 # Install web dependencies
 web-install:
     cd web && bun install
 
-# Build the web app (copies Docusaurus output into it)
+# Build the website (marketing, blog, and /docs/** — output in dist/client)
 web-build:
     cd web && bun run build
 
-# Start the web dev server
+# Start the web dev server (Astro, port 3000)
 web-dev:
     cd web && bun run dev
+
+# Preview the built site
+web-preview:
+    cd web && bun run preview
 
 # ---- CI Workflows ----
 

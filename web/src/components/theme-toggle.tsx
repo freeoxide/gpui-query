@@ -11,39 +11,38 @@ function updateThemeColor(isDark: boolean) {
     ?.setAttribute("content", isDark ? THEME_COLOR_DARK : THEME_COLOR_LIGHT);
 }
 
-export function ThemeToggle() {
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    if (typeof window === "undefined") return "light";
-    const stored = localStorage.getItem("theme");
-    if (stored === "dark" || stored === "light") return stored;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  });
+/** Apply a theme end-to-end: <html> class, persisted preference, meta color. */
+function applyTheme(next: "light" | "dark") {
+  document.documentElement.classList.toggle("dark", next === "dark");
+  localStorage.setItem("theme", next);
+  updateThemeColor(next === "dark");
+}
 
+export function ThemeToggle() {
+  // SSR-safe: the server and the first client render both use "light", so
+  // hydration matches (avoids React #418). The real theme — which the no-flash
+  // <script> in BaseLayout already applied to <html> before paint — is read
+  // from the DOM on mount, so the icon catches up without a flash and without
+  // clobbering the user's stored preference.
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [mounted, setMounted] = useState(false);
   const iconRef = useRef<HTMLSpanElement>(null);
 
-  // Apply theme class, persist, and update meta
+  // Catch the icon up to whatever the no-flash script applied.
   useEffect(() => {
-    const root = document.documentElement;
-    const isDark = theme === "dark";
-
-    if (isDark) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-    localStorage.setItem("theme", theme);
-    updateThemeColor(isDark);
+    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     setMounted(true);
-  }, [theme]);
+  }, []);
 
-  // Listen for system theme changes
+  // Listen for system theme changes, but only when the user hasn't stored a
+  // preference of their own.
   useEffect(() => {
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => {
-      // Only follow system if user hasn't explicitly stored a preference
       if (!localStorage.getItem("theme")) {
-        setTheme(e.matches ? "dark" : "light");
+        const next = e.matches ? "dark" : "light";
+        applyTheme(next);
+        setTheme(next);
       }
     };
     mql.addEventListener("change", handler);
@@ -51,12 +50,14 @@ export function ThemeToggle() {
   }, []);
 
   const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
     if (iconRef.current) {
       iconRef.current.classList.add("theme-icon-exit");
       iconRef.current.addEventListener(
         "animationend",
         () => {
-          setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+          applyTheme(next);
+          setTheme(next);
           if (iconRef.current) {
             iconRef.current.classList.remove("theme-icon-exit");
             iconRef.current.classList.add("theme-icon-enter");
@@ -72,7 +73,8 @@ export function ThemeToggle() {
         { once: true },
       );
     } else {
-      setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+      applyTheme(next);
+      setTheme(next);
     }
   };
 

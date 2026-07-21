@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - "web/**"
-      - "docs/**"
       - "shared/**"
       - ".github/workflows/pr-checks.yml"
 

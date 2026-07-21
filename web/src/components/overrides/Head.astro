@@ -1,0 +1,27 @@
+---
+// Starlight <Head> override.
+//
+// Why this exists: under `build.format: "file"` (kept so output stays flat
+// `foo.html`, matching the no-trailing-slash deploy scheme), Starlight's
+// canonical + og:url carry a trailing `.html`. See
+// node_modules/@astrojs/starlight/utils/canonical.ts — `formatCanonical()`
+// returns the href unchanged for file format — and utils/head.ts builds it
+// from `context.url.pathname`, which includes `.html` for file-format pages.
+//
+// The site serves these pages at the extensionless URL (Cloudflare Pages
+// `auto-trailing-slash`), and `@astrojs/sitemap` already advertises the
+// extensionless form. Stripping `.html` from just `canonical` and `og:url`
+// keeps the head consistent with the sitemap and the rest of the site.
+// See astro-migration.mdx § "SEO parity checks".
+
+const head = Astro.locals.starlightRoute.head.map((entry) => {
+	const attrs = entry.attrs ?? {};
+	// Only touch <link rel="canonical" href="…"> and <meta property="og:url" content="…">.
+	if (attrs.rel !== "canonical" && attrs.property !== "og:url") return entry;
+	const key = "href" in attrs ? "href" : "content";
+	const value = attrs[key];
+	if (typeof value !== "string") return entry;
+	return { ...entry, attrs: { ...attrs, [key]: value.replace(/\.html(?=[?#]|$)/, "") } };
+});
+---
+{head.map(({ tag: Tag, attrs, content }) => <Tag {...attrs} set:html={content} />)}

@@ -3,7 +3,7 @@
  * Generate llms.txt and llms-full.txt for AI agent optimization.
  * Follows the llmstxt.org specification.
  *
- * Source: Docusaurus docs at ../docs/docs (all .md and .mdx files).
+ * Source: Starlight docs at src/content/docs/docs (all .md and .mdx files).
  *
  * Usage: node scripts/generate-llms-txt.ts [--output .output/public]
  */
@@ -17,8 +17,9 @@ const outputDir = process.argv.includes("--output")
   ? process.argv[process.argv.indexOf("--output") + 1]
   : ".output/public";
 
-// Scripts run from web/, so the Docusaurus docs live one level up.
-const docsRoot = resolve("..", "docs", "docs");
+// Scripts run from web/. Starlight docs live under src/content/docs/docs and
+// are served at /docs/** (route "" -> /docs/).
+const docsRoot = resolve("src", "content", "docs", "docs");
 const siteUrl = "https://gpui-query.freeoxide.com";
 
 const HEADER = [
@@ -31,7 +32,7 @@ const HEADER = [
 async function main(): Promise<void> {
   const parsed = await loadDocs(docsRoot);
   if (parsed.length === 0) {
-    console.log("No Docusaurus docs found, skipping llms.txt generation");
+    console.log("No docs found, skipping llms.txt generation");
     return;
   }
 

@@ -1,0 +1,142 @@
+---
+sidebar_position: 5
+title: Migrating from v1 to v2
+description: "The breaking and behavioral changes from gpui-query v1 to the options-first v2 API"
+---
+
+gpui-query v2 (the `0.2.x` line) is an options-first redesign. The hooks keep the same names, but the call signatures, return types, and a number of internal behaviors changed. This page is a checklist for porting a v1 codebase to v2, grouped by what actually breaks.
+
+## Summary of what changed
+
+| Area                  | v1                                          | v2                                                   |
+| --------------------- | ------------------------------------------- | --------------------------------------------------- |
+| Primary call style    | Positional args (key, cache, request, fetcher) | Options-first (`QueryOptions::new(key)`, fetcher)   |
+| Hook return type      | `Entity` only                               | `(Entity, Subscription)` tuple                       |
+| Fetcher signal        | Optional                                    | Always receives a `QuerySignal`                      |
+| Error interop         | `QueryError` without `Error` impl            | `QueryError: Display + Error` (`?` and `anyhow`)     |
+| Mutation retries      | Could retry by default                       | Default to **no retries**                            |
+| Infinite `max_pages`  | Unbounded                                    | Defaults to `Some(50)`                               |
+| Mutation GC           | Effectively a no-op                          | Real GC, respects `gc_time_ms`                       |
+| Status dedup          | Re-rendered on every mutation                | `QueryObserver` deduplicates by status               |
+
+## 1. Switch to options-first
+
+The single biggest mechanical change. v1 took the key, cache policy, and request policy as separate positional arguments. v2 takes a single `QueryOptions` (or just a key string, which converts via `Into`).
+
+```rust
+// v1
+// let entity = use_query("users", cache_policy, request_policy, fetcher, cx);
+
+// v2
+use gpui_query::hook::use_query;
+use gpui_query::QueryOptions;
+
+let (entity, _sub) = use_query(
+    QueryOptions::new("users")
+        .cache_policy(cache_policy)
+        .request_policy(request_policy),
+    |signal| async move { Ok::<_, gpui_query::QueryError>(vec![]) },
+    cx,
+);
+```
+
+For the simplest case — just a key with default policies — pass the string directly:
+
+```rust
+let (entity, _sub) = use_query("users", |signal| async move { Ok(vec![]) }, cx);
+```
+
+## 2. Handle the tuple return
+
+v2 hooks return `(Entity<…>, Subscription)`. You must store the `Subscription` or the observation is dropped immediately and your view will not re-render on data changes.
+
+```rust
+struct MyView {
+    users: gpui::Entity<gpui_query::QueryResource<Vec<User>, MyError>>,
+    _subscription: gpui::Subscription, // keep this
+}
+```
+
+This applies to `use_query`, `use_infinite_query`, and `use_mutation`. `use_query_select` returns a triple including a second subscription for the mapped observer — store both.
+
+## 3. Adopt the signal-always fetcher
+
+v2 fetchers always receive a `QuerySignal`. If you have long-running fetches, check `signal.is_cancelled()` periodically to bail out early when a newer request supersedes yours. For short fetches you can ignore it — the two-phase `accept_current_request` guard discards stale results automatically.
+
+If you cannot change the fetcher signature, `use_query_unsignalled` keeps the `Fn() -> Fut` (no-signal) shape for backward compatibility. It is not the recommended default.
+
+## 4. Review mutation retry defaults
+
+v1 mutations could retry by default. v2 mutations default to **`RetryPolicy::no_retries()`** because silently retrying a destructive action is dangerous. If your mutation is idempotent and you relied on retries, opt back in explicitly:
+
+```rust
+use gpui_query::{MutationOptions, RetryPolicy};
+use gpui_query::hook::use_mutation;
+
+let (entity, _sub) = use_mutation(
+    MutationOptions::default().retry_policy(RetryPolicy::new(2)),
+    cx,
+);
+```
+
+## 5. `use_mutation_with_options` is deprecated
+
+`use_mutation_with_options(options, cx)` is deprecated since `0.2.0`. It now delegates to `use_mutation`, which accepts `MutationOptions` via `Into`. Replace it:
+
+```rust
+// v1
+// let (entity, sub) = use_mutation_with_options(&opts, cx);
+
+// v2
+let (entity, sub) = use_mutation(opts, cx);
+```
+
+The deprecated function is retained (and still works) so existing callers compile, but it is no longer re-exported from the crate root. Move off it to clear the deprecation warning.
+
+## 6. Bound infinite queries with max_pages
+
+v1 infinite queries accumulated pages without limit. v2 defaults to `max_pages: Some(50)` to prevent unbounded memory growth from deep scrolling. If you genuinely need unbounded pages, opt back in:
+
+```rust
+use gpui_query::hook::InfiniteQueryOptions;
+
+let opts = InfiniteQueryOptions::new("feed").unbounded_pages();
+```
+
+Otherwise, decide on a cap that fits your UI (`max_pages(n)`).
+
+## 7. Take advantage of `QueryError: Display + Error`
+
+v2 gives `QueryError` full `Display + Error` impls, so it composes with `?` and `anyhow`. You can now return it from fallible helpers directly:
+
+```rust
+use gpui_query::QueryError;
+
+fn lookup() -> Result<Vec<User>, QueryError> {
+    // ...
+}
+```
+
+And use `QueryError::sanitized()` at the boundary where you convert server responses, so tokens and connection strings do not leak into logs or [DevTools](/docs/advanced/devtools).
+
+## 8. Trust status deduplication
+
+v1 re-rendered views on every internal mutation (including retry ticks). v2's `QueryObserver` / `MutationObserver` deduplicates by status, so a retrying query no longer re-renders your view on every attempt — only on terminal status changes. You can remove manual "did the status actually change?" guards from your render logic.
+
+## What did not change
+
+- `QueryKey` and the hierarchical key model are unchanged.
+- `QueryKeyFilter` (`Exact` / `Prefix` / `All`) and the bulk operations on `QueryClient` are unchanged.
+- `CachePolicy`, `RequestPolicy`, and their semantics are unchanged.
+- The `QueryClient` as a GPUI `Global`, set via `cx.set_global(QueryClient::new())`, is unchanged.
+- Cancellation is still cooperative via `QuerySignal`; only the staleness guard is stricter (no more TOCTOU window).
+
+## Need help?
+
+If a v1 pattern is not covered here, the source of truth is the crate's own doc comments — every module lists its v2 changes at the top. Run `cargo doc -p gpui-query --open` for the item-level reference.
+
+## Next steps
+
+- [API reference](/docs/advanced/api-reference) — the flat index of v2 types and functions.
+- [Comparison: vs. raw async](/docs/advanced/comparison) — what v2 removes versus hand-rolled `cx.spawn`.
+- [Quick start](/docs/getting-started/quick-start) — the canonical v2 entry point.

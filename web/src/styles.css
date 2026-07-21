@@ -3,6 +3,7 @@
 @import "@fontsource-variable/oxanium";
 @import "../../shared/tokens.css";
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 

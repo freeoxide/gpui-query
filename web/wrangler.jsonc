@@ -2,28 +2,12 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "gpui-query",
   "compatibility_date": "2025-09-02",
-  "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry",
   "assets": {
     "directory": "./dist/client",
-    "binding": "ASSETS",
-    "html_handling": "auto-trailing-slash",
-    // The /src, /@vite, /@id, /@fs and /node_modules exclusions only matter in
-    // `vp dev`, where the Cloudflare plugin honors run_worker_first and would
-    // otherwise route Vite module/CSS requests into the SSR worker (which
-    // rejects non-HTML requests). Production never requests these paths.
-    "run_worker_first": [
-      "/*",
-      "!/docs/**",
-      "!/assets/**",
-      "!/pagefind/**",
-      "!/src/**",
-      "!/@vite/**",
-      "!/@id/**",
-      "!/@fs/**",
-      "!/@react-refresh",
-      "!/@tanstack-start/**",
-      "!/node_modules/**",
-    ],
-  },
+    // auto-trailing-slash serves both /foo and /foo/ without 308 redirects, so
+    // the canonical no-trailing-slash URLs resolve directly. This is a purely
+    // static Cloudflare Pages deploy — no Worker, so no `main`, no bindings, no
+    // run_worker_first (those existed only for TanStack Start's SSR worker).
+    "html_handling": "auto-trailing-slash"
+  }
 }

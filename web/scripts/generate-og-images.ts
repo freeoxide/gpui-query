@@ -8,10 +8,9 @@
  *   public/og/changelog.png    /changelog (latest version read from ../CHANGELOG.md)
  *   public/og/faq.png          /faq
  *   public/og/blog/<slug>.png  one per MDX post in src/content/blog
- *   ../docs/static/img/og-docs.png   Docusaurus themeConfig.image fallback
+ *   public/og/docs.png        docs OG fallback (Astro-owned)
  *
- * Runs first in `bun run build` — before build-docs.ts, so the Docusaurus
- * build picks up the docs fallback image from its static dir.
+ * Runs first in `bun run build`, ahead of `astro build`.
  *
  * Usage:
  *   node scripts/generate-og-images.ts                 # everything
@@ -45,7 +44,6 @@ const keepSvg = args.includes("--keep-svg");
 
 const contentDir = resolve("src/content/blog");
 const publicDir = resolve("public");
-const docsStaticImg = resolve("..", "docs", "static", "img");
 const changelogPath = resolve("..", "CHANGELOG.md");
 
 /* ── Frontmatter parsing (same simple YAML shape as lib/blog.ts) ───── */
@@ -117,7 +115,7 @@ async function sitePages(): Promise<Array<{ name: string; content: OgContent; ou
     },
     {
       name: "docs",
-      outFile: join(docsStaticImg, "og-docs.png"),
+      outFile: join(publicDir, "og", "docs.png"),
       content: {
         kicker: { text: "gpui-query", suffix: "/ docs" },
         title: "Documentation",

@@ -1,0 +1,36 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+// Starlight is configured with disable404Route: true, so this page owns the
+// site-wide 404. (Ported from the NotFoundPage in routes/__root.tsx.)
+---
+<BaseLayout title="Page not found - gpui-query" canonicalPath="/404" noindex>
+  <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div class="flex min-h-[60vh] flex-col items-center justify-center text-center">
+      <h1 class="text-8xl font-extrabold tracking-tighter text-primary">404</h1>
+      <p class="mt-4 text-2xl font-semibold text-foreground">Page not found</p>
+      <p class="mt-2 max-w-md text-muted-foreground">
+        The page you are looking for does not exist or has been moved.
+      </p>
+      <div class="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+        <a
+          href="/"
+          class="inline-flex h-10 items-center justify-center gap-1.5 bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <svg viewBox="0 0 256 256" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+            <path d="M218.83 103.77 160 64l-.69-33.37a8 8 0 0 0-8-7.63H88a8 8 0 0 0-8 8v8a16 16 0 0 0 16 16h32l-58 40.23a16 16 0 0 0 0 25.54L128 160v32h-16a16 16 0 0 0-16 16v8a8 8 0 0 0 8 8h80a8 8 0 0 0 8-8v-8a16 16 0 0 0-16-16h-16v-32l66-40.23a16 16 0 0 0 0-25.54Z"></path>
+          </svg>
+          Go Home
+        </a>
+        <a
+          href="/docs/"
+          class="inline-flex h-10 items-center justify-center gap-1.5 border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          <svg viewBox="0 0 256 256" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+            <path d="M232 48h-64a32 32 0 0 0-32 32v128a8 8 0 0 0 12.24 6.78L168 200l19.76 14.78A8 8 0 0 0 200 208V80a16 16 0 0 1 16-16h16a8 8 0 0 0 0-16Z"></path>
+          </svg>
+          Documentation
+        </a>
+      </div>
+    </div>
+  </div>
+</BaseLayout>

@@ -1,13 +1,11 @@
 /* ==========================================================================
    gpui-query — Shared Design Tokens
    Single source of truth for colors, typography, spacing, and radius.
-   Used by both web/ (TanStack Start) and website/ (Docusaurus).
+   Consumed by web/ (Astro marketing + Starlight docs). Fonts are self-hosted
+   via @fontsource-variable/* in the app/styles and docs stylesheets, so no
+   Google Fonts @import is needed here (it previously caused an out-of-order
+   @import warning and a double font payload).
    ========================================================================== */
-
-/* --------------------------------------------------------------------------
-   Google Fonts
-   -------------------------------------------------------------------------- */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* --------------------------------------------------------------------------
    Light Mode

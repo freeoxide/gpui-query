@@ -1,0 +1,105 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getCollection, render, type CollectionEntry } from "astro:content";
+import { blogPost } from "../../lib/seo";
+
+type Props = {
+  post: CollectionEntry<"blog">;
+  newer?: CollectionEntry<"blog">;
+  older?: CollectionEntry<"blog">;
+};
+
+// Enumerate /blog/$slug from the collection; compute prev/next (newest-first).
+export async function getStaticPaths() {
+  const all = (await getCollection("blog")).sort(
+    (a, b) => b.data.date.getTime() - a.data.date.getTime()
+  );
+  return all.map((post, index) => ({
+    params: { slug: post.id },
+    props: { post, newer: all[index - 1], older: all[index + 1] },
+  }));
+}
+
+const { post, newer, older } = Astro.props;
+const { Content } = await render(post);
+const fm = post.data;
+
+const SITE = "https://gpui-query.freeoxide.com";
+const url = `${SITE}/blog/${post.id}`;
+const ogImage = `${SITE}/og/blog/${post.id}.png`;
+const title = `${fm.title} - gpui-query Blog`;
+const jsonLd = blogPost({
+  headline: fm.title,
+  description: fm.description,
+  author: fm.author,
+  datePublished: fm.date.toISOString(),
+  url,
+  image: ogImage,
+});
+
+function formatDate(d: Date): string {
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+}
+---
+<BaseLayout
+  title={title}
+  description={fm.description}
+  canonicalPath={`/blog/${post.id}`}
+  image={`/og/blog/${post.id}.png`}
+  ogType="article"
+  jsonLd={jsonLd}
+>
+  <div class="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-16 lg:px-8">
+    <a
+      href="/blog"
+      class="inline-flex items-center text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5 h-3.5 w-3.5" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+      Back to blog
+    </a>
+
+    <header class="mt-6 border-l-4 border-primary pl-5">
+      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{fm.title}</h1>
+      <p class="mt-3 text-lg text-muted-foreground">{fm.description}</p>
+      <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+        <span class="font-medium text-foreground/90">{fm.author}</span>
+        <span aria-hidden="true">·</span>
+        <time datetime={fm.date.toISOString()}>{formatDate(fm.date)}</time>
+      </div>
+      {fm.tags && fm.tags.length > 0 && (
+        <div class="mt-3 flex flex-wrap gap-2">
+          {fm.tags.map((tag) => (
+            <span class="inline-flex items-center rounded-md border border-transparent bg-secondary text-secondary-foreground px-2.5 py-0.5 text-xs font-normal">{tag}</span>
+          ))}
+        </div>
+      )}
+    </header>
+
+    <article class="prose prose-sm mt-10 max-w-none dark:prose-invert sm:prose-base">
+      <Content />
+    </article>
+
+    <nav class="mt-16 flex flex-col gap-4 border-t border-border/60 pt-8 sm:flex-row sm:justify-between">
+      {older ? (
+        <a href={`/blog/${older.id}`} class="inline-flex h-11 items-center justify-start gap-2 border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+          <span class="flex flex-col items-start truncate">
+            <span class="text-[11px] uppercase tracking-wider text-muted-foreground">Older</span>
+            <span class="truncate">{older.data.title}</span>
+          </span>
+        </a>
+      ) : (
+        <span class="hidden sm:block"></span>
+      )}
+      {newer ? (
+        <a href={`/blog/${newer.id}`} class="inline-flex h-11 items-center justify-end gap-2 border border-input bg-background px-4 text-right text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground">
+          <span class="flex flex-col items-end truncate">
+            <span class="text-[11px] uppercase tracking-wider text-muted-foreground">Newer</span>
+            <span class="truncate">{newer.data.title}</span>
+          </span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </a>
+      ) : null}
+    </nav>
+  </div>
+</BaseLayout>

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Generate clean .md alternatives for Docusaurus documentation pages.
+ * Generate clean .md alternatives for documentation pages.
  * AI crawlers can fetch these directly for plain markdown content.
  *
- * Source: Docusaurus docs at ../docs/docs (all .md and .mdx files).
- * Output: {output}/docs/{route}.md
+ * Source: Starlight docs at src/content/docs/docs (all .md and .mdx files).
+ * Output: {output}/docs/{route}.md  (route "" -> docs/index.md, served at /docs/)
  *
  * Usage: node scripts/generate-md-alt.ts [--output .output/public]
  */
@@ -18,8 +18,8 @@ const outputDir = process.argv.includes("--output")
   ? process.argv[process.argv.indexOf("--output") + 1]
   : ".output/public";
 
-// Scripts run from web/, so the Docusaurus docs live one level up.
-const docsRoot = resolve("..", "docs", "docs");
+// Scripts run from web/. Starlight docs live under src/content/docs/docs.
+const docsRoot = resolve("src", "content", "docs", "docs");
 
 async function main(): Promise<void> {
   const docs = await loadDocs(docsRoot);

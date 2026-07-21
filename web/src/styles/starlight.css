@@ -1,0 +1,198 @@
+/* ==========================================================================
+   gpui-query — Starlight theme
+   Maps Starlight's --sl-* theme variables onto the shared design tokens
+   (shared/tokens.css) so the docs share the marketing site's palette, fonts,
+   and sharp-radius identity. See astro-migration.mdx § "Starlight CSS".
+
+   Two facts make this work:
+   1. Starlight's base styles live in @layer starlight.{base,components} (see the
+      package's style/*.css). Unlayered CSS beats layered CSS regardless of
+      specificity, so the rules below reliably override Starlight's defaults —
+      INCLUDING per-type declarations on .starlight-aside--{type} (which would
+      otherwise beat a :root mapping).
+   2. shared/tokens.css already flips --color-* under [data-theme='dark'] and
+      .dark. Starlight drives dark mode via <html data-theme="dark">, so
+      mapping --sl-* -> --color-* once makes docs follow the same light/dark
+      palette as the app (and the Starlight toggle works without a bridge).
+   ========================================================================== */
+
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "../../../shared/tokens.css";
+
+/* --------------------------------------------------------------------------
+   Fonts — self-hosted variable faces (same override the app's styles.css uses;
+   tokens.css declares the static family names, fontsource registers the
+   "<Family> Variable" faces). NOTE: tokens.css also @imports the static Google
+   faces, which ship unused here — a known nit, left for a tokens refactor.
+   -------------------------------------------------------------------------- */
+:root {
+	--font-sans:
+		"Inter Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+		"Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+	--font-mono:
+		"JetBrains Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+		"Liberation Mono", monospace;
+
+	/* Chart colors (web-only today; mirrored from src/styles.css so any future
+	   docs chart component resolves them). TODO(Phase 4): lift into shared tokens. */
+	--chart-1: oklch(0.828 0.111 230.318);
+	--chart-2: oklch(0.685 0.169 237.323);
+	--chart-3: oklch(0.588 0.158 241.966);
+	--chart-4: oklch(0.5 0.134 242.749);
+	--chart-5: oklch(0.443 0.11 240.79);
+}
+
+/* --------------------------------------------------------------------------
+   Starlight semantic theme variables -> shared tokens.
+   Defined for the no-attribute fallback and both explicit themes for clarity;
+   the unlayered cascade beats Starlight's @layer starlight.base either way,
+   and var(--color-*) resolves per theme via tokens.css.
+   -------------------------------------------------------------------------- */
+:root,
+:root[data-theme='light'],
+:root[data-theme='dark'] {
+	/* Accent ramp — lime primary with the deep-green primary-foreground as the
+	   low (pressed/hover) shade. */
+	--sl-color-accent: var(--color-primary);
+	--sl-color-accent-high: var(--color-primary);
+	--sl-color-accent-low: var(--color-primary-foreground);
+	--sl-color-text-accent: var(--color-primary);
+	--sl-color-text-invert: var(--color-primary-foreground);
+	--sl-color-bg-accent: var(--color-primary);
+
+	/* Surfaces */
+	--sl-color-bg: var(--color-background);
+	--sl-color-bg-nav: var(--color-background);
+	--sl-color-bg-sidebar: var(--color-background);
+	--sl-color-bg-inline-code: var(--color-muted);
+
+	/* Text */
+	--sl-color-text: var(--color-foreground);
+	--sl-color-banner-text: var(--color-foreground);
+
+	/* Lines */
+	--sl-color-hairline: var(--color-border);
+	--sl-color-hairline-light: var(--color-border);
+	--sl-color-hairline-shade: var(--color-border);
+
+	/* Mobile nav / dialog backdrop */
+	--sl-color-backdrop-overlay: oklch(0.145 0 0 / 0.66);
+
+	/* Fonts */
+	--sl-font: var(--font-sans);
+	--sl-font-mono: var(--font-mono);
+
+	/* Reading rhythm matches the old docs (1.75 line height) */
+	--sl-line-height: 1.75;
+
+	/* Search dialog corner radius (Starlight reads --sl-search-corners). */
+	--sl-search-corners: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Aside callouts (:::note / :::tip / :::caution / :::danger).
+   Starlight's defaults map note=blue, tip=purple, caution=orange, danger=red
+   (style/asides.css declares these vars ON each .starlight-aside--{type}, which
+   would beat any :root value). Realign to the brand: note/tip take the lime
+   primary, caution amber, danger destructive-red — matching the old Docusaurus
+   admonitions. Unlayered, so these win over @layer starlight.components.
+   -------------------------------------------------------------------------- */
+.starlight-aside--note,
+.starlight-aside--tip {
+	--sl-color-asides-border: color-mix(in oklab, var(--color-primary) 35%, transparent);
+	--sl-color-asides-text-accent: var(--color-primary);
+	background-color: color-mix(in oklab, var(--color-primary) 7%, transparent);
+}
+.starlight-aside--caution {
+	--sl-color-asides-border: oklch(0.7 0.12 75 / 0.45);
+	--sl-color-asides-text-accent: oklch(0.62 0.14 75);
+	background-color: oklch(0.7 0.12 75 / 0.07);
+}
+.starlight-aside--danger {
+	--sl-color-asides-border: color-mix(in oklab, var(--color-destructive) 40%, transparent);
+	--sl-color-asides-text-accent: var(--color-destructive);
+	background-color: color-mix(in oklab, var(--color-destructive) 7%, transparent);
+}
+
+/* --------------------------------------------------------------------------
+   Sharp visual identity — flatten Starlight's rounded surfaces to match the
+   app (old theme: border-radius 0 everywhere). Selectors verified against the
+   package: Card (.card), LinkCard (.sl-link-card), LinkButton (.sl-link-button,
+   a 999rem pill by default), Badge (.sl-badge), Pagination (.pagination-links
+   a), FileTree (.not-content), Search (--sl-search-corners, set above), and
+   content pre/blockquote/table. Steps number circles (99rem) and the mobile
+   menu toggle (50%) stay round intentionally.
+   -------------------------------------------------------------------------- */
+.card,
+.sl-link-card,
+.sl-link-button,
+.sl-badge,
+.pagination-links a,
+.not-content,
+.sl-markdown-content :is(pre, blockquote, table) {
+	border-radius: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Prose surfaces — recover the old docs' table, blockquote, and inline-code
+   treatments (Starlight's defaults are plainer). Code-block background is left
+   to ExpressiveCode's own theme (it ships a proper dark/light pair; overriding
+   it previously made dark-mode code lighter than the page).
+   -------------------------------------------------------------------------- */
+
+/* Tables: bordered, uppercase tracked header, row dividers. */
+.sl-markdown-content table {
+	border: 1px solid var(--color-border);
+	border-collapse: collapse;
+	width: 100%;
+	font-size: 0.8125rem;
+}
+.sl-markdown-content thead {
+	background-color: color-mix(in oklab, var(--color-foreground) 4%, transparent);
+}
+.sl-markdown-content th {
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--color-muted-foreground);
+	border-bottom: 1px solid var(--color-border);
+}
+.sl-markdown-content td,
+.sl-markdown-content th {
+	padding: 0.625rem 1rem;
+	text-align: left;
+}
+.sl-markdown-content tbody tr {
+	border-bottom: 1px solid color-mix(in oklab, var(--color-foreground) 6%, transparent);
+}
+.sl-markdown-content tbody tr:last-child {
+	border-bottom: none;
+}
+
+/* Blockquotes: lime left rule + tinted background (old docs style). */
+.sl-markdown-content blockquote {
+	border-left: 3px solid var(--color-primary);
+	background-color: color-mix(in oklab, var(--color-primary) 4%, transparent);
+	color: var(--color-muted-foreground);
+	padding: 0.75rem 1.25rem;
+	margin: 0 0 1.5em 0;
+}
+
+/* Inline code: green-tinted like the old docs (outside code blocks). */
+.sl-markdown-content :not(pre) > code {
+	color: var(--color-primary);
+	background-color: var(--color-muted);
+}
+
+/* Headings: tighter tracking (h1 a touch tighter than h2–h4), matching the
+   app/docs type. */
+.sl-markdown-content h1 {
+	letter-spacing: -0.03em;
+}
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4 {
+	letter-spacing: -0.025em;
+}

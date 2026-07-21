@@ -1,7 +1,7 @@
 /**
- * Shared helpers for scripts that read the Docusaurus docs (../docs/docs)
- * and turn them into plain markdown: generate-llms-txt.ts and
- * generate-md-alt.ts.
+ * Shared helpers for scripts that read the Starlight docs
+ * (src/content/docs/docs) and turn them into plain markdown:
+ * generate-llms-txt.ts and generate-md-alt.ts.
  */
 
 import { readdir, readFile } from "node:fs/promises";
@@ -69,10 +69,10 @@ export function parseFrontmatter(text: string): { frontmatter: DocFrontmatter; b
 }
 
 /**
- * Resolve the Docusaurus route for a doc file.
- * Mirrors Docusaurus' default routing: the route is the file path relative
- * to docs/, without extension, using forward slashes, with index.* -> "" and
- * honoring an explicit `slug:` frontmatter override.
+ * Resolve the docs route for a doc file (relative to the Starlight content dir
+ * src/content/docs/docs). Mirrors Starlight/Astro routing: the route is the
+ * file path without extension, using forward slashes, with index.* -> "" (the
+ * /docs/ root) and nested index.* -> their directory route.
  */
 export function resolveRoute(relPath: string, frontmatter: DocFrontmatter): string {
   if (frontmatter.slug) {
@@ -85,7 +85,8 @@ export function resolveRoute(relPath: string, frontmatter: DocFrontmatter): stri
     .replace(/\.(mdx?|md)$/, "")
     .split(sep)
     .join("/");
-  // index files map to their directory route.
+  // index files map to their directory route (bare index -> root "").
+  if (route === "index") return "";
   if (route.endsWith("/index")) route = route.slice(0, -"/index".length);
   return route;
 }
