@@ -18,21 +18,21 @@ The API mirrors what TanStack Query popularized in the JavaScript ecosystem: `us
 
 ```toml
 [dependencies]
-gpui-query = "0.1.0"
+gpui-query = "0.2.0"
 ```
 
 This pulls in the `client` layer (which includes `core`). To use the declarative hooks:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.1.0", features = ["hook"] }
+gpui-query = { version = "0.2.0", features = ["hook"] }
 ```
 
 To use only the core state machine with no GPUI dependency:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.1.0", default-features = false, features = ["core"] }
+gpui-query = { version = "0.2.0", default-features = false, features = ["core"] }
 ```
 
 ## quick start

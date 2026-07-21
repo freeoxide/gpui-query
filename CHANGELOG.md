@@ -5,7 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-21
+
+> Disk persistence, server-driven cache policy, and two new companion crates.
+
+### Added
+
+#### Persistence (`gpui-query` with the new `persist` feature)
+
+- `Persister` trait with async `load` / `save`, and the `PersistSnapshot` / `PersistedEntry` / `PersistError` / `PERSIST_VERSION` types that adapters serialize to and from.
+- `QueryClient::persist_with(persister, opts, cx) -> PersistHandle`, a debounced driver that coalesces bursts of cache mutations into one snapshot per window (default 500 ms) and writes only entries younger than `max_age` (default 24 h).
+- `hydrate(client, persister, filter, max_age, cx)` to restore a cold-start cache from disk, re-checking the persist version before applying entries.
+- `PersistOptions` (`filter` / `max_age` / `debounce`) and `PersistFilter` (`Exact` / `Prefix` / `All`) to scope what gets persisted.
+- `SerializerRegistry` / `DeserializerRegistry` for round-tripping typed values through `serde_json::Value` without leaking concrete types into the core layer.
+- `NoopPersister` for tests and disabled-persistence modes.
+
+#### "Server wins" cache policy (`Fetched`)
+
+- `Fetched<T>` fetcher result wrapper in `core`: return `Result<Fetched<T>, E>` to let a fetcher attach a server-derived `CachePolicy` that overrides the caller's per-query policy on success.
+- `Fetched::new` (no override), `Fetched::with_policy` (override), and `Fetched::with_meta` (persist-gated opaque metadata, e.g. an HTTP `CacheMeta` for cheap `304` refetches after relaunch).
+- `use_query_with_policy` and `fetch_query_with_policy` hooks that accept `Fetched`-returning fetchers.
+
+#### `gpui-query-http` — HTTP cache-header helpers (new companion crate)
+
+- `cache_policy_from_headers(&HeaderMap)` turns `Cache-Control` into a `CachePolicy` per [RFC 9111]: `no-store` / `no-cache` → `NoCache`, `max-age` / `s-maxage` → `Ttl`, and `stale-while-revalidate` → `StaleWhileRevalidate`. Directive names are matched case-insensitively and values may be quoted.
+- `HttpCache<B>` in-memory cache layer, generic over an `HttpBackend` trait so any request library can plug in.
+- `BackendResponse`, `Conditionals` (ETag / `If-Modified-Since`), and a serializable `CacheMeta` for persistence round-trip.
+- Optional `ReqwestBackend` behind the `reqwest` cargo feature; `reqwest` is never a hard dependency.
+- Depends on `gpui-query` `core` only — no GPUI — keeping `http` / `bytes` / `reqwest` out of the core crate.
+
+#### `gpui-query-persist` — disk persistence adapter (new companion crate)
+
+- `FilePersister`, an atomic, durable `Persister`: each save writes to a sibling temp file, fsyncs it (issuing `F_FULLFSYNC` on macOS for true durability), renames it over the target, then fsyncs the parent directory on POSIX so a crash mid-write never corrupts the cache.
+- Tolerant load: missing file → empty snapshot; corrupt JSON/bincode → logged warning + empty snapshot (no panic); version mismatch → typed `PersistError::VersionMismatch`.
+- `PersistFormat::Json` (default, inspectable) and `PersistFormat::Bincode` (compact), plus `FilePersister::json` / `::bincode` / `::in_cache_dir` constructors.
+- `PersistError` surfaces retryable Windows `ERROR_ACCESS_DENIED` (antivirus / concurrent reader) as a distinct `Permission` variant so callers can back off, while preserving the original `io::Error` chain elsewhere.
+
+### Changed
+
+- New `persist` cargo feature gates the persistence module (and the `serde_json` / `thiserror` deps); `core` and `client` stay free of it.
+- The workspace gains two crates: `gpui-query-http` (core-only) and `gpui-query-persist` (pulls `persist` + `client` + `hook`).
+- Error sanitization now strips connection strings, tokens, paths, emails, and hex keys from messages (documented in the main crate README).
+
 ## [0.1.4] - 2026-06-17
+
+> Crate metadata and README improvements on crates.io.
 
 ### Added
 
@@ -13,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - readme field on gpui-query-legacy so its README renders on crates.io.
 
 ## [0.1.3] - 2026-06-14
+
+> Decoupled the legacy crate and fixed gpui version compatibility.
 
 ### Changed
 
@@ -28,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.2] - 2025-06-13
 
+> Single-workflow releases and an independent legacy crate.
+
 ### Changed
 
 - The CI pipeline now publishes both crates in a single workflow run. The changelog-release workflow handles tag, GitHub Release, publish, and website deploy without needing a separate trigger.
@@ -35,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Legacy crate publish step tolerates "already uploaded" errors so the main crate can still publish when re-running a workflow.
 
 ## [0.1.1] - 2025-06-12
+
+> The v2 rewrite became the main crate; v1 lives on as gpui-query-legacy.
 
 ### Changed
 
@@ -51,6 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All `gpui_query_v2` references in source and docs replaced with `gpui_query`.
 
 ## [0.1.0] - 2025-06-10
+
+> Initial public release: core query system, client registry, and GPUI hooks.
 
 ### Added
 
@@ -101,6 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Initial public release
 
+[0.2.0]: https://github.com/freeoxide/gpui-query/releases/tag/v0.2.0
 [0.1.4]: https://github.com/freeoxide/gpui-query/releases/tag/v0.1.4
 [0.1.3]: https://github.com/freeoxide/gpui-query/releases/tag/v0.1.3
 [0.1.2]: https://github.com/freeoxide/gpui-query/releases/tag/v0.1.2

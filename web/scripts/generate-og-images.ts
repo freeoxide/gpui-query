@@ -5,7 +5,7 @@
  *
  *   public/og-image.png        root brand card (homepage, link previews)
  *   public/og/blog.png         /blog index
- *   public/og/changelog.png    /changelog (latest version read from ../CHANGELOG.md)
+ *   public/og/changelog.png    /changelog (latest version from crates/gpui-query/Cargo.toml)
  *   public/og/faq.png          /faq
  *   public/og/blog/<slug>.png  one per MDX post in src/content/blog
  *   public/og/docs.png        docs OG fallback (Astro-owned)
@@ -24,6 +24,7 @@ import { Buffer } from "node:buffer";
 import process from "node:process";
 import sharp from "sharp";
 import { composeOgSvg, OG_WIDTH, OG_HEIGHT, type OgContent } from "./lib/og.ts";
+import { latestRelease } from "../src/lib/release.ts";
 
 interface BlogFrontmatter {
   title: string;
@@ -44,7 +45,6 @@ const keepSvg = args.includes("--keep-svg");
 
 const contentDir = resolve("src/content/blog");
 const publicDir = resolve("public");
-const changelogPath = resolve("..", "CHANGELOG.md");
 
 /* ── Frontmatter parsing (same simple YAML shape as lib/blog.ts) ───── */
 function parseFrontmatter(source: string, file: string): BlogFrontmatter {
@@ -71,16 +71,7 @@ function formatDate(iso: string | undefined): string {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
-/* Latest release from the crate changelog, e.g. { version: "0.1.4", date: "2026-06-17" }. */
-async function latestRelease(): Promise<{ version: string; date: string } | undefined> {
-  try {
-    const changelog = await readFile(changelogPath, "utf8");
-    const m = changelog.match(/^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})/m);
-    return m ? { version: m[1], date: m[2] } : undefined;
-  } catch {
-    return undefined;
-  }
-}
+/* Latest release (version from Cargo.toml, date from CHANGELOG.md) — see src/lib/release.ts. */
 
 /* ── Rasterization ──────────────────────────────────────────────────── */
 async function renderPng(content: OgContent, outFile: string): Promise<void> {
