@@ -222,6 +222,52 @@ cx.set_global(
 );
 ```
 
+## Server wins with `Fetched<T>`
+
+A fetcher normally returns `Result<T, E>`, and the resource uses whatever `CachePolicy` the caller supplied through `QueryOptions`. That policy is decided entirely on the client.
+
+Sometimes the server knows better. A `Cache-Control: max-age=30` response header is more authoritative than a TTL you guessed at compile time. The `*_with_policy` hooks let a fetcher return `Result<Fetched<T>, E>` instead, carrying a server-derived `CachePolicy` that overrides the caller's per-query policy once the fetch resolves successfully.
+
+- **`use_query_with_policy(options, fetcher, cx)`** - same shape as `use_query` (options-first, signal-accepting fetcher, returns `(Entity<QueryResource<T, E>>, Subscription)`), but the fetcher returns `Result<Fetched<T>, E>`.
+- **`fetch_query_with_policy(&entity, fetcher, cx)`** - same shape as `fetch_query`, but the fetcher returns `Result<Fetched<T>, E>`.
+
+`Fetched<T>` has three constructors:
+
+```rust
+// No override: the resource keeps the caller's policy.
+Fetched::new(data)
+
+// Override: the resource's policy is replaced with the server's.
+Fetched::with_policy(data, policy: CachePolicy)
+
+// (`persist` feature) Attach opaque metadata that flows into PersistedEntry::meta.
+Fetched::with_meta(self, meta)
+```
+
+A fetcher that just parsed the response headers can push that TTL back into the resource:
+
+```rust
+use gpui_query::{
+    use_query_with_policy, CachePolicy, Fetched, QueryKey, QueryOptions,
+};
+use gpui_query_http::cache_policy_from_headers;
+
+let (entity, _sub) = use_query_with_policy(
+    QueryOptions::new(QueryKey::from(["notifications"])),
+    |_signal| async move {
+        let resp = client.get(url).send().await?;
+        let policy = cache_policy_from_headers(resp.headers())
+            .unwrap_or(CachePolicy::NoCache);
+        Ok(Fetched::with_policy(resp.json().await?, policy))
+    },
+    cx,
+);
+```
+
+The server policy replaces the resource's stored policy immediately after `complete_success`, so subsequent freshness and SWR checks use the server's TTL. Returning `Fetched::new(data)` (or using the plain `Result<T, E>` hooks) leaves the caller's policy untouched. Server-wins is strictly opt-in.
+
+`Fetched::with_meta` requires the `persist` feature. The opaque `meta` flows into `PersistedEntry::meta` when the resource is persisted, so it survives a cold start. See [Persistence](/docs/guides/persistence). For the full HTTP `Cache-Control` and ETag flow, see [HTTP caching](/docs/guides/http-caching).
+
 ## Putting it together
 
 A typical setup looks like this:

@@ -107,6 +107,7 @@ export default defineConfig({
             { label: "Error handling", link: "/docs/guides/error-handling" },
             { label: "Retry", link: "/docs/guides/retry" },
             { label: "Persistence", link: "/docs/guides/persistence" },
+            { label: "HTTP cache headers", link: "/docs/guides/http-caching" },
             { label: "Query Keys", link: "/docs/guides/query-keys" },
             { label: "The Select Pattern", link: "/docs/guides/select-pattern" },
           ],

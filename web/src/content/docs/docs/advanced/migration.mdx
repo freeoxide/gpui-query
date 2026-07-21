@@ -4,7 +4,7 @@ title: Migrating from v1 to v2
 description: "The breaking and behavioral changes from gpui-query v1 to the options-first v2 API"
 ---
 
-gpui-query v2 (the `0.2.x` line) is an options-first redesign. The hooks keep the same names, but the call signatures, return types, and a number of internal behaviors changed. This page is a checklist for porting a v1 codebase to v2, grouped by what actually breaks.
+gpui-query v2 (the `0.2.x` line) is an options-first redesign. The hooks keep the same names, but the call signatures, return types, and a number of internal behaviors changed. This page is a checklist for porting a v1 codebase to v2, grouped by what breaks.
 
 ## Summary of what changed
 
@@ -21,7 +21,7 @@ gpui-query v2 (the `0.2.x` line) is an options-first redesign. The hooks keep th
 
 ## 1. Switch to options-first
 
-The single biggest mechanical change. v1 took the key, cache policy, and request policy as separate positional arguments. v2 takes a single `QueryOptions` (or just a key string, which converts via `Into`).
+The biggest mechanical change is the call signature. v1 took the key, cache policy, and request policy as separate positional arguments. v2 takes a single `QueryOptions` (or just a key string, which converts via `Into`).
 
 ```rust
 // v1
@@ -40,7 +40,7 @@ let (entity, _sub) = use_query(
 );
 ```
 
-For the simplest case — just a key with default policies — pass the string directly:
+For the simplest case (just a key with default policies), pass the string directly:
 
 ```rust
 let (entity, _sub) = use_query("users", |signal| async move { Ok(vec![]) }, cx);
@@ -57,11 +57,11 @@ struct MyView {
 }
 ```
 
-This applies to `use_query`, `use_infinite_query`, and `use_mutation`. `use_query_select` returns a triple including a second subscription for the mapped observer — store both.
+This applies to `use_query`, `use_infinite_query`, and `use_mutation`. `use_query_select` returns a triple including a second subscription for the mapped observer; store both.
 
 ## 3. Adopt the signal-always fetcher
 
-v2 fetchers always receive a `QuerySignal`. If you have long-running fetches, check `signal.is_cancelled()` periodically to bail out early when a newer request supersedes yours. For short fetches you can ignore it — the two-phase `accept_current_request` guard discards stale results automatically.
+v2 fetchers always receive a `QuerySignal`. If you have long-running fetches, check `signal.is_cancelled()` periodically to bail out early when a newer request supersedes yours. For short fetches you can ignore it: the two-phase `accept_current_request` guard discards stale results automatically.
 
 If you cannot change the fetcher signature, `use_query_unsignalled` keeps the `Fn() -> Fut` (no-signal) shape for backward compatibility. It is not the recommended default.
 
@@ -121,7 +121,7 @@ And use `QueryError::sanitized()` at the boundary where you convert server respo
 
 ## 8. Trust status deduplication
 
-v1 re-rendered views on every internal mutation (including retry ticks). v2's `QueryObserver` / `MutationObserver` deduplicates by status, so a retrying query no longer re-renders your view on every attempt — only on terminal status changes. You can remove manual "did the status actually change?" guards from your render logic.
+v1 re-rendered views on every internal mutation (including retry ticks). v2's `QueryObserver` / `MutationObserver` deduplicates by status, so a retrying query no longer re-renders your view on every attempt, only on terminal status changes. You can remove manual "did the status actually change?" guards from your render logic.
 
 ## What did not change
 
@@ -133,10 +133,10 @@ v1 re-rendered views on every internal mutation (including retry ticks). v2's `Q
 
 ## Need help?
 
-If a v1 pattern is not covered here, the source of truth is the crate's own doc comments — every module lists its v2 changes at the top. Run `cargo doc -p gpui-query --open` for the item-level reference.
+If a v1 pattern is not covered here, the source of truth is the crate's own doc comments: every module lists its v2 changes at the top. Run `cargo doc -p gpui-query --open` for the item-level reference.
 
 ## Next steps
 
-- [API reference](/docs/advanced/api-reference) — the flat index of v2 types and functions.
-- [Comparison: vs. raw async](/docs/advanced/comparison) — what v2 removes versus hand-rolled `cx.spawn`.
-- [Quick start](/docs/getting-started/quick-start) — the canonical v2 entry point.
+- [API reference](/docs/advanced/api-reference): the flat index of v2 types and functions.
+- [Comparison: vs. raw async](/docs/advanced/comparison): what v2 removes versus hand-rolled `cx.spawn`.
+- [Quick start](/docs/getting-started/quick-start): the canonical v2 entry point.

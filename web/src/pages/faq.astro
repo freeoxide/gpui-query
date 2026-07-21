@@ -23,7 +23,7 @@ const categories: FaqCategory[] = [
       {
         question: "How is gpui-query different from TanStack Query?",
         answer:
-          "gpui-query adapts TanStack Query's proven patterns to Rust and the GPUI framework. It uses Rust's type system for compile-time guarantees, Arc<AtomicBool> for cooperative cancellation, and integrates directly with GPUI's render loop.",
+          "gpui-query adapts TanStack Query's patterns to Rust and the GPUI framework. It uses Rust's type system for compile-time guarantees, Arc<AtomicBool> for cooperative cancellation, and integrates directly with GPUI's render loop.",
       },
       {
         question: "Can I use gpui-query outside of Zed?",
@@ -49,7 +49,7 @@ const categories: FaqCategory[] = [
       {
         question: "What happens if my component unmounts during a fetch?",
         answer:
-          "gpui-query uses cooperative cancellation via QuerySignal (Arc<AtomicBool>). When a component unmounts, the signal is set and the query checks it between retry attempts, enabling clean teardown.",
+          "gpui-query uses cooperative cancellation via QuerySignal (Arc<AtomicBool>). When a component unmounts, the signal is set and the query checks it between retry attempts, which keeps teardown clean.",
       },
       {
         question: "What is QuerySignal and when do I check it?",
@@ -65,12 +65,12 @@ const categories: FaqCategory[] = [
       {
         question: "Why does LatestWins cancel my in-flight request?",
         answer:
-          "LatestWins is a RequestPolicy that ensures only the most recent request's result is used. When a new request arrives, previous in-flight requests are cancelled via their signals, preventing stale data from overwriting fresh results.",
+          "LatestWins is a RequestPolicy that ensures only the most recent request's result is used. When a new request arrives, previous in-flight requests are cancelled via their signals, which prevents stale data from overwriting fresh results.",
       },
       {
         question: "How do I persist my query cache?",
         answer:
-          "Implement the QueryPersister trait to serialize and restore query state. gpui-query supports custom persistence backends — you can use files, databases, or any storage mechanism.",
+          "Enable the persist feature and implement the async Persister trait to save and restore query state across restarts. gpui-query supports custom backends (files, databases, KV) and ships a ready-made disk adapter in the gpui-query-persist crate.",
       },
       {
         question: "How do I handle pagination?",
@@ -80,7 +80,7 @@ const categories: FaqCategory[] = [
       {
         question: "Is there a devtools experience?",
         answer:
-          "gpui-query provides ClientDiagnostic types and dehydrate/hydrate methods for inspecting cache state, query status, and resource lifecycle — a developer toolkit for debugging async state.",
+          "gpui-query provides ClientDiagnostic types for inspecting cache state, query status, and resource lifecycle, a developer toolkit for debugging async state.",
       },
     ],
   },
@@ -101,7 +101,7 @@ const ogImage = "/og/faq.png";
       <div class="border-l-4 border-primary pl-5">
         <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Frequently Asked Questions</h1>
         <p class="mt-2 text-lg text-muted-foreground">
-          Everything you need to know about gpui-query, organized by topic.
+          Common questions about gpui-query, grouped by topic.
         </p>
       </div>
 

@@ -85,13 +85,15 @@ fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
 
 ## architecture
 
-The library is three layers, each gated by a Cargo feature flag.
+The library is four layers, each gated by a Cargo feature flag.
 
 **Core** (`feature = "core"`) is a serde-only state machine with zero framework coupling. This is where `QueryResource<T,E>`, `MutationResource<V,T,E>`, `CachePolicy`, `RetryPolicy`, `QueryKey`, and all the request lifecycle types live. You can use this layer in any Rust project, not just GPUI.
 
-**Client** (`feature = "client"`, the default) builds on core and adds `QueryClient`, a GPUI `Global` that provides type-partitioned storage via `QueryBucket<T,E>`. This layer handles garbage collection, cache invalidation, observers, persistence, and devtools diagnostics.
+**Client** (`feature = "client"`, the default) builds on core and adds `QueryClient`, a GPUI `Global` that provides type-partitioned storage via `QueryBucket<T,E>`. This layer handles garbage collection, cache invalidation, observers, and devtools diagnostics.
 
 **Hook** (`feature = "hook"`) provides the declarative hooks (`use_query`, `use_mutation`, `use_infinite_query`) that wire the client layer into GPUI views. All hooks return `(Entity, Subscription)` tuples.
+
+**Persistence** (`feature = "persist"`) adds an async `Persister` trait, `QueryClient::persist_with` (debounced snapshot saves), the free `hydrate()` function for cold-start restore, and typed (de)serializer registries. See the [Persistence guide](https://gpui-query.freeoxide.com/docs/guides/persistence).
 
 ```toml
 [features]
@@ -99,6 +101,7 @@ default = ["client"]
 core = []
 client = ["core", "dep:gpui"]
 hook = ["client"]
+persist = ["client", "hook", "dep:serde_json", "dep:thiserror"]
 ```
 
 ## queries
@@ -216,33 +219,39 @@ Retry delay is `base * 2^attempt`, capped at `max_delay`. The fetcher's `QuerySi
 
 ## persistence
 
-Implement `QueryPersister` to serialize and restore query state across app restarts:
+Enable the `persist` feature to save and restore the cache across restarts. Implement the async `Persister` trait, then drive it with `QueryClient::persist_with` (debounced snapshot saves) and the free `hydrate` function (cold-start restore):
 
 ```rust
-use gpui_query::{QueryPersister, DehydratedEntry};
+use std::time::Duration;
+use gpui_query::client::{
+    QueryClient, Persister, PersistSnapshot, PersistError, PersistOptions, PersistFilter,
+};
 
-struct FilePersister;
+struct MyPersister; // your backend: file, db, kv, …
 
-impl QueryPersister for FilePersister {
-    fn load(&self) -> Vec<DehydratedEntry> {
-        // Read from disk, database, etc.
-    }
-
-    fn save(&self, entries: Vec<DehydratedEntry>) {
-        // Write to disk, database, etc.
-    }
+impl Persister for MyPersister {
+    async fn load(&self) -> Result<PersistSnapshot, PersistError> { /* … */ }
+    async fn save(&self, _snapshot: &PersistSnapshot) -> Result<(), PersistError> { /* … */ }
 }
+
+// Debounced saves: coalesces bursts of cache mutations into one snapshot.
+let _handle = client.persist_with(MyPersister, PersistOptions::default(), cx);
+
+// Cold start: re-prime the cache from the persister (needs &mut QueryClient).
+gpui_query::client::hydrate(
+    &mut client, &MyPersister, &PersistFilter::All, Duration::from_secs(86_400), cx,
+).await.ok();
 ```
 
-Call `client.dehydrate()` to extract state and `client.hydrate(entries)` to restore it.
+Only `Success` entries with a registered serializer are persisted; the typed round-trip is driven by `QueryClient::register_serializer` / `register_deserializer`. The companion crate **`gpui-query-persist`** ships a ready-made atomic disk adapter (`FilePersister`). See the [Persistence guide](https://gpui-query.freeoxide.com/docs/guides/persistence).
 
 ## other things worth knowing
 
-`QueryObserver` and `MutationObserver` wrap entities and only call `cx.notify()` when the status actually changes, cutting down on unnecessary re-renders.
+`QueryObserver` and `MutationObserver` wrap entities and only call `cx.notify()` when the status changes. This avoids unnecessary re-renders.
 
 `QueryError::sanitized()` redacts connection strings, bearer tokens, file paths, emails, and hex keys from error messages. Useful for logging without leaking secrets.
 
-`use_query_select` projects a `QueryResource<T,E>` through a `SelectTransform<T,U>`, giving you a `MappedQueryResource` that derives values from cached data without extra fetches.
+`use_query_select` projects a `QueryResource<T,E>` through a `SelectTransform<T,U>` to produce a `MappedQueryResource` that derives values from cached data. No extra fetches are needed.
 
 `ClientDiagnostic`, `QueryDiagnostic`, and `MutationDiagnostic` give you runtime introspection of the query client's internal state for debugging.
 

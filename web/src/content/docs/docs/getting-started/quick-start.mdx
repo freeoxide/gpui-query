@@ -12,9 +12,9 @@ It assumes you have already [installed gpui-query and set up a `QueryClient` glo
 
 gpui-query is built around three pieces:
 
-- A **fetcher** — an async function that knows how to load some data. gpui-query owns everything else: caching, deduplication, retries.
-- `use_query` — a hook you call from a view's constructor (not in `render`). It fetches the first time, subscribes the view to the result, and returns an [`Entity`](/docs/api/queries) you read during render.
-- The `QueryClient` — a global registry that shares results across views so the same key is only ever fetched once.
+- A **fetcher**: an async function that knows how to load some data. gpui-query owns everything else: caching, deduplication, retries.
+- `use_query`: a hook you call from a view's constructor (not in `render`). It fetches the first time, subscribes the view to the result, and returns an [`Entity`](/docs/api/queries) you read during render.
+- The `QueryClient`: a global registry that shares results across views so the same key is only ever fetched once.
 
 Data is cached under a `QueryKey`. Two views asking for the same key read from the same cached entity.
 
@@ -35,7 +35,7 @@ pub struct Todo {
 
 ### 2. Define a fetcher
 
-A fetcher is a `Fn() -> Future<Output = Result<T, E>>`. It takes no arguments and returns the data or an error. The real networking is up to you (`reqwest`, an LSP transport, a local file) — here we return a fixed list so the example compiles without a server.
+A fetcher is a `Fn() -> Future<Output = Result<T, E>>`. It takes no arguments and returns the data or an error. The real networking is up to you (`reqwest`, an LSP transport, a local file). Here we return a fixed list so the example compiles without a server.
 
 ```rust
 use gpui_query::QueryError;
@@ -51,7 +51,7 @@ async fn fetch_todos() -> Result<Vec<Todo>, QueryError> {
 
 ### 3. Subscribe with use_query
 
-Call `use_query` in your view's `new`. It returns a tuple: the resource entity (store it on the view to read during render) and a `Subscription` (store it too — dropping it stops the view from re-rendering on changes).
+Call `use_query` in your view's `new`. It returns a tuple: the resource entity (store it on the view to read during render) and a `Subscription` (store it too, because dropping it stops the view from re-rendering on changes).
 
 ```rust
 use gpui_query::hook::use_query;
@@ -111,15 +111,15 @@ impl gpui::Render for TodosView {
 
 Useful predicates on the resource:
 
-- `r.is_loading()` — true during the first fetch or any refetch.
-- `r.is_pending()` — true when there is no data yet and a fetch is in flight.
-- `r.data()` / `r.error()` — `Option<&T>` / `Option<&E>`, borrowed for the duration of the read.
+- `r.is_loading()`: true during the first fetch or any refetch.
+- `r.is_pending()`: true when there is no data yet and a fetch is in flight.
+- `r.data()` / `r.error()`: `Option<&T>` / `Option<&E>`, borrowed for the duration of the read.
 
 That is the whole query loop: define a fetcher, subscribe with `use_query`, branch on status, render. gpui-query handles caching, deduplication, and re-rendering on every status transition.
 
 ## A tiny mutation
 
-Mutations are imperative: you trigger them on demand (a button, a form submit). `use_mutation` creates a `MutationResource<V, T, E>` entity — `V` is the variables you pass in, `T` the success result, `E` the error. Trigger it with the `mutate` helper.
+Mutations are imperative: you trigger them on demand (a button, a form submit). `use_mutation` creates a `MutationResource<V, T, E>` entity: `V` is the variables you pass in, `T` the success result, `E` the error. Trigger it with the `mutate` helper.
 
 ```rust
 use gpui_query::hook::{use_mutation, mutate};
@@ -185,7 +185,7 @@ client.invalidate_queries(&QueryKeyFilter::Prefix(&todos), cx);
 
 You now have a query that caches and a mutation that triggers. From here:
 
-- [Queries](/docs/api/queries) — the full `use_query` surface, the fetcher signal, and refetching.
-- [Mutations](/docs/api/mutations) — lifecycle callbacks and the `mutate` variants.
-- [Caching](/docs/guides/caching) — `CachePolicy`, request deduplication, and GC.
-- [Query keys](/docs/guides/query-keys) — hierarchical keys and invalidation scope.
+- [Queries](/docs/api/queries): the full `use_query` surface, the fetcher signal, and refetching.
+- [Mutations](/docs/api/mutations): lifecycle callbacks and the `mutate` variants.
+- [Caching](/docs/guides/caching): `CachePolicy`, request deduplication, and GC.
+- [Query keys](/docs/guides/query-keys): hierarchical keys and invalidation scope.

@@ -148,6 +148,48 @@ impl Dashboard {
 }
 ```
 
+## use_query_with_policy
+
+```rust
+fn use_query_with_policy<T, E, C, F, Fut>(
+    options: impl Into<QueryOptions>,
+    fetcher: F,
+    cx: &mut Context<C>,
+) -> (Entity<QueryResource<T, E>>, Subscription)
+where
+    F: Fn(QuerySignal) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<Fetched<T>, E>> + Send + 'static,
+```
+
+Like `use_query`, but the fetcher returns `Result<Fetched<T>, E>` instead of `Result<T, E>`. Everything else matches `use_query`.
+
+Use this when a response carries its own caching directive that should override the caller's per-query `CachePolicy` ("server wins"). On success, wrap your data in `Fetched`:
+
+- `Fetched::new(data)`: keep the resource's existing cache policy.
+- `Fetched::with_policy(data, policy)`: replace the resource's policy with the server's, effective immediately after the fetch resolves. Subsequent freshness and SWR checks use the server's TTL.
+
+```rust
+use gpui_query::{use_query_with_policy, QueryOptions, Fetched};
+
+let (users, _sub) = use_query_with_policy(
+    QueryOptions::new("users"),
+    |signal| async move {
+        let resp = reqwest::get("/api/users").await?;
+        // Parse Cache-Control BEFORE consuming `resp` via `.json()` (which takes `self`).
+        let policy = gpui_query_http::cache_policy_from_headers(resp.headers())?;
+        let users: Vec<User> = resp.json().await?;
+        Ok::<_, MyError>(Fetched::with_policy(users, policy))
+    },
+    cx,
+);
+```
+
+:::tip
+The plain `Result<T, E>` `use_query` is unchanged. Reach for `use_query_with_policy` only when the server can return a `CachePolicy` (typically HTTP APIs with `Cache-Control` / `Expires` headers).
+:::
+
+See the [HTTP caching guide](/docs/guides/http-caching) for `cache_policy_from_headers`, and [Caching: server wins with `Fetched<T>`](/docs/guides/caching#server-wins-with-fetchedt) for the full server-wins contract.
+
 ## fetch_query
 
 ```rust
@@ -196,6 +238,35 @@ fn handle_refresh(&mut self, cx: &mut Context<MyView>) {
     }, cx);
 }
 ```
+
+## fetch_query_with_policy
+
+```rust
+fn fetch_query_with_policy<T, E, C, F, Fut>(
+    entity: &Entity<QueryResource<T, E>>,
+    fetcher: F,
+    cx: &mut Context<C>,
+) where
+    F: Fn() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<Fetched<T>, E>> + Send + 'static,
+```
+
+Like `fetch_query`, but the fetcher returns `Result<Fetched<T>, E>` so a server-derived `CachePolicy` can override the resource's policy on success. The fetcher takes no signal, same as `fetch_query`. On failure, retries according to the entity's retry policy.
+
+Use this for imperative refetches whose response should update the cache policy, for example a manual refresh of an HTTP endpoint.
+
+```rust
+fn handle_refresh(&mut self, cx: &mut Context<MyView>) {
+    fetch_query_with_policy(&self.users, || async {
+        let resp = reqwest::get("/api/users").await?;
+        let policy = gpui_query_http::cache_policy_from_headers(resp.headers())?;
+        let users: Vec<User> = resp.json().await?;
+        Ok::<_, MyError>(Fetched::with_policy(users, policy))
+    }, cx);
+}
+```
+
+See [`use_query_with_policy`](#use_query_with_policy) for the server-wins contract, and the [caching guide](/docs/guides/caching#server-wins-with-fetchedt) for details.
 
 ## QueryResource
 
@@ -363,7 +434,7 @@ Signals are cancelled automatically when a newer request replaces an older one (
 pub enum CachePolicy {
     NoCache,                                    // Never cache
     Ttl { ttl_ms: u64 },                        // Cache for N milliseconds
-    StaleWhileRevalidate { ttl_ms: u64 },       // Serve stale, refetch in background
+    StaleWhileRevalidate { ttl_ms: u64, stale_ms: u64 }, // Serve stale, refetch in background
 }
 ```
 

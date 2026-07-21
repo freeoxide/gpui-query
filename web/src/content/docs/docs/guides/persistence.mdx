@@ -1,132 +1,169 @@
 ---
 sidebar_position: 4
 title: Persistence
-description: "Save and restore cached query data across app restarts with QueryPersister"
+description: "Save and restore cached query data across app restarts with the async Persister trait, persist_with, and hydrate."
 ---
 
-Persistence lets your app start with data already in the cache instead of an empty loading state. gpui-query provides a `QueryPersister` trait you implement against any backend — the filesystem, a database, an in-memory store — plus `dehydrate()` / `persist()` / `restore()` to drive snapshots in and out of the `QueryClient`.
-
-## The pieces
-
-| Piece                 | Role                                                                 |
-| --------------------- | ------------------------------------------------------------------- |
-| `QueryPersister`      | Trait you implement: `load() -> Vec<DehydratedEntry>` and `save(...)`. |
-| `DehydratedEntry`     | One cached resource: key, `TypeId`, kind (`"query"` / `"infinite"` / `"mutation"`). |
-| `DehydratedState`     | A `Vec<DehydratedEntry>` snapshot of all `Success` resources.        |
-| `QueryClient::dehydrate` | Produce a snapshot from the live cache.                           |
-| `QueryClient::persist` / `restore` | Save a snapshot via a persister / load entries back.   |
-| `QueryClient::set_query_data` | Restore typed data for a key (the hydration step).            |
-
-## Implementing a persister
-
-`QueryPersister` is `Send + Sync` with two methods. Entries flow through as plain values — the backend is free to serialize them however it likes (JSON, bincode, a database row).
-
-```rust
-use std::path::PathBuf;
-use gpui_query::client::{QueryPersister, DehydratedEntry};
-
-struct FilePersister {
-    path: PathBuf,
-}
-
-impl QueryPersister for FilePersister {
-    fn load(&self) -> Vec<DehydratedEntry> {
-        // Read the file, deserialize, return entries.
-        // On any failure, return an empty vec (cold start).
-        Vec::new()
-    }
-
-    fn save(&self, _entries: Vec<DehydratedEntry>) {
-        // Serialize `entries` and write to `self.path`.
-    }
-}
-```
+Persistence lets your app start with data already in the cache instead of an empty loading state. Enable the `persist` feature and gpui-query drives a snapshot of your `Success` entries through an async backend you implement (the filesystem, a database, or a KV store). It saves on a debounce and restores on cold start.
 
 :::note
-Because the `QueryClient` stores type-erased buckets, the persister deals in `DehydratedEntry` values — key + `TypeId` + kind — not in typed data. The actual `T` payload is serialized and restored at the call site where the concrete type is known (see [Restoring typed data](#restoring-typed-data) below).
+Persistence is gated behind the `persist` feature. Add it alongside `hook`:
+
+```toml
+gpui-query = { version = "0.2.0", features = ["hook", "persist"] }
+```
 :::
 
-## Saving state
+## How it fits together
 
-`QueryClient::persist(persister, cx)` dehydrates the live cache and hands the entries to the persister. Call it on shutdown, on a timer, or as part of GC — whatever cadence matches your app.
+The cache stores type-erased buckets, so persistence has to move typed data (`Vec<User>`, `Config`, …) through an opaque shape. gpui-query splits that into a few pieces:
+
+| Piece | Role |
+| ----- | ---- |
+| `Persister` | Async trait **you implement**: `load() -> Result<PersistSnapshot, PersistError>` and `save(&PersistSnapshot) -> Result<(), PersistError>`. |
+| `PersistSnapshot` / `PersistedEntry` | The on-wire shape: a map of key → `{ value (JSON), cached_at, cache_policy, meta }`. |
+| `QueryClient::persist_with` | A debounced driver that collects a snapshot on every cache mutation and hands it to the persister. Returns a `PersistHandle` drop-guard. |
+| `hydrate` (free fn) | Cold-start restore: load a snapshot and re-prime the live cache. |
+| `SerializerRegistry` / `DeserializerRegistry` | Typed `T -> JSON` and `JSON -> T` conversions, registered per `T`. Required for the value-carrying round-trip. |
+| `PersistOptions` / `PersistFilter` | Tuning: which keys (`Exact` / `Prefix` / `All`), max age, debounce. |
+| `PersistError` / `PERSIST_VERSION` | Typed errors; the snapshot format version loaders check. |
+
+## Register the typed (de)serializers
+
+Only resources whose data type `T` has a registered serializer are emitted, and only types with a registered deserializer come back on `hydrate`. Register both, keyed by the concrete `T` and the `E` you read it under:
 
 ```rust
 use gpui_query::client::QueryClient;
-# use std::sync::Arc;
-# struct FilePersister;
-# impl gpui_query::client::QueryPersister for FilePersister {
-#     fn load(&self) -> Vec<gpui_query::client::DehydratedEntry> { vec![] }
-#     fn save(&self, _: Vec<gpui_query::client::DehydratedEntry>) {}
-# }
-# fn _doc(cx: &mut gpui::App) {
-# let client = cx.global::<QueryClient>();
-# let persister = Arc::new(FilePersister);
 
-client.persist(&*persister, cx);
-# }
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct User { id: u64, name: String }
+#[derive(Clone, Debug)] struct MyError;
+
+let mut client = QueryClient::new();
+
+// T -> JSON (used when collecting a snapshot).
+client.register_serializer::<Vec<User>, MyError>(
+    |users| serde_json::to_value(users).unwrap(),
+);
+
+// JSON -> T (used by hydrate to re-prime the cache).
+client.register_deserializer::<Vec<User>, MyError>(
+    |v| serde_json::from_value(v.clone()).ok(),
+);
 ```
 
-Only resources in `Success` status are included; `Idle`, `Loading`, `Failure`, and `Cancelled` resources are skipped — you don't want to restore half-finished fetches.
+:::caution
+`hydrate` offers every on-disk entry to every registered deserializer. There is no type tag on `PersistedEntry`, so routing is by trial. A deserializer **must** return `None` for any shape that is not its own, or a foreign entry can be mis-primed. Keep them strict and cheap.
+:::
 
-## Restoring typed data
+## Implement a Persister
 
-`restore(persister)` is an associated function (it does not read `&self`) that loads the raw entries. Hydration itself is type-specific: iterate the entries and call `set_query_data::<T, E>(key, data, cx)` for each key you recognize.
+`Persister` is async and `Send + Sync + 'static`; the save future runs on GPUI's background executor, so blocking I/O is fine there. Be tolerant on load. A missing or corrupt store should yield an empty snapshot, not an error:
 
 ```rust
-use gpui_query::client::QueryClient;
-# use std::sync::Arc;
-# #[derive(Clone)] struct User;
-# #[derive(Clone, Debug)] struct MyError;
-# struct FilePersister;
-# impl gpui_query::client::QueryPersister for FilePersister {
-#     fn load(&self) -> Vec<gpui_query::client::DehydratedEntry> { vec![] }
-#     fn save(&self, _: Vec<gpui_query::client::DehydratedEntry>) {}
-# }
-# fn _doc(cx: &mut gpui::App) {
-# let mut client = QueryClient::new();
+use gpui_query::client::{Persister, PersistSnapshot, PersistError};
 
-// 1. Load whatever was persisted.
-let entries = QueryClient::restore(&(FilePersister));
+struct DbPersister { /* your handle */ }
 
-// 2. For each entry, restore typed data you know how to deserialize.
-for entry in entries {
-    match entry.key.as_str() {
-        "users" => {
-            let cached: Vec<User> = read_users_from_disk(); // your deserializer
-            client.set_query_data::<Vec<User>, MyError>("users", cached, cx);
-        }
-        other => {
-            // Unknown key — skip, or store for later typed restoration.
-        }
+impl Persister for DbPersister {
+    async fn load(&self) -> Result<PersistSnapshot, PersistError> {
+        // Read from your backend. Missing/corrupt → Ok(PersistSnapshot::new()).
+        Ok(PersistSnapshot::new())
+    }
+
+    async fn save(&self, snapshot: &PersistSnapshot) -> Result<(), PersistError> {
+        // Serialize `snapshot` (it is Serialize) and write it out.
+        Ok(())
     }
 }
-# }
-# fn read_users_from_disk() -> Vec<User> { vec![] }
+```
+
+For tests or a disabled mode, `NoopPersister` persists nothing and loads an empty snapshot.
+
+## Save with persist_with
+
+`QueryClient::persist_with(persister, opts, cx)` observes cache mutations and, after a short debounce, collects a fresh snapshot and calls `persister.save`. Bursts coalesce into one save per window. It returns a `PersistHandle`. Hold it for as long as you want saves to continue; dropping it stops scheduling new saves (one save already waiting on its timer may still finish).
+
+```rust
+use gpui_query::client::{QueryClient, PersistOptions, PersistFilter};
+
+# fn doc(client: &QueryClient, cx: &mut gpui::App) {
+// Defaults: every key, max age 24h, 500ms debounce.
+let _handle = client.persist_with(DbPersister, PersistOptions::default(), cx);
+
+// ...or scope and tune it:
+use std::time::Duration;
+let opts = PersistOptions {
+    filter: PersistFilter::Prefix("users".into()), // only the "users" subtree
+    max_age: Duration::from_secs(60 * 60),
+    debounce: Duration::from_millis(250),
+};
+let _handle = client.persist_with(DbPersister, opts, cx);
 # }
 ```
 
-`set_query_data` writes directly into the cache for a key, creating the resource if it does not already exist. The resource's previous data is saved for rollback via `rollback_to_previous()`, but the status and timestamp are not changed — this is manual cache manipulation where you control the lifecycle.
+For a one-shot snapshot without the driver, call `client.collect_persist_snapshot(&filter, max_age, cx)` and persist it yourself.
 
-### Why restore is type-specific
+## Restore on cold start
 
-The `QueryClient` partitions resources by `TypeId` of `(T, E)`. Once erased into a bucket, the payload cannot be downcast back without knowing the concrete type. So the persister stores the metadata (`key`, `TypeId`, `kind`) and the call site — which knows it is restoring `Vec<User>` — performs the typed `set_query_data` call. This mirrors TanStack Query's split between the dehydrated state and the `queryClient.setQueryData(key, data)` calls that repopulate it.
+The free `hydrate` function loads a snapshot and re-primes the live cache through the registered deserializers. Call it once during startup, before your views mount.
 
-## hydrate
+```rust
+use std::time::Duration;
+use gpui_query::client::{hydrate, PersistFilter};
 
-`QueryClient::hydrate(state, cx)` is the symmetric entry point to `dehydrate()`. It accepts a `DehydratedState` and is the documented hook for typed hydration — internally it delegates to the same per-entry `set_query_data` flow shown above. Use `dehydrate()` + `hydrate()` when you are moving state between two in-memory clients (for example, during tests or a workspace transfer), and `persist()` / `restore()` when the destination is an external backend.
+# async fn doc(client: &mut gpui_query::client::QueryClient, cx: &mut gpui::App) {
+let persister = DbPersister;
+match hydrate(client, &persister, &PersistFilter::All, Duration::from_secs(86_400), cx).await {
+    Ok(snapshot) => {
+        // Entries with a registered deserializer are already primed.
+        // `snapshot` is returned so you can do ad-hoc typed priming for the rest.
+    }
+    Err(e) => eprintln!("hydrate failed: {e}"),
+}
+# }
+```
+
+Entries older than `max_age`, excluded by `filter`, or without a matching deserializer are skipped. A snapshot whose `version` does not match `PERSIST_VERSION` returns `PersistError::VersionMismatch`.
+
+## Reference adapter: FilePersister
+
+The companion crate [`gpui-query-persist`](https://crates.io/crates/gpui-query-persist) ships a production-grade disk adapter, so you usually do not implement `Persister` yourself:
+
+```sh
+cargo add gpui-query-persist
+```
+
+```rust
+use gpui_query_persist::FilePersister;
+use gpui_query::client::{QueryClient, PersistOptions};
+
+# fn doc(client: &QueryClient, cx: &mut gpui::App) {
+// JSON (human-readable) or Bincode (compact); in_cache_dir roots at the OS cache dir.
+let persister = FilePersister::json("path/to/cache.json");
+// let persister = FilePersister::in_cache_dir("my-app").unwrap();
+let _handle = client.persist_with(persister, PersistOptions::default(), cx);
+# }
+```
+
+Each save is atomic and durable: it writes a sibling temp file, `fsync`s it (issuing `F_FULLFSYNC` on macOS), renames it over the target, and `fsync`s the parent directory on POSIX, so a crash mid-write never leaves a corrupt cache. Loading is tolerant: a missing file yields an empty snapshot, a corrupt file is logged and treated as empty, and a version mismatch surfaces as a typed `PersistError::VersionMismatch`.
+
+## Opaque metadata (ETags, etc.)
+
+If you fetch over HTTP, you can attach opaque metadata to a fetched value with `Fetched::with_meta`. It lands in `PersistedEntry::meta` and round-trips back through persistence. That lets you issue cheap `304` refetches after relaunch. See [HTTP cache headers](/docs/guides/http-caching).
 
 ## When to persist
 
-- **On app shutdown** — the simplest correct strategy. Persist once when the user quits, restore on next launch.
-- **On a timer** — for long-running apps that may be killed without a clean shutdown. A few times per minute is usually plenty; the snapshot is cheap because it only records `Success` entries.
-- **As part of GC** — you can call `persist()` from the same place GC runs, so eviction and persistence stay in step. Be careful not to persist on every GC pass if your backend write is expensive.
+- **On app shutdown**: the simplest correct strategy. `persist_with`'s debounce lands a final flush shortly after the last mutation; drop the handle on quit.
+- **Continuously, debounced**: for long-running apps that may be killed without a clean shutdown. The default 500ms debounce keeps write volume bounded.
+- **Scoped**: use `PersistFilter::Prefix` to persist only a subtree (e.g. user data, not ephemeral feed pages).
 
 :::tip
-Sanitize errors before they reach persistence. A `QueryError` built from a raw server response can contain tokens or connection strings; once it is on a resource it can flow into a dehydrate snapshot. See [Error handling — Error sanitization](/docs/guides/error-handling#error-sanitization).
+Sanitize errors before they reach persistence. A `QueryError` built from a raw server response can carry tokens or connection strings. See [Error handling: Error sanitization](/docs/guides/error-handling#error-sanitization).
 :::
 
 ## Next steps
 
-- [DevTools](/docs/advanced/devtools) — `DehydratedState` is the same structure diagnostics read from.
-- [Query keys](/docs/guides/query-keys) — keys are what make a restored entry addressable.
-- [Error handling](/docs/guides/error-handling) — sanitize before you persist.
+- [HTTP cache headers](/docs/guides/http-caching): derive a `CachePolicy` from `Cache-Control` and persist `ETag`s.
+- [Caching](/docs/guides/caching): how `CachePolicy` travels with each persisted entry.
+- [Query keys](/docs/guides/query-keys): keys are what make a restored entry addressable.

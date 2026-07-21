@@ -110,7 +110,7 @@ What you got for free:
 
 ## When the raw approach is enough
 
-gpui-query is not free — it is a dependency and a mental model. The raw approach is genuinely fine when:
+gpui-query is not free. It is a dependency and a mental model. The raw approach is genuinely fine when:
 
 - You have **one** async operation that does not need to be cached or shared.
 - The result is not something a second view will ever want.
@@ -120,7 +120,7 @@ For those cases `cx.spawn` plus a field on the view is the right tool. gpui-quer
 
 ## Caching is the big win
 
-The single largest difference is shared caching. With `QueryClient` set as a global, every `use_query` call with the same key resolves to the **same** resource entity. Two views that both need `["users", "42"]` get one fetch, one cache entry, and consistent state — and a third view mounted later reads straight from the cache.
+The single largest difference is shared caching. With `QueryClient` set as a global, every `use_query` call with the same key resolves to the **same** resource entity. Two views that both need `["users", "42"]` get one fetch, one cache entry, and consistent state. A third view mounted later reads straight from the cache.
 
 ```rust
 // Set once, in app setup:
@@ -133,18 +133,18 @@ That cache is also what makes bulk operations possible: `invalidate_queries(Pref
 
 gpui-query still gives you the imperative escape hatches you would write by hand:
 
-- [`fetch_query`](/docs/api/queries) — refetch on demand (button click, timer).
-- `QueryClient::prepare_fetch_query` / `prepare_prefetch_query` — fetch or prefetch without subscribing, the equivalent of `queryClient.fetchQuery` / `prefetchQuery`.
-- `get_query_data` / `set_query_data` — read or seed the cache directly for optimistic updates.
+- [`fetch_query`](/docs/api/queries): refetch on demand (button click, timer).
+- `QueryClient::prepare_fetch_query` / `prepare_prefetch_query`: fetch or prefetch without subscribing, the equivalent of `queryClient.fetchQuery` / `prefetchQuery`.
+- `get_query_data` / `set_query_data`: read or seed the cache directly for optimistic updates.
 
 The difference is that these operate on the shared, deduplicated, GC'd cache rather than on ad-hoc fields scattered across your views.
 
 ## Summary
 
-Reach for raw `cx.spawn` for one-off fire-and-forget work. Reach for gpui-query the moment you are caching, sharing, retrying, or guarding against stale writes — which, for anything that talks to a server, is usually the first feature you need.
+Reach for raw `cx.spawn` for one-off fire-and-forget work. Reach for gpui-query the moment you are caching, sharing, retrying, or guarding against stale writes. For anything that talks to a server, that is usually the first feature you need.
 
 ## Next steps
 
-- [Quick start](/docs/getting-started/quick-start) — your first query.
-- [Caching](/docs/guides/caching) — the `CachePolicy` that makes navigation feel instant.
-- [Query keys](/docs/guides/query-keys) — how shared caching keys resources.
+- [Quick start](/docs/getting-started/quick-start): your first query.
+- [Caching](/docs/guides/caching): the `CachePolicy` that makes navigation feel instant.
+- [Query keys](/docs/guides/query-keys): how shared caching keys resources.

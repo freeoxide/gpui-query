@@ -22,18 +22,19 @@ gpui-query = "0.2.0"
 ```
 
 :::note
-`gpui-query` depends on `gpui` as a workspace dependency. It does not ship `gpui` itself — your app already brings `gpui` in, and gpui-query links against the same version.
+`gpui-query` depends on `gpui` as a workspace dependency. It does not ship `gpui` itself. Your app already brings `gpui` in, and gpui-query links against the same version.
 :::
 
 ## Feature flags
 
-The crate is split into three layers, each behind a feature flag:
+The crate is split into four layers, each behind a feature flag:
 
 | Feature  | Default | Pulls in                                            | What it gives you                                  |
 | -------- | ------- | --------------------------------------------------- | -------------------------------------------------- |
 | `core`   | no      | `serde` only                                        | The transport-agnostic state machine (`QueryResource`, `CachePolicy`, …) with no GPUI dependency. Usable in non-GPUI code or tests. |
 | `client` | yes     | `core` + `gpui`                                     | The `QueryClient` registry and its type-partitioned buckets. |
 | `hook`   | no      | `client`                                            | The `use_query` / `use_mutation` hooks you call from views. |
+| `persist` | no     | `client` + `hook` + `serde_json` + `thiserror`      | Async persistence: the `Persister` trait, `QueryClient::persist_with`, the free `hydrate` function, and the typed (de)serializer registries. See [Persistence](/docs/guides/persistence). |
 
 `client` is on by default, so `cargo add gpui-query` is enough to get the registry. To use the ergonomic hooks from your components, enable the `hook` feature:
 
@@ -46,44 +47,46 @@ gpui-query = { version = "0.2.0", features = ["hook"] }
 cargo add gpui-query --features hook
 ```
 
-You almost always want `hook` in an application. Reach for `core` alone when you need the state machine without a GPUI dependency (a library, a CLI that reasons about cached state, or unit tests).
+You almost always want `hook` in an application. Reach for `core` alone when you need the state machine without a GPUI dependency (a library, a CLI that reasons about cached state, or unit tests). Add `persist` when you want to save and restore the cache across restarts (`gpui-query = { features = ["hook", "persist"] }`).
+
+## Companion crates
+
+Two standalone crates extend gpui-query without adding dependencies to the core:
+
+- **`gpui-query-persist`** is a reference disk adapter. `FilePersister` atomically writes a `PersistSnapshot` to disk (JSON or bincode) with a tolerant load. `cargo add gpui-query-persist`. See [Persistence: reference adapter](/docs/guides/persistence#reference-adapter-filepersister).
+- **`gpui-query-http`** turns a server's `Cache-Control` header into a `CachePolicy` ("server wins") and layers an in-memory `HttpCache` over any HTTP backend. `cargo add gpui-query-http`. See [HTTP cache headers](/docs/guides/http-caching).
+
+Both depend on `gpui-query` with a narrow feature set and publish independently.
 
 ## Set up the QueryClient
 
-`QueryClient` is a GPUI `Global`. Install it once during app setup — from then on, every hook routes resource creation through it for shared caching, deduplication, and garbage collection.
+`QueryClient` is a GPUI `Global`. Install it once during app setup. From then on, every hook routes resource creation through it for shared caching, deduplication, and garbage collection.
+
+```rust
+use gpui_query::client::QueryClient;
+
+fn setup_app(cx: &mut gpui::App) {
+    cx.set_global(QueryClient::new());
+}
+```
+
+`QueryClient::new()` uses the default policies (`Ttl { ttl_ms: 60_000 }`, `LatestWins`). Override them with `with_policies` and tune the garbage-collection window with `with_gc_time`:
 
 ```rust
 use gpui_query::client::QueryClient;
 use gpui_query::{CachePolicy, core::RequestPolicy};
 
-fn setup_app(cx: &mut gpui::App) {
-    cx.set_global(QueryClient::new(
-        // Default freshness for every query.
-        CachePolicy::Ttl { ttl_ms: 60_000 },
-        // Default behavior for concurrent fetches on the same resource.
-        RequestPolicy::LatestWins,
-    ));
-}
-```
-
-`QueryClient::new` takes the default cache and request policies. Tune the garbage-collection window and the default mutation retry policy with builders:
-
-```rust
-use gpui_query::client::QueryClient;
-use gpui_query::{CachePolicy, RetryPolicy, core::RequestPolicy};
-
-let client = QueryClient::new(
+let client = QueryClient::with_policies(
     CachePolicy::Ttl { ttl_ms: 60_000 },
     RequestPolicy::LatestWins,
 )
-.with_gc_time(600_000)                       // 10 minutes (default is 5)
-.with_retry_policy(RetryPolicy::no_retries()); // default retry for mutations
+.with_gc_time(600_000); // 10 minutes (default is 5)
 
 cx.set_global(client);
 ```
 
 :::note
-If a hook runs before a `QueryClient` is installed, it falls back to creating a standalone entity — there is no shared cache, no deduplication, and no GC. Always install the client during app startup.
+If a hook runs before a `QueryClient` is installed, it falls back to creating a standalone entity. There is no shared cache, deduplication, or GC. Always install the client during app startup.
 :::
 
 ## Verify it is reachable
@@ -101,6 +104,6 @@ That is the entire setup: add the crate, enable `hook`, install a `QueryClient` 
 
 ## Next steps
 
-- [Quick Start](/docs/getting-started/quick-start) — define a fetcher, call `use_query`, render data.
-- [Queries](/docs/api/queries) — the full `use_query` surface and `QueryResource` accessors.
-- [Caching](/docs/guides/caching) — `CachePolicy`, deduplication, and GC in depth.
+- [Quick Start](/docs/getting-started/quick-start): define a fetcher, call `use_query`, render data.
+- [Queries](/docs/api/queries): the full `use_query` surface and `QueryResource` accessors.
+- [Caching](/docs/guides/caching): `CachePolicy`, deduplication, and GC in depth.

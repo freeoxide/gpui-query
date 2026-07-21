@@ -4,7 +4,7 @@ title: Query Keys
 description: "Hierarchical, cheap-to-clone cache keys and the QueryKeyFilter for bulk operations"
 ---
 
-Every cached resource in gpui-query is identified by a [`QueryKey`](/docs/api/queries) — a structured, hierarchical key inspired by TanStack Query's array keys (`["users", "42", "posts"]`). Keys are the foundation of caching, deduplication, and the bulk operations (`invalidate_queries`, `cancel_queries`, `reset_queries`, `remove_queries`) that the [`QueryClient`](/docs/api/query-client) exposes.
+Every cached resource in gpui-query is identified by a [`QueryKey`](/docs/api/queries), a structured, hierarchical key inspired by TanStack Query's array keys (`["users", "42", "posts"]`). Keys are the foundation of caching, deduplication, and the bulk operations (`invalidate_queries`, `cancel_queries`, `reset_queries`, `remove_queries`) that the [`QueryClient`](/docs/api/query-client) exposes.
 
 ## Creating a key
 
@@ -16,7 +16,7 @@ use gpui_query::QueryKey;
 let key = QueryKey::from("users");
 ```
 
-For resources scoped by an identifier, build a multi-segment key. The key records the **order** of the segments, so `["users", "42"]` and `["42", "users"]` are different keys.
+For resources scoped by an identifier, build a multi-segment key. The key records the order of the segments, so `["users", "42"]` and `["42", "users"]` are different keys.
 
 ```rust
 let user_key    = QueryKey::from(["users", "42"]);
@@ -28,7 +28,7 @@ You can construct a key from any of:
 
 - `&str` / `String` (single segment)
 - `[&str; N]`, `Vec<&str>`, `Vec<String>` (multiple segments)
-- `QueryKey::new(iterator)` (panics on an empty iterator — a key must have at least one segment)
+- `QueryKey::new(iterator)` (panics on an empty iterator: a key must have at least one segment)
 
 ## Cheap cloning
 
@@ -44,8 +44,8 @@ assert!(std::sync::Arc::ptr_eq(&key.parts()[0], &cloned.parts()[0]));
 
 Two methods make hierarchical keys useful:
 
-- `starts_with(prefix)` — `true` when this key begins with `prefix`. This is the primitive the bulk operations use to invalidate a whole subtree.
-- `to_path()` — a `users::42::posts`-style display string for DevTools and logs. The `::` separator avoids ambiguity when a segment itself contains a forward slash.
+- `starts_with(prefix)`: `true` when this key begins with `prefix`. This is the primitive the bulk operations use to invalidate a whole subtree.
+- `to_path()`: a `users::42::posts`-style display string for DevTools and logs. The `::` separator avoids ambiguity when a segment itself contains a forward slash.
 
 ```rust
 use gpui_query::QueryKey;
@@ -103,12 +103,12 @@ impl View {
 
 ## QueryKeyFilter
 
-The bulk operations on `QueryClient` do not take a raw key — they take a [`QueryKeyFilter`](/docs/api/query-client), which is how you say *which* keys to act on. There are three variants:
+The bulk operations on `QueryClient` do not take a raw key; they take a [`QueryKeyFilter`](/docs/api/query-client), which is how you say *which* keys to act on. There are three variants:
 
 | Filter     | Matches                                                   |
 | ---------- | -------------------------------------------------------- |
 | `Exact(k)` | Only the key that is exactly equal to `k`.               |
-| `Prefix(k)`| Every key that `starts_with(k)` — the whole subtree.    |
+| `Prefix(k)`| Every key that `starts_with(k)`: the whole subtree.    |
 | `All`      | Every key in the cache.                                  |
 
 `QueryKeyFilter` is `Copy`, so you can build it inline at the call site:
@@ -134,9 +134,9 @@ client.remove_queries(&QueryKeyFilter::All);
 
 ### Choosing a filter
 
-- **`Exact`** when you know the full key — for example, after a mutation that updates a single record. `invalidate_queries(Exact(&["users", "42"]))` refetches only that user.
-- **`Prefix`** when a mutation affects a family of resources — for example, after creating a user, `invalidate_queries(Prefix(&["users"]))` refetches the users list and every cached user.
-- **`All`** for global resets, most commonly on logout: `remove_queries(All)` clears the cache, and `reset_queries(All)` clears both data **and** cancels in-flight requests.
+- **`Exact`** when you know the full key (for example, after a mutation that updates a single record). `invalidate_queries(Exact(&["users", "42"]))` refetches only that user.
+- **`Prefix`** when a mutation affects a family of resources. For example, after creating a user, `invalidate_queries(Prefix(&["users"]))` refetches the users list and every cached user.
+- **`All`** for global resets, most commonly on logout: `remove_queries(All)` clears the cache, and `reset_queries(All)` clears data and cancels in-flight requests.
 
 ## Patterns
 
@@ -149,7 +149,7 @@ let list  = QueryKey::from(["users"]);             // the list
 let detail= QueryKey::from(["users", id.as_str()]); // one user
 ```
 
-After an update mutation, `invalidate_queries(Prefix(&["users"]))` refreshes the list **and** any cached detail pages in one call.
+After an update mutation, `invalidate_queries(Prefix(&["users"]))` refreshes the list and any cached detail pages in one call.
 
 ### Dynamic segments
 
@@ -161,10 +161,10 @@ let key = QueryKey::from(["projects", &project_id.to_string(), "members"]);
 
 ### Avoid empty keys
 
-`QueryKey::new` with a zero-length iterator panics. Every key must have at least one segment — there is no "root" key. Use `QueryKeyFilter::All` when you mean "everything".
+`QueryKey::new` with a zero-length iterator panics. Every key must have at least one segment; there is no "root" key. Use `QueryKeyFilter::All` when you mean "everything".
 
 ## Next steps
 
-- [`QueryClient`](/docs/api/query-client) — the bulk operations that consume a `QueryKeyFilter`.
-- [Caching](/docs/guides/caching) — how `CachePolicy` interacts with keys.
-- [Error handling](/docs/guides/error-handling) — surfacing failures keyed by resource.
+- [`QueryClient`](/docs/api/query-client): the bulk operations that consume a `QueryKeyFilter`.
+- [Caching](/docs/guides/caching): how `CachePolicy` interacts with keys.
+- [Error handling](/docs/guides/error-handling): surfacing failures keyed by resource.

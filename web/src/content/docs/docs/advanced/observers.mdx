@@ -4,7 +4,7 @@ title: Observers
 description: "Reactive subscriptions with status deduplication for queries, infinite queries, and mutations"
 ---
 
-Observers bridge gpui-query's resources to GPUI's reactivity. An observer attaches to a resource entity and calls `cx.notify()` to trigger a re-render — but only when the resource's **status** actually changes. This is the primitive that keeps `use_query`, `use_infinite_query`, and `use_mutation` from re-rendering your view on every internal state mutation.
+Observers bridge gpui-query's resources to GPUI's reactivity. An observer attaches to a resource entity and calls `cx.notify()` to trigger a re-render, but only when the resource's status changes. This is the primitive that keeps `use_query`, `use_infinite_query`, and `use_mutation` from re-rendering your view on every internal state mutation.
 
 ## The Observer type
 
@@ -25,7 +25,7 @@ Each resource exposes its status via an inherent `status()` method; the `Observa
 
 ## Status deduplication
 
-This is the whole point of the observer. Without it, a raw `cx.observe` would call `cx.notify()` on **every** entity mutation — including intermediate ones like `increment_retry()` that leave the status at `Loading`. A query retrying three times would re-render the view two or three extra times for nothing.
+This is the whole point of the observer. Without it, a raw `cx.observe` would call `cx.notify()` on every entity mutation, including intermediate ones like `increment_retry()` that leave the status at `Loading`. A query retrying three times would re-render the view two or three extra times for nothing.
 
 `Observer` tracks the last status it saw and notifies only on change:
 
@@ -46,11 +46,11 @@ cx.observe(&upgraded, move |_, entity, cx| {
 });
 ```
 
-The result: `increment_retry()` / `prepare_retry()` calls (status stays `Loading`) no longer trigger re-renders. Your view re-renders on the transitions that matter — `Idle → LoadingEmpty → Success`, `Success → LoadingWithData → Success`, `Loading → Failure`, and so on.
+The result: `increment_retry()` / `prepare_retry()` calls (status stays `Loading`) no longer trigger re-renders. Your view re-renders on the transitions that matter: `Idle → LoadingEmpty → Success`, `Success → LoadingWithData → Success`, `Loading → Failure`, and so on.
 
 ## Creating and observing
 
-Build an observer from an entity, then call `observe(cx)` to start watching. `observe` returns `Option<Subscription>` — `None` if the entity was already dropped. **Store the returned subscription**; dropping it ends the observation.
+Build an observer from an entity, then call `observe(cx)` to start watching. `observe` returns `Option<Subscription>` (`None` if the entity was already dropped). Store the returned subscription; dropping it ends the observation.
 
 ```rust
 use gpui_query::client::QueryObserver;
@@ -74,7 +74,7 @@ impl MyView {
 ```
 
 :::note
-The hooks (`use_query`, `use_infinite_query`, `use_mutation`) already construct the observer and return the subscription for you. You only need to create an observer yourself when you are subscribing to a resource you obtained another way — for example, one you pulled out of the `QueryClient` with `query::<T, E>(key)`.
+The hooks (`use_query`, `use_infinite_query`, `use_mutation`) already construct the observer and return the subscription for you. You only need to create an observer yourself when you are subscribing to a resource you obtained another way (for example, one you pulled out of the `QueryClient` with `query::<T, E>(key)`).
 :::
 
 ## ObserverConfig
@@ -109,14 +109,14 @@ Use unconditional mode only when you genuinely need to react to non-status field
 | `use_infinite_query`  | `InfiniteQueryObserver<T, E>` | `QueryStatus` |
 | `use_mutation`        | `MutationObserver<V, T, E>`| `MutationStatus`|
 
-Each hook creates its observer, calls `observe(cx)`, and returns the subscription as the second element of its tuple. The status-dedup is what makes a retrying mutation or a refetching query cheap to render — only terminal status changes reach your view.
+Each hook creates its observer, calls `observe(cx)`, and returns the subscription as the second element of its tuple. The status-dedup is what makes a retrying mutation or a refetching query cheap to render: only terminal status changes reach your view.
 
 ## ObservableResource
 
-`ObservableResource` is the pub(crate) trait that lets `Observer<R>` read a status generically. It is not part of the public API, but it is why the three resource kinds share one observer implementation: each resource exposes `status()` with its own associated `Status` type, and `Observer` deduplicates on that. If you write your own resource type that should be observable, it will need the same `status()` method shape — but for application code, the three built-in observers cover every resource the hooks produce.
+`ObservableResource` is the pub(crate) trait that lets `Observer<R>` read a status generically. It is not part of the public API, but it is why the three resource kinds share one observer implementation: each resource exposes `status()` with its own associated `Status` type, and `Observer` deduplicates on that. If you write your own resource type that should be observable, it will need the same `status()` method shape, but for application code, the three built-in observers cover every resource the hooks produce.
 
 ## Next steps
 
-- [Queries](/docs/api/queries) / [Infinite queries](/docs/api/infinite-queries) / [Mutations](/docs/api/mutations) — the hooks that build observers for you.
-- [DevTools](/docs/advanced/devtools) — diagnostics read the same live entities observers watch.
-- [Error handling](/docs/guides/error-handling) — why `Cancelled` rarely reaches your UI (it is a status, deduplicated like any other).
+- [Queries](/docs/api/queries) / [Infinite queries](/docs/api/infinite-queries) / [Mutations](/docs/api/mutations): the hooks that build observers for you.
+- [DevTools](/docs/advanced/devtools): diagnostics read the same live entities observers watch.
+- [Error handling](/docs/guides/error-handling): why `Cancelled` rarely reaches your UI (it is a status, deduplicated like any other).

@@ -3,8 +3,8 @@
 //! [`HttpCache`] wraps any [`crate::backend::HttpBackend`] and adds an in-memory
 //! cache keyed by URL string: fresh entries short-circuit the network entirely,
 //! stale entries are revalidated with conditional headers (`If-None-Match` /
-//! `If-Modified-Since`) and a `304 Not Modified` response refreshes the
-//! stored-at timestamp without transferring a body.
+//! `If-Modified-Since`) and a `304 Not Modified` response re-serves the cached
+//! body without transferring a new one.
 //!
 //! The cache is library-agnostic — it does not name `reqwest` anywhere. `reqwest`
 //! is just one optional backend ([`crate::reqwest_backend::ReqwestBackend`]).

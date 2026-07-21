@@ -13,7 +13,7 @@ Failed fetches are retried automatically. A `RetryPolicy` says how many times to
 | Query     | 3 retries, exponential backoff, 1s base, 30s cap |
 | Mutation  | No retries                                     |
 
-Queries default to retry because transient network failures are common and the user did not ask for the fetch — silently retrying is the friendlier behavior. Mutations default to **no retries** because they are user-initiated and often destructive — silently re-running a "create" or "delete" on failure can duplicate or destroy data. Opt into mutation retry explicitly when you know it is safe.
+Queries default to retry because transient network failures are common and the user did not ask for the fetch, so silently retrying is the friendlier behavior. Mutations default to **no retries** because they are user-initiated and often destructive; silently re-running a "create" or "delete" on failure can duplicate or destroy data. Opt into mutation retry explicitly when you know it is safe.
 
 ## RetryPolicy
 
@@ -89,28 +89,28 @@ assert_eq!(p.delay_for_attempt(2), 4_000);   // 4s
 assert_eq!(p.delay_for_attempt(5), 30_000);  // capped
 ```
 
-`should_retry(current_retries)` returns `true` while `current_retries < max_retries` — the loop the resource uses to decide whether to schedule another attempt.
+`should_retry(current_retries)` returns `true` while `current_retries < max_retries`. That is the condition the resource loop checks to decide whether to schedule another attempt.
 
 ## Status during retries
 
-While the resource is between the initial failure and either a successful retry or exhausted retries, the status stays `Loading` (specifically `LoadingEmpty` on first load or `LoadingWithData` on a refetch). The retry counter increments via `increment_retry()`, but because the [`QueryObserver`](/docs/advanced/observers) deduplicates by status, **your view does not re-render on every retry tick** — only on the terminal outcome (`Success` or `Failure`).
+While the resource is between the initial failure and either a successful retry or exhausted retries, the status stays `Loading` (specifically `LoadingEmpty` on first load or `LoadingWithData` on a refetch). The retry counter increments via `increment_retry()`, but because the [`QueryObserver`](/docs/advanced/observers) deduplicates by status, your view does not re-render on every retry tick, only on the terminal outcome (`Success` or `Failure`).
 
 This is the reason retry can be aggressive by default without thrashing the UI: three retries with exponential backoff look like one loading state to the user, with the spinner shown until the request either succeeds or the policy is exhausted.
 
 ## Cancellation during retry
 
-A retry in progress is cancelled if a newer request supersedes it (`LatestWins`) or the resource is reset/unmounted. The signal is checked after the retry delay, so a cancelled fetch does not waste an attempt. See [Error handling — Error states in QueryStatus](/docs/guides/error-handling#error-states-in-querystatus) for how cancelled requests surface (`QueryStatus::Cancelled`, `QueryErrorKind::Cancelled`).
+A retry in progress is cancelled if a newer request supersedes it (`LatestWins`) or the resource is reset/unmounted. The signal is checked after the retry delay, so a cancelled fetch does not waste an attempt. See [Error handling: Error states in QueryStatus](/docs/guides/error-handling#error-states-in-querystatus) for how cancelled requests surface (`QueryStatus::Cancelled`, `QueryErrorKind::Cancelled`).
 
 ## When not to retry
 
 - **Non-idempotent mutations.** A `POST /charge` that fails after the request was sent but before the response arrived may have already charged the card. Retrying can double-charge. Keep the `no_retries` default for these.
-- **4xx errors.** A 400 or 401 will not succeed on retry — it just burns the retry budget and delays surfacing the real error. Map these to `QueryError::response` and consider a policy with fewer retries.
+- **4xx errors.** A 400 or 401 will not succeed on retry; it just burns the retry budget and delays surfacing the real error. Map these to `QueryError::response` and consider a policy with fewer retries.
 - **User-visible destructive actions.** Let the user decide whether to retry, so they stay in control of side effects.
 
-Retry shines for transient failures: network blips, 5xx responses, timeouts. For these, exponential backoff with a sensible cap is usually the right call.
+Retry is most useful for transient failures: network blips, 5xx responses, timeouts. For these, exponential backoff with an appropriate cap is usually the right call.
 
 ## Next steps
 
-- [Error handling](/docs/guides/error-handling) — how retries and `QueryError` interact.
-- [Caching](/docs/guides/caching) — what triggers a fetch in the first place.
-- [Queries](/docs/api/queries) / [Mutations](/docs/api/mutations) — where retry policies attach.
+- [Error handling](/docs/guides/error-handling): how retries and `QueryError` interact.
+- [Caching](/docs/guides/caching): what triggers a fetch in the first place.
+- [Queries](/docs/api/queries) / [Mutations](/docs/api/mutations): where retry policies attach.
