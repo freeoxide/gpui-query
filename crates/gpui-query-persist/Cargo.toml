@@ -3,11 +3,12 @@ name = "gpui-query-persist"
 version = "0.1.0"
 edition = "2024"
 description = "Reference disk-based persistence adapter (FilePersister) for gpui-query"
-repository = "https://github.com/hmziqrs/gpui-query"
+repository = "https://github.com/freeoxide/gpui-query"
+readme = "README.md"
 license = "MIT"
 keywords = ["gpui", "persistence", "cache", "query", "filesystem"]
 categories = ["asynchronous", "caching", "filesystem"]
-homepage = "https://gpui-query.hmziq.xyz"
+homepage = "https://gpui-query.freeoxide.com"
 authors = ["hmziqrs"]
 
 [features]

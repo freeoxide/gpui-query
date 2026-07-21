@@ -91,7 +91,6 @@ pub struct MutationBucket<V, T, E> {
 
 /// (Audit #41) The previous private `now_ms()` duplicate is removed; this
 /// module now reuses the canonical [`super::erased::current_time_ms`].
-
 impl<
     V: Clone + Send + Sync + 'static,
     T: Clone + Send + Sync + 'static,
@@ -109,7 +108,7 @@ impl<
     /// Evict the oldest (least-recently-updated) entry to make room for a new one.
     ///
     /// **M2 (O(n)→O(1) entity reads)**: scans entry MIRRORS (no `entity.read`)
-    /// + `WeakEntity::upgrade` liveness, picking the entry with the smallest
+    /// plus `WeakEntity::upgrade` liveness, picking the entry with the smallest
     /// mirrored recency — preferring the completion-time mirror
     /// (`last_updated_ms`) and falling back to the insertion time
     /// (`updated_at`) for never-completed mutations (audit #112). Then **one**
@@ -127,9 +126,7 @@ impl<
                     if entry.loading {
                         return None;
                     }
-                    if entry.entity.upgrade().is_none() {
-                        return None;
-                    }
+                    entry.entity.upgrade()?;
                     // Prefer completion-time mirror; fall back to insertion
                     // time for never-completed mutations (audit #112).
                     let age = entry.last_updated_ms.unwrap_or(entry.updated_at);

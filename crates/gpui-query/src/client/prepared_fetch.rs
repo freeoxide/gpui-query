@@ -61,8 +61,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Prepare
     /// re-syscalling `current_time_ms()`.
     pub fn complete_success(self, data: T, cx: &mut App) {
         self.entity.update(cx, |resource, cx| {
-            let accepted =
-                resource.complete_current_success(self.request_id, data, self.now_ms);
+            let accepted = resource.complete_current_success(self.request_id, data, self.now_ms);
             // B2: precise dirty signal for the persistence layer. Imperative
             // completions (`prepare_fetch_query`) mutate the cache just like the
             // hook-layer completions, so they must wake `persist_with` too —
@@ -86,8 +85,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Prepare
     /// re-syscalling `current_time_ms()`.
     pub fn complete_failure(self, error: E, cx: &mut App) {
         self.entity.update(cx, |resource, cx| {
-            let accepted =
-                resource.complete_current_failure(self.request_id, error, self.now_ms);
+            let accepted = resource.complete_current_failure(self.request_id, error, self.now_ms);
             // B2: see `complete_success` — bump only when the failure was
             // actually accepted, so an imperative failure is visible to
             // `persist_with` without spurious saves on stale completions.

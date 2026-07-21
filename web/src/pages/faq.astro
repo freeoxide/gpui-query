@@ -1,0 +1,213 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { faqPage } from "../lib/seo";
+
+// Native <details>/<summary> instead of a React accordion: the answers stay in
+// the DOM (crawlable for the FAQPage structured data) with no JS. Same content
+// as the old faq.tsx. See astro-migration.mdx § "Route and content mapping".
+interface FaqItem {
+  question: string;
+  answer: string;
+}
+interface FaqCategory {
+  label: string;
+  icon: string; // inner SVG markup (lucide-style)
+  items: FaqItem[];
+}
+
+const categories: FaqCategory[] = [
+  {
+    label: "Getting Started",
+    icon: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>',
+    items: [
+      {
+        question: "How is gpui-query different from TanStack Query?",
+        answer:
+          "gpui-query adapts TanStack Query's patterns to Rust and the GPUI framework. It uses Rust's type system for compile-time guarantees, Arc<AtomicBool> for cooperative cancellation, and integrates directly with GPUI's render loop.",
+      },
+      {
+        question: "Can I use gpui-query outside of Zed?",
+        answer:
+          "gpui-query is designed for the GPUI framework, which powers the Zed editor. While architecturally the Core layer is framework-agnostic, the Hook layer depends on GPUI's reactive primitives.",
+      },
+      {
+        question: "How do I set up QueryClient in my app?",
+        answer:
+          "Create a QueryClient instance and register it in your GPUI application. The client manages all query resources, caching, and garbage collection. See the Getting Started guide for a complete walkthrough.",
+      },
+    ],
+  },
+  {
+    label: "Architecture",
+    icon: '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>',
+    items: [
+      {
+        question: "Why does use_query return a tuple instead of an object?",
+        answer:
+          "use_query returns (Entity<QueryResource<T, E>>, Subscription). Read data and status from the resource entity during render, and store the Subscription to keep the observation alive: dropping it stops updates, which is GPUI's standard lifecycle convention.",
+      },
+      {
+        question: "What happens if my component unmounts during a fetch?",
+        answer:
+          "gpui-query uses cooperative cancellation via QuerySignal (Arc<AtomicBool>). When a component unmounts, the signal is set and the query checks it between retry attempts, which keeps teardown clean.",
+      },
+      {
+        question: "What is QuerySignal and when do I check it?",
+        answer:
+          "QuerySignal is an Arc<AtomicBool> that enables cooperative cancellation. Long-running queries should check the signal periodically (especially between retry attempts) and abort early if cancelled.",
+      },
+    ],
+  },
+  {
+    label: "Advanced",
+    icon: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+    items: [
+      {
+        question: "Why does LatestWins cancel my in-flight request?",
+        answer:
+          "LatestWins is a RequestPolicy that ensures only the most recent request's result is used. When a new request arrives, previous in-flight requests are cancelled via their signals, which prevents stale data from overwriting fresh results.",
+      },
+      {
+        question: "How do I persist my query cache?",
+        answer:
+          "Enable the persist feature and implement the async Persister trait to save and restore query state across restarts. gpui-query supports custom backends (files, databases, KV) and ships a ready-made disk adapter in the gpui-query-persist crate.",
+      },
+      {
+        question: "How do I handle pagination?",
+        answer:
+          "Use use_infinite_query for paginated data. It supports bidirectional fetching (fetch_next_page_infinite / fetch_previous_page_infinite) and configurable max_pages to limit cached pages.",
+      },
+      {
+        question: "Is there a devtools experience?",
+        answer:
+          "gpui-query provides ClientDiagnostic types for inspecting cache state, query status, and resource lifecycle, a developer toolkit for debugging async state.",
+      },
+    ],
+  },
+];
+
+const faqItems: FaqItem[] = categories.flatMap((c) => c.items);
+const title = "FAQ - gpui-query";
+const description =
+  "Common gpui-query questions answered: differences from TanStack Query, QueryClient setup, QuerySignal cancellation, persistence, and pagination.";
+const jsonLd = faqPage({
+  questions: faqItems.map((item) => ({ question: item.question, answer: item.answer })),
+});
+const ogImage = "/og/faq.png";
+---
+<BaseLayout title={title} description={description} canonicalPath="/faq" image={ogImage} jsonLd={jsonLd}>
+  <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-16 lg:px-8">
+    <div class="mx-auto max-w-7xl">
+      <div class="border-l-4 border-primary pl-5">
+        <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Frequently Asked Questions</h1>
+        <p class="mt-2 text-lg text-muted-foreground">
+          Common questions about gpui-query, grouped by topic.
+        </p>
+      </div>
+
+      <div class="mt-14 space-y-14">
+        {categories.map((category) => (
+          <section>
+            <div class="flex items-center gap-3 border-l-4 border-primary pl-4">
+              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="h-4 w-4"
+                  set:html={category.icon}
+                />
+              </div>
+              <h2 class="text-xl font-semibold tracking-tight sm:text-2xl">{category.label}</h2>
+            </div>
+
+            <div class="mt-6 divide-y divide-border/60">
+              {category.items.map((item) => (
+                <details class="group py-1">
+                  <summary
+                    class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-left text-[15px] font-medium text-foreground/90 transition-colors duration-200 hover:text-primary group-open:text-primary"
+                  >
+                    <span>{item.question}</span>
+                    <svg
+                      class="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m6 9 6 6 6-6"></path>
+                    </svg>
+                  </summary>
+                  <p class="pb-4 pr-8 leading-relaxed text-muted-foreground">{item.answer}</p>
+                </details>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <div
+        class="mt-20 rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-emerald-500/10 px-8 py-14 text-center sm:px-16"
+      >
+        <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">Still have questions?</h2>
+        <p class="mx-auto mt-3 max-w-md text-muted-foreground">
+          Open an issue on GitHub and we will get back to you. Contributions and discussions are
+          always welcome.
+        </p>
+        <div class="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+          <a
+            href="https://github.com/freeoxide/gpui-query/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex h-11 items-center justify-center gap-2 bg-primary px-6 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-colors hover:bg-primary/90"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+              <path
+                d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.6 18 4.9 18 4.9c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"
+              ></path>
+            </svg>
+            Open an Issue
+            <svg
+              class="ml-1 h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M5 12h14"></path>
+              <path d="m12 5 7 7-7 7"></path>
+            </svg>
+          </a>
+          <a
+            href="/docs/"
+            class="inline-flex h-11 items-center justify-center gap-2 border border-input bg-background px-6 text-base font-semibold transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            Read the Docs
+            <svg
+              class="ml-1 h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M5 12h14"></path>
+              <path d="m12 5 7 7-7 7"></path>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</BaseLayout>

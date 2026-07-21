@@ -2,12 +2,12 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "gpui-query",
   "compatibility_date": "2025-09-02",
-  "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry",
   "assets": {
     "directory": "./dist/client",
-    "binding": "ASSETS",
-    "html_handling": "auto-trailing-slash",
-    "run_worker_first": ["/*", "!/docs/**", "!/assets/**", "!/pagefind/**"],
-  },
+    // auto-trailing-slash serves both /foo and /foo/ without 308 redirects, so
+    // the canonical no-trailing-slash URLs resolve directly. This is a purely
+    // static Cloudflare Pages deploy — no Worker, so no `main`, no bindings, no
+    // run_worker_first (those existed only for TanStack Start's SSR worker).
+    "html_handling": "auto-trailing-slash"
+  }
 }

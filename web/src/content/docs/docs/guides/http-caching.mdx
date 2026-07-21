@@ -1,0 +1,123 @@
+---
+sidebar_position: 5
+title: HTTP cache headers
+description: "Turn a server's Cache-Control into a gpui-query CachePolicy (server wins) and persist ETags for cheap 304 refetches with gpui-query-http."
+---
+
+The companion crate `gpui-query-http` turns your server's HTTP cache headers into a gpui-query `CachePolicy`. Two pieces work together: a parser that derives the policy from response headers, and an in-memory `HttpCache` you can layer over any HTTP client. Together they let the server drive cache TTLs and enable cheap `304 Not Modified` refetches after relaunch.
+
+```sh
+cargo add gpui-query-http
+```
+
+## Server wins
+
+A fetcher normally returns `Result<T, E>` and the resource keeps whatever `CachePolicy` the caller asked for. When the server knows better (it sent `Cache-Control: max-age=30`, after all), return `Result<Fetched<T>, E>` from a `*_with_policy` hook and the server's policy overrides the caller's on success.
+
+Parse the response headers with `cache_policy_from_headers`, hand the result to `Fetched::with_policy`, and consume the resource with `use_query_with_policy`:
+
+```rust
+use gpui_query::core::{CachePolicy, Fetched};
+use gpui_query::hook::use_query_with_policy;
+use gpui_query_http::cache_policy_from_headers;
+
+async fn fetch_user(id: u64) -> Result<Fetched<User>, MyError> {
+    let resp = my_client.get(&format!("/users/{id}")).await?;
+    let policy = cache_policy_from_headers(resp.headers())
+        .unwrap_or(CachePolicy::NoCache);
+    Ok(Fetched::with_policy(resp.json::<User>().await?, policy))
+}
+```
+
+The resource adopts the server's TTL for as long as that value is fresh. `use_query_with_policy` is the server-wins variant of `use_query`; on refetch, `fetch_query_with_policy` reapplies the same override.
+
+:::note
+If `cache_policy_from_headers` returns an error (a malformed `max-age`), fall back to `CachePolicy::NoCache` rather than surfacing the parse error to the user. A `no-store` response is never an error; it maps cleanly to `NoCache`.
+:::
+
+## cache_policy_from_headers rules
+
+`cache_policy_from_headers(headers: &http::HeaderMap) -> Result<CachePolicy, ParseError>` reads `Cache-Control` per [RFC 9111]. Rules, in priority order:
+
+1. `Cache-Control: no-store` or `no-cache` (bare or any value) → `CachePolicy::NoCache`. These win immediately: a malformed directive that follows them (`no-store, max-age=abc`) must not surface as a parse error.
+2. `Cache-Control: max-age=N` (seconds) → `CachePolicy::Ttl { ttl_ms: N * 1000 }`. If `stale-while-revalidate=M` is also present → `CachePolicy::StaleWhileRevalidate { ttl_ms: N * 1000, stale_ms: M * 1000 }`.
+3. Otherwise → `CachePolicy::NoCache` (no usable cache directives).
+
+A few specifics:
+
+- `s-maxage` (the shared-cache directive) is treated like `max-age` and takes precedence when both are present.
+- Directive names are matched case-insensitively (`Max-Age=60` works).
+- Values may be quoted (`max-age="600"`).
+- Multiple `Cache-Control` headers combine; unknown directives (`public`, `private`) are ignored.
+
+The three variants map exactly onto the policies described in [Caching](/docs/guides/caching):
+
+```rust
+pub enum CachePolicy {
+    NoCache,
+    Ttl { ttl_ms: u64 },
+    StaleWhileRevalidate { ttl_ms: u64, stale_ms: u64 },
+}
+```
+
+## HttpCache over any backend
+
+`HttpCache<B>` is a URL-keyed in-memory cache layered over an `HttpBackend`. Fresh entries short-circuit the network entirely; stale entries are revalidated with conditional headers and a `304 Not Modified` re-serves the cached body without a new transfer.
+
+```rust
+use gpui_query_http::{HttpCache, ReqwestBackend};
+
+let backend = ReqwestBackend::from_client(client);
+let cache: HttpCache<ReqwestBackend> = HttpCache::new(backend);
+
+let (body, policy, meta) = cache.fetch("/api/users/42").await?;
+```
+
+`HttpCache::fetch(&self, url: &str) -> Result<(Bytes, CachePolicy, Option<CacheMeta>), HttpError>` returns the body, the policy in effect for this response, and the cached `CacheMeta` when the entry is cacheable.
+
+### Library-agnostic by design
+
+`HttpBackend` is a trait that abstracts a single conditional `GET`. The crate ships one optional backend, `ReqwestBackend`, behind the `reqwest` cargo feature; `reqwest` is never a hard dependency. Any other request library can implement `HttpBackend` and plug into `HttpCache::new`:
+
+```rust
+pub trait HttpBackend: Send + Sync {
+    type Error: std::error::Error + Send + Sync + 'static;
+    fn fetch(
+        &self,
+        url: &str,
+        conditionals: Conditionals,
+    ) -> impl Future<Output = Result<BackendResponse, Self::Error>> + Send;
+}
+```
+
+Dispatch is static (`HttpCache<B: HttpBackend>`), so there is no `Box<dyn>` overhead, and the cache never requires `tokio`.
+
+## Persisting ETags for cheap 304s
+
+`CacheMeta` is the HTTP cache metadata extracted from a response. It holds the validators a backend resends to make a refetch cheap:
+
+```rust
+pub struct CacheMeta {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub stored_at: std::time::SystemTime,
+    pub fresh_for: Duration,
+    pub stale_for: Duration,
+}
+```
+
+With the `persist` feature on `gpui-query`, attach a serialized `CacheMeta` to a fetched value with `Fetched::with_meta`. It lands in `PersistedEntry::meta` and round-trips back through persistence, so after a relaunch the next fetch can send `If-None-Match` / `If-Modified-Since` and turn into a `304` with no body transfer:
+
+```rust
+use gpui_query::core::Fetched;
+
+let fetched = Fetched::with_policy(data, policy)
+    .with_meta(serde_json::to_value(&meta).unwrap());
+```
+
+This is what closes the loop with [Persistence](/docs/guides/persistence): the ETag survives a process restart, hydration re-primes the cache, and the first refetch after launch costs a `304` instead of a full download.
+
+## Next steps
+
+- [Caching](/docs/guides/caching): how `NoCache`, `Ttl`, and `StaleWhileRevalidate` decide freshness.
+- [Persistence](/docs/guides/persistence): how `meta` travels through `PersistedEntry` and back via `hydrate`.

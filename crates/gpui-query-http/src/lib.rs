@@ -49,6 +49,8 @@ pub mod reqwest_backend;
 
 pub use backend::{BackendResponse, Conditionals, HttpBackend};
 pub use cache::{HttpCache, HttpError};
+#[cfg(feature = "reqwest")]
+pub use reqwest_backend::ReqwestBackend;
 
 /// HTTP cache metadata extracted from a response.
 ///

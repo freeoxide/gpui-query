@@ -1,0 +1,26 @@
+---
+sidebar_position: 1
+title: Introduction
+description: "gpui-query is async state management for GPUI, the Rust framework behind Zed. Declarative queries with caching, retries, and cancellation built in."
+---
+
+gpui-query is a zero-boilerplate async state management library for GPUI, the framework behind the Zed editor.
+
+## What is gpui-query?
+
+gpui-query brings the async state management patterns popularized by libraries like TanStack Query to the GPUI framework. It provides a declarative way to fetch, cache, synchronize, and update server state in your GPUI applications without the boilerplate of manual lifecycle management.
+
+## Why gpui-query?
+
+- **Zero boilerplate**: Define a query, bind it to a view, and let the library handle the rest.
+- **Automatic caching**: Responses are cached and deduplicated.
+- **Built-in retry and error handling**: Failed requests are retried with configurable policies.
+- **Observer pattern**: Reactively update your UI when data changes.
+- **Designed for GPUI**: Direct integration with GPUI's entity and view system.
+
+## Next Steps
+
+- [Install gpui-query](/docs/getting-started/installation) in your project.
+- Follow the [Quick Start](/docs/getting-started/quick-start) guide to make your first query.
+- Explore the [API Reference](/docs/api/queries) for detailed documentation.
+- Read the [Guides](/docs/guides/caching) for patterns and best practices.

@@ -57,13 +57,23 @@ jobs:
         run: |
           VERSION="${{ steps.changelog.outputs.version }}"
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/gpui-query/Cargo.toml
+          # Keep the version literal in sync across the install snippets that
+          # external systems render statically (crates.io README, GitHub README,
+          # docs installation page). Mirrors the Cargo.toml bump above; both the
+          # bare `gpui-query = "x.y.z"` and table `version = "x.y.z"` forms.
+          sed -i -E \
+            -e 's|gpui-query = "[^"]*"|gpui-query = "'"$VERSION"'"|g' \
+            -e 's|gpui-query = [{] version = "[^"]*"|gpui-query = { version = "'"$VERSION"'"|g' \
+            README.md \
+            crates/gpui-query/README.md \
+            web/src/content/docs/docs/getting-started/installation.mdx
 
       - name: Commit version bump
         if: steps.check_tag.outputs.exists == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add crates/gpui-query/Cargo.toml
+          git add crates/gpui-query/Cargo.toml README.md crates/gpui-query/README.md web/src/content/docs/docs/getting-started/installation.mdx
           git diff --cached --quiet || git commit -m "chore: bump gpui-query version to v${{ steps.changelog.outputs.version }}"
 
       - name: Create Git tag
@@ -115,8 +125,8 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  deploy-website:
-    needs: publish-main
+  deploy-web:
+    needs: [publish-main, check-and-release]
     runs-on: ubuntu-latest
     environment: prod
     defaults:
@@ -124,19 +134,24 @@ jobs:
         working-directory: web
 
     steps:
+      # Check out the tagged commit (created by check-and-release) so the web
+      # build sees the version-bumped Cargo.toml — read at build time by the OG
+      # image and changelog page — and the synced markdown install snippets.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-and-release.outputs.tag }}
 
       - uses: oven-sh/setup-bun@v2
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Install web dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install website dependencies
-        working-directory: website
+      - name: Install docs dependencies
+        working-directory: docs
         run: npm ci
 
       - name: Build

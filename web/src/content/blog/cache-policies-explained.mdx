@@ -1,0 +1,80 @@
+---
+title: "Cache policies, explained"
+description: "When to reach for NoCache, Ttl, or StaleWhileRevalidate in gpui-query, and how each CachePolicy variant interacts with retries, observers, and persistence."
+date: "2026-05-02"
+author: "hmziqrs"
+tags:
+  - gpui
+  - rust
+  - caching
+---
+
+Caching is the part of a query library where good intentions turn into stale-data bugs. `gpui-query` keeps the surface deliberately small: three `CachePolicy` variants, each with a contract you can hold in your head.
+
+```rust
+pub enum CachePolicy {
+    NoCache,
+    Ttl { ttl_ms: u64 },
+    StaleWhileRevalidate { ttl_ms: u64, stale_ms: u64 },
+}
+```
+
+## NoCache
+
+`CachePolicy::NoCache` never caches. Every observer mount triggers a fresh fetch. Use it when the data is cheap to recompute and must always be current: live presence, ephemeral session state, anything where showing even a moment of stale data is wrong.
+
+```rust
+use gpui_query::CachePolicy;
+
+let policy = CachePolicy::NoCache;
+assert_eq!(policy.ttl_ms(), None);
+assert!(!policy.can_short_circuit());
+```
+
+It's also the safe choice when you're unsure. You trade a little performance for never having to reason about staleness.
+
+## Ttl
+
+`CachePolicy::Ttl { ttl_ms }` caches a successful result for `ttl_ms` milliseconds. While the entry is fresh, new observers short-circuit: they get the cached value immediately without firing a request. `can_short_circuit()` returns `true` for both `Ttl` and `StaleWhileRevalidate`. Both can hand back cached data without firing a request.
+
+```rust
+let policy = CachePolicy::Ttl { ttl_ms: 60_000 }; // 60s
+assert_eq!(policy.ttl_ms(), Some(60_000));
+assert!(policy.can_short_circuit());
+```
+
+`Ttl` is the workhorse for most API data: a list of projects, a user profile, a config document. Pick the TTL from how stale your UI can tolerate the data being. Collaborative data that changes often wants a short one. Slow-moving reference data can ride for minutes.
+
+Once the TTL elapses the entry counts as stale, and the next observer triggers a refetch.
+
+## StaleWhileRevalidate
+
+`CachePolicy::StaleWhileRevalidate { ttl_ms, stale_ms }` is the variant that makes UIs feel instant. Data is fresh for `ttl_ms`; for the next `stale_ms` it is served immediately to the observer while a background refetch runs, and only after `ttl_ms + stale_ms` is the entry considered expired.
+
+```rust
+let policy = CachePolicy::StaleWhileRevalidate { ttl_ms: 30_000, stale_ms: 60_000 };
+assert_eq!(policy.ttl_ms(), Some(30_000));
+assert_eq!(policy.stale_ms(), Some(60_000));
+assert!(policy.can_short_circuit());
+```
+
+Like `Ttl`, `can_short_circuit()` is `true` here: during the stale window the entry is served immediately (no fetch blocks the render) while a revalidation runs in the background and swaps in the fresh result. Dashboards and feeds usually want this: users would rather see something now and an update a moment later.
+
+## How policies interact with the rest of the crate
+
+A cache policy never acts alone. A few interactions worth knowing:
+
+- Retries. A failed fetch follows `RetryPolicy` (capped exponential backoff) regardless of cache policy. `NoCache` with `RetryPolicy::no_retries()` is the most pessimistic combination; `StaleWhileRevalidate` with default retries is the most forgiving.
+- Request policies. `RequestPolicy::LatestWins` cancels in-flight requests when a newer one arrives for the same key, so a revalidation triggered by a stale hit can be cleanly superseded. The cancellation mechanism is covered in [Cooperative cancellation in gpui-query](/blog/cooperative-cancellation).
+- Observers. Multiple observers on the same key share one underlying `QueryResource`, so a single background revalidation fans its result out to everyone subscribed.
+- Persistence. `CachePolicy` derives `Serialize` and `Deserialize`, so cached state round-trips through a `Persister` implementation (see [Persistence](/docs/guides/persistence)) with its TTL and stale window intact.
+
+## Choosing
+
+| Need                                         | Pick                              |
+| -------------------------------------------- | --------------------------------- |
+| Must always be live                          | `NoCache`                         |
+| Reference-ish data, fine to refetch on stale | `Ttl { ttl_ms }`                  |
+| Instant render, refresh in the background    | `StaleWhileRevalidate { ttl_ms, stale_ms }` |
+
+My default: `Ttl` for everything that isn't obviously transient, `StaleWhileRevalidate` for the lists and feeds I want to feel snappy, and `NoCache` reserved for data where staleness is a correctness bug rather than a cosmetic one.

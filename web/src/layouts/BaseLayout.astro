@@ -1,0 +1,91 @@
+---
+// App shell for marketing/blog/legal pages. Mirrors web/src/routes/__root.tsx:
+// HTML shell, no-flash theme bootstrap, global stylesheet, navbar island,
+// footer, Firebase Analytics, and explicit per-page metadata.
+//
+// Docs pages are owned by Starlight (its own layout) and are NOT wrapped here.
+// See astro-migration.mdx § "Phase 5: Astro shell and web pages".
+import "../styles.css";
+import { Navbar } from "../components/navbar";
+import Footer from "../components/Footer.astro";
+import { FirebaseAnalytics } from "../components/firebase-analytics";
+
+export interface Props {
+  /** Full <title> text (include the "- gpui-query" suffix at the call site). */
+  title: string;
+  description?: string;
+  /** Canonical path, e.g. "/", "/blog", "/privacy". Joined to the site URL. */
+  canonicalPath: string;
+  /** OG image path (default: the homepage brand card). */
+  image?: string;
+  noindex?: boolean;
+  ogType?: string;
+  jsonLd?: object | object[];
+}
+
+const {
+  title,
+  description,
+  canonicalPath,
+  image = "/og-image.png",
+  noindex = false,
+  ogType = "website",
+  jsonLd,
+} = Astro.props;
+
+const SITE = "https://gpui-query.freeoxide.com";
+const canonical = new URL(canonicalPath, SITE).href;
+const ogImage = new URL(image, SITE).href;
+const jsonLdArray = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [];
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1E6B5A" />
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+    {noindex && <meta name="robots" content="noindex,nofollow" />}
+
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="manifest" href="/manifest.json" />
+
+    {/* OpenGraph */}
+    <meta property="og:title" content={title} />
+    {description && <meta property="og:description" content={description} />}
+    <meta property="og:type" content={ogType} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:site_name" content="gpui-query" />
+
+    {/* Twitter */}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    {description && <meta name="twitter:description" content={description} />}
+    <meta name="twitter:image" content={ogImage} />
+
+    {jsonLdArray.map((data) => (
+      <script type="application/ld+json" set:html={JSON.stringify(data)} />
+    ))}
+
+    {/* No-flash theme bootstrap: same contract as the old __root.tsx — the
+        marketing app keys dark mode off a `.dark` class on <html> and a
+        `theme` localStorage entry (docs/Starlight use `data-theme` instead). */}
+    <script is:inline>
+      (function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.classList.add('dark');document.querySelector('meta[name=theme-color]')?.setAttribute('content','#0C1222')}}catch(e){}})()
+    </script>
+  </head>
+  <body>
+    <a href="#main-content" class="skip-to-content">Skip to content</a>
+    <div id="app" class="flex min-h-screen flex-col">
+      <Navbar client:load />
+      <main id="main-content" class="flex-1" data-pagefind-body>
+        <slot />
+      </main>
+      <Footer />
+    </div>
+    <FirebaseAnalytics client:idle />
+  </body>
+</html>

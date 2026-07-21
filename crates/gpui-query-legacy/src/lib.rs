@@ -8,10 +8,10 @@
 //! - Fixed retry loops and signal lifecycle
 //! - Efficient re-renders with status deduplication
 //!
-//! See https://gpui-query.hmziq.xyz/docs/ for migration guidance.
+//! See https://gpui-query.freeoxide.com/docs/ for migration guidance.
 #![deprecated(
     since = "0.1.0",
-    note = "gpui-query-legacy is deprecated. Use gpui-query (v2) instead. See https://gpui-query.hmziq.xyz/docs/ for migration guidance."
+    note = "gpui-query-legacy is deprecated. Use gpui-query (v2) instead. See https://gpui-query.freeoxide.com/docs/ for migration guidance."
 )]
 
 #[cfg(feature = "core")]

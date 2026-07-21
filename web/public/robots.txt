@@ -1,8 +1,10 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://gpui-query.hmziq.xyz/sitemap.xml
+# Astro emits a single combined sitemap-index.xml (all marketing, blog, legal,
+# and /docs/** pages). The old /docs/sitemap.xml (Docusaurus) no longer exists.
+Sitemap: https://gpui-query.freeoxide.com/sitemap-index.xml
 
 # AI agent files
-# llms.txt: https://gpui-query.hmziq.xyz/llms.txt
-# llms-full.txt: https://gpui-query.hmziq.xyz/llms-full.txt
+# llms.txt: https://gpui-query.freeoxide.com/llms.txt
+# llms-full.txt: https://gpui-query.freeoxide.com/llms-full.txt

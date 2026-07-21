@@ -3,12 +3,12 @@ name = "gpui-query"
 version = "0.2.0"
 edition = "2024"
 description = "TanStack Query-inspired async state management for GPUI"
-repository = "https://github.com/hmziqrs/gpui-query"
+repository = "https://github.com/freeoxide/gpui-query"
 readme = "README.md"
 license = "MIT"
 keywords = ["gpui", "async", "state-management", "query", "zed"]
 categories = ["asynchronous", "caching", "gui"]
-homepage = "https://gpui-query.hmziq.xyz"
+homepage = "https://gpui-query.freeoxide.com"
 authors = ["hmziqrs"]
 
 [features]

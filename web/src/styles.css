@@ -1,5 +1,9 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/oxanium";
 @import "../../shared/tokens.css";
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -42,7 +46,20 @@
   --radius-xl: var(--radius-xl);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
-  --font-display: "Oxanium", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Oxanium Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Self-hosted variable fonts (fontsource). Shared tokens declare the static
+   Google Fonts family names; fontsource registers "<Family> Variable", so
+   override the stacks here rather than in shared/tokens.css, which the docs
+   site also consumes. */
+:root {
+  --font-sans:
+    "Inter Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono:
+    "JetBrains Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
 }
 
 /* Chart colors (not in shared tokens — web-only) */
@@ -68,7 +85,7 @@
   --chart-3: oklch(0.588 0.158 241.966);
   --chart-4: oklch(0.5 0.134 242.749);
   --chart-5: oklch(0.443 0.11 240.79);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.165 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.768 0.233 130.85);
   --sidebar-primary-foreground: oklch(0.274 0.072 132.109);
@@ -264,6 +281,105 @@
     opacity: 1;
     transform: none;
     transition: none;
+  }
+}
+
+/* ── Landing previews (/v1 /v2 /v3) ──────────────────────────────── */
+
+/* V1 — cursor-reactive line grid */
+.v1-grid-base {
+  background-image:
+    linear-gradient(
+      color-mix(in oklab, var(--color-foreground) 6%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--color-foreground) 6%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 32px 32px;
+}
+
+.v1-grid-glow {
+  background-image:
+    linear-gradient(
+      color-mix(in oklab, var(--color-primary) 45%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--color-primary) 45%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 32px 32px;
+  mask-image: radial-gradient(
+    240px circle at var(--mx, -500px) var(--my, -500px),
+    black 0%,
+    transparent 100%
+  );
+  -webkit-mask-image: radial-gradient(
+    240px circle at var(--mx, -500px) var(--my, -500px),
+    black 0%,
+    transparent 100%
+  );
+}
+
+@keyframes v1-led {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0.2;
+  }
+}
+
+.v1-led {
+  animation: v1-led 1s step-end infinite;
+}
+
+/* V2 — indeterminate meter while revalidating */
+@keyframes v2-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 16px 0;
+  }
+}
+
+.v2-meter-busy {
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--color-primary) 0 4px,
+    transparent 4px 8px
+  );
+  animation: v2-stripes 0.5s linear infinite;
+}
+
+/* V3 — drafting sheet rulers */
+.v3-ruler-x {
+  background-image: repeating-linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--color-foreground) 25%, transparent) 0 1px,
+    transparent 1px 8px
+  );
+}
+
+.v3-ruler-y {
+  background-image: repeating-linear-gradient(
+    0deg,
+    color-mix(in oklab, var(--color-foreground) 25%, transparent) 0 1px,
+    transparent 1px 8px
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v1-led,
+  .v2-meter-busy {
+    animation: none;
   }
 }
 

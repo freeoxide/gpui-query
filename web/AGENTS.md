@@ -1,16 +1,34 @@
-<!--VITE PLUS START-->
+# Website (Astro + Starlight)
 
-# Using Vite+, the Unified Toolchain for the Web
+This is the gpui-query website: a static Astro + Starlight site deployed to
+Cloudflare Pages. The migration from TanStack Start + Docusaurus is complete —
+do **not** reintroduce Vite+, TanStack Start, or Docusaurus.
 
-This project is using Vite+, a unified toolchain built on top of Vite, Rolldown, Vitest, tsdown, Oxlint, Oxfmt, and Vite Task. Vite+ wraps runtime management, package management, and frontend tooling in a single global CLI called `vp`. Vite+ is distinct from Vite, and it invokes Vite through `vp dev` and `vp build`. Run `vp help` to print a list of commands and `vp <command> --help` for information about a specific command.
+## Commands (run from `web/`)
 
-Docs are local at `node_modules/vite-plus/docs` or online at https://viteplus.dev/guide/.
+- `bun install` — install dependencies.
+- `bun run dev` — Astro dev server on http://localhost:3000.
+- `bun run build` — full production build: OG images → `astro build` → Pagefind
+  index → `llms.txt` / `.md` alternatives. Output is `dist/client/`.
+- `bun run preview` — serve the built site.
+- `astro check` — type-check `.astro` / `.tsx` sources.
 
-## Review Checklist
+## Layout
 
-- [ ] Run `vp install` after pulling remote changes and before getting started.
-- [ ] Run `vp check` and `vp test` to format, lint, type check and test changes.
-- [ ] Check if there are `vite.config.ts` tasks or `package.json` scripts necessary for validation, run via `vp run <script>`.
-- [ ] If setup, runtime, or package-manager behavior looks wrong, run `vp env doctor` and include its output when asking for help.
+- `src/pages/**` — Astro routes (marketing, blog, legal).
+- `src/content/docs/docs/**` — Starlight docs served at `/docs/**`.
+- `src/content/blog/**` — blog posts (MDX).
+- `src/layouts/BaseLayout.astro` — app shell; `src/styles/starlight.css` — docs
+  theme layered on shared tokens.
+- Interactive UI stays as React islands (`client:load` / `client:idle`).
+- Package manager is **bun**.
 
-<!--VITE PLUS END-->
+## Conventions
+
+- Canonical URLs are no-trailing-slash; `build.format: "file"` keeps output flat.
+- Shared design tokens live in `../shared/tokens.css` — consume them, don't
+  recolor.
+- Docs internal links must sit under `/docs/**` (root-absolute `/api/...` links
+  404).
+- Search is one combined Pagefind index (`data-pagefind-body` on the app
+  `<main>` and on Starlight content).

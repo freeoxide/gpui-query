@@ -224,17 +224,20 @@ fn file_persister_large_snapshot_round_trips() {
             .unwrap_or_else(|| panic!("format {fmt:?}: sampled entry {sample_key} present"));
         assert_eq!(entry.cached_at, 1_700_000_000_000 + 9000);
         assert_eq!(entry.cache_policy, CachePolicy::Ttl { ttl_ms: 60_000 });
-        assert_eq!(entry.value, serde_json::json!({
-            "id": 9000,
-            "name": "User 9000",
-            "email": "user9000@example.test",
-            "active": true,
-            "tags": ["tag-9000", "member", "persisted"],
-            "profile": {
-                "bio": "Auto-generated biography for user 9000.",
-                "followers": 27000,
-            },
-        }));
+        assert_eq!(
+            entry.value,
+            serde_json::json!({
+                "id": 9000,
+                "name": "User 9000",
+                "email": "user9000@example.test",
+                "active": true,
+                "tags": ["tag-9000", "member", "persisted"],
+                "profile": {
+                    "bio": "Auto-generated biography for user 9000.",
+                    "followers": 27000,
+                },
+            })
+        );
     }
 }
 
@@ -246,10 +249,17 @@ fn file_persister_corrupt_bincode_yields_empty_snapshot() {
     // an empty snapshot without panicking or erroring.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cache.bin");
-    std::fs::write(&path, b"\x00\x01\x02 this is definitely not bincode \xff\xfe garbage").expect("write garbage");
+    std::fs::write(
+        &path,
+        b"\x00\x01\x02 this is definitely not bincode \xff\xfe garbage",
+    )
+    .expect("write garbage");
 
     let p = FilePersister::bincode(&path);
     let loaded = pollster::block_on(p.load()).expect("tolerant load");
-    assert!(loaded.entries.is_empty(), "corrupt bincode → empty snapshot");
+    assert!(
+        loaded.entries.is_empty(),
+        "corrupt bincode → empty snapshot"
+    );
     assert_eq!(loaded.version, PERSIST_VERSION);
 }

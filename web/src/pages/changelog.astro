@@ -1,0 +1,147 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { changelogPage } from "../lib/seo";
+import { parseChangelog, type Category } from "../lib/release";
+
+// Generated at build time from the repo-root CHANGELOG.md (the single source of
+// truth) via src/lib/release.ts. The per-entry headline comes from a blockquote
+// summary under each version header in CHANGELOG.md; the doc cross-links below
+// are web-only and have no CHANGELOG representation.
+interface ChangelogSubItem {
+  category: Category;
+  text: string;
+}
+interface ChangelogLink {
+  label: string;
+  slug: string;
+}
+interface ChangelogEntry {
+  version: string;
+  date: string;
+  description?: string;
+  items: ChangelogSubItem[];
+  links?: ChangelogLink[];
+}
+
+const categoryConfig: Record<Category, { bullet: string; color: string }> = {
+  Added: { bullet: "+", color: "text-emerald-600 dark:text-emerald-400" },
+  Changed: { bullet: "~", color: "text-amber-600 dark:text-amber-400" },
+  Fixed: { bullet: "!", color: "text-sky-600 dark:text-sky-400" },
+  Removed: { bullet: "-", color: "text-rose-600 dark:text-rose-400" },
+};
+
+// Web-only doc cross-links, keyed by version (no leading "v"). CHANGELOG.md has
+// no notion of these, so they live here as a small sidecar.
+const docLinks: Record<string, ChangelogLink[]> = {
+  "0.1.3": [{ label: "Migrating from v1 to v2", slug: "/docs/advanced/migration" }],
+  "0.1.1": [{ label: "Migrating from v1 to v2", slug: "/docs/advanced/migration" }],
+  "0.1.0": [
+    { label: "Getting Started", slug: "/docs/getting-started/installation" },
+    { label: "Queries", slug: "/docs/api/queries" },
+  ],
+};
+
+const changelogEntries: ChangelogEntry[] = parseChangelog().map((entry) => ({
+  ...entry,
+  links: docLinks[entry.version],
+}));
+
+const title = "Changelog - gpui-query";
+const description =
+  "gpui-query release history: the v1 to v2 rewrite, crate reorganization, fixes, and docs updates in every published version.";
+const jsonLd = changelogPage({
+  name: "gpui-query Changelog",
+  description: "Release history for gpui-query, the async state management library for GPUI.",
+  url: "https://gpui-query.freeoxide.com/changelog",
+  softwareVersion: changelogEntries[0].version,
+  datePublished: changelogEntries[changelogEntries.length - 1].date,
+  dateModified: changelogEntries[0].date,
+});
+
+function badgeClasses(index: number): string {
+  if (index === 0) return "border-transparent bg-primary text-primary-foreground shadow-sm";
+  if (index === 1) return "border-transparent bg-secondary text-secondary-foreground";
+  return "border-transparent bg-muted text-muted-foreground";
+}
+---
+<BaseLayout
+  title={title}
+  description={description}
+  canonicalPath="/changelog"
+  image="/og/changelog.png"
+  jsonLd={jsonLd}
+>
+  <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div class="mx-auto max-w-7xl">
+      <div class="mb-12 text-center">
+        <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Changelog</h1>
+        <p class="mt-3 text-lg text-muted-foreground">
+          Release history for gpui-query. Every version, every improvement.
+        </p>
+      </div>
+
+      <div class="relative">
+        <div
+          aria-hidden="true"
+          class="absolute bottom-0 left-[7px] top-0 w-px bg-gradient-to-b from-primary/40 via-primary/20 to-transparent"
+        ></div>
+
+        <div class="space-y-12">
+          {changelogEntries.map((entry, index) => (
+            <article class="relative pl-8" style={`animation: fade-in-up 0.5s ease-out ${index * 120}ms both`}>
+              <div
+                aria-hidden="true"
+                class={`absolute left-0 top-1.5 flex h-[15px] w-[15px] items-center justify-center rounded-full border-2 ${index === 0 ? "border-primary bg-primary/20 shadow-[0_0_8px_var(--color-primary)/30%]" : "border-primary/30 bg-background"}`}
+              >
+                {index === 0 && <div class="h-1.5 w-1.5 rounded-full bg-primary"></div>}
+              </div>
+
+              <div class="rounded-xl border border-border/60 bg-card p-5 transition-colors hover:border-primary/20 hover:bg-card/80 sm:p-6">
+                <div class="flex flex-wrap items-center gap-3">
+                  <span class={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold ${badgeClasses(index)}`}>{`v${entry.version}`}</span>
+                  {index === 0 && (
+                    <span class="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary">Latest</span>
+                  )}
+                  <time class="text-sm text-muted-foreground">{entry.date}</time>
+                </div>
+
+                {entry.description && <p class="mt-3 leading-relaxed text-foreground/90">{entry.description}</p>}
+
+                {entry.items.length > 0 && (
+                  <div class="mt-4 space-y-1.5 rounded-lg bg-muted/40 px-4 py-3">
+                    {entry.items.map((item) => {
+                      const config = categoryConfig[item.category];
+                      return (
+                        <div class="flex items-start gap-2 text-sm">
+                          <span class={`mt-0.5 shrink-0 font-mono text-xs font-bold leading-none ${config.color}`} aria-hidden="true">{config.bullet}</span>
+                          <span class="text-muted-foreground">
+                            <span class={`mr-1.5 font-semibold ${config.color}`}>{item.category}</span>
+                            {item.text}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {entry.links && entry.links.length > 0 && (
+                  <div class="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border/40 pt-3">
+                    <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">Docs</span>
+                    {entry.links.map((link) => (
+                      <a href={link.slug} class="inline-flex items-center text-sm font-medium text-primary transition-colors hover:text-primary/80">
+                        {link.label}
+                        <svg class="ml-1 h-3 w-3" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"></path>
+                        </svg>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+</BaseLayout>

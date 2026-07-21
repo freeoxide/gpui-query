@@ -57,11 +57,10 @@ export function softwareSourceCode(data: SoftwareSourceCodeData) {
 }
 
 /*
- * The following TechArticle / HowTo / BlogPosting factories are intentionally
- * retained even though some have no current call site in the marketing app:
- * the docs (Docusaurus) and blog moved out of web/, but the blog will be
- * re-introduced and wired to blogPost(). techArticle() and howTo() are kept
- * for parity and future doc/blog embeds. Do not remove.
+ * blogPost() is wired to /blog/$slug and changelogPage() to /changelog.
+ * techArticle() and howTo() have no current call site: they are retained for
+ * future doc/blog embeds (the docs live in the separate Docusaurus app). Do
+ * not remove.
  */
 // Retained for Docusaurus/future use — no current call site in this app.
 export function techArticle(data: TechArticleData) {
@@ -114,7 +113,7 @@ export function blogPost(data: BlogPostData) {
     description: data.description,
     ...(data.author && { author: { "@type": "Person", name: data.author } }),
     ...(data.datePublished && { datePublished: data.datePublished }),
-    ...(data.url && { url: data.url }),
+    ...(data.url && { url: data.url, mainEntityOfPage: data.url }),
     ...(data.image && { image: data.image }),
   };
 }

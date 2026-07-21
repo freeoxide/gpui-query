@@ -17,29 +17,23 @@ test:
 test-feature feature:
     cargo test --features "{{ feature }}"
 
-# ---- Docs ----
-
-# Build the Docusaurus docs site
-docs-build:
-    cd website && npm run build
-
-# Start the docs dev server
-docs-dev:
-    cd website && npm run start
-
-# ---- Website (TanStack Start) ----
+# ---- Website (Astro + Starlight) ----
 
 # Install web dependencies
 web-install:
     cd web && bun install
 
-# Build the web app (copies Docusaurus output into it)
+# Build the website (marketing, blog, and /docs/** — output in dist/client)
 web-build:
     cd web && bun run build
 
-# Start the web dev server
+# Start the web dev server (Astro, port 3000)
 web-dev:
     cd web && bun run dev
+
+# Preview the built site
+web-preview:
+    cd web && bun run preview
 
 # ---- CI Workflows ----
 
@@ -67,7 +61,7 @@ ci-logs run_id:
 
 # Open the GitHub releases page
 releases:
-    open "https://github.com/hmziqrs/gpui-query/releases"
+    open "https://github.com/freeoxide/gpui-query/releases"
 
 # Create a new release: bumps version in CHANGELOG, commits, and pushes
 # Usage: just release 0.1.2

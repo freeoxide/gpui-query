@@ -1,0 +1,83 @@
+---
+title: "Cooperative cancellation in gpui-query"
+description: "What QuerySignal is, why cancellation in Rust has to be cooperative, and where your fetchers should check the flag so abandoned queries stop early."
+date: "2026-04-08"
+author: "hmziqrs"
+tags:
+  - gpui
+  - rust
+  - concurrency
+---
+
+Here's a bug that shows up in almost every async UI eventually. A component kicks off a request. The user navigates away. Two seconds later the response lands and writes to state nobody is rendering anymore, or worse, overwrites fresher data. Web frameworks paper over this with abort signals and effect cleanup. In a Rust and GPUI app you can do it with less machinery.
+
+`gpui-query` handles it with cooperative cancellation via `QuerySignal`.
+
+## What QuerySignal actually is
+
+```rust
+#[derive(Debug, Clone)]
+pub struct QuerySignal {
+    cancelled: Arc<AtomicBool>,
+}
+```
+
+That's the whole type: a shared atomic flag in an `Arc`. Clones share the same underlying flag, so cancelling any clone cancels all of them:
+
+```rust
+use gpui_query::core::QuerySignal;
+
+let signal = QuerySignal::new();
+let clone = signal.clone();
+
+signal.cancel();
+assert!(signal.is_cancelled());
+assert!(clone.is_cancelled());
+```
+
+Both the store and the load use `Ordering::SeqCst`, so cancellation is observable across threads without a lock. The type is deliberately not serializable. A cancellation flag has no meaningful persisted form, so it doesn't get one.
+
+## Why cooperative rather than preemptive
+
+Rust won't let you kill a future from the outside, and `gpui-query` doesn't own your futures anyway. Cancellation has to be opt-in: the running task checks a flag at points where stopping is safe. `QuerySignal` gives fetchers a cheap, allocation-free way to do exactly that.
+
+The contract is short:
+
+- The client hands your fetcher a `QuerySignal` clone when a request starts.
+- When the request is superseded (a newer request, a component unmount, a manual cancel), the client calls `signal.cancel()`.
+- Your fetcher checks `signal.is_cancelled()` periodically and returns early.
+
+## Where to check the signal
+
+The most important place is between retry attempts. `RetryPolicy` will keep retrying a failing request up to `max_retries` times, and without a cancellation check that means a doomed query can keep working for seconds after nobody wants the result.
+
+```rust
+use gpui_query::core::{QuerySignal, RetryPolicy};
+
+async fn fetch_users(signal: QuerySignal) -> Result<Vec<User>, MyError> {
+    let policy = RetryPolicy::default(); // 3 retries, exponential backoff
+    for attempt in 0..=policy.max_retries {
+        if signal.is_cancelled() {
+            return Err(MyError::Cancelled);
+        }
+        match do_request().await {
+            Ok(users) => return Ok(users),
+            Err(e) if attempt == policy.max_retries => return Err(e),
+            Err(_) => sleep(backoff(attempt)).await,
+        }
+    }
+    unreachable!()
+}
+```
+
+Long-running scans and paginated fetches should also poll `is_cancelled()` at their natural chunk boundaries.
+
+## How LatestWins uses it
+
+`RequestPolicy::LatestWins` is built on this primitive. When a new request arrives for a key while an older one is still in flight, the older request's signal is cancelled and the client waits only on the newest result. That closes the classic query-cache race where stale data clobbers fresh data, and it does so without the framework aborting futures it doesn't own.
+
+## Takeaways
+
+`QuerySignal` is an `Arc<AtomicBool>`: cheap to clone and lock-free to read. Check `is_cancelled()` at retry and chunk boundaries inside your fetcher. Component unmount and `LatestWins` both flow through the same signal, so the crate has one teardown story instead of three.
+
+If your fetcher never checks the signal, nothing breaks. It just won't stop early. Treat the signal as a contract between your fetcher and the client: honor it, and abandoned queries cost you almost nothing.

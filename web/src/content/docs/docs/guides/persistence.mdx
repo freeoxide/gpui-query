@@ -1,0 +1,169 @@
+---
+sidebar_position: 4
+title: Persistence
+description: "Save and restore cached query data across app restarts with the async Persister trait, persist_with, and hydrate."
+---
+
+Persistence lets your app start with data already in the cache instead of an empty loading state. Enable the `persist` feature and gpui-query drives a snapshot of your `Success` entries through an async backend you implement (the filesystem, a database, or a KV store). It saves on a debounce and restores on cold start.
+
+:::note
+Persistence is gated behind the `persist` feature. Add it alongside `hook`:
+
+```toml
+gpui-query = { version = "0.2.0", features = ["hook", "persist"] }
+```
+:::
+
+## How it fits together
+
+The cache stores type-erased buckets, so persistence has to move typed data (`Vec<User>`, `Config`, …) through an opaque shape. gpui-query splits that into a few pieces:
+
+| Piece | Role |
+| ----- | ---- |
+| `Persister` | Async trait **you implement**: `load() -> Result<PersistSnapshot, PersistError>` and `save(&PersistSnapshot) -> Result<(), PersistError>`. |
+| `PersistSnapshot` / `PersistedEntry` | The on-wire shape: a map of key → `{ value (JSON), cached_at, cache_policy, meta }`. |
+| `QueryClient::persist_with` | A debounced driver that collects a snapshot on every cache mutation and hands it to the persister. Returns a `PersistHandle` drop-guard. |
+| `hydrate` (free fn) | Cold-start restore: load a snapshot and re-prime the live cache. |
+| `SerializerRegistry` / `DeserializerRegistry` | Typed `T -> JSON` and `JSON -> T` conversions, registered per `T`. Required for the value-carrying round-trip. |
+| `PersistOptions` / `PersistFilter` | Tuning: which keys (`Exact` / `Prefix` / `All`), max age, debounce. |
+| `PersistError` / `PERSIST_VERSION` | Typed errors; the snapshot format version loaders check. |
+
+## Register the typed (de)serializers
+
+Only resources whose data type `T` has a registered serializer are emitted, and only types with a registered deserializer come back on `hydrate`. Register both, keyed by the concrete `T` and the `E` you read it under:
+
+```rust
+use gpui_query::client::QueryClient;
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct User { id: u64, name: String }
+#[derive(Clone, Debug)] struct MyError;
+
+let mut client = QueryClient::new();
+
+// T -> JSON (used when collecting a snapshot).
+client.register_serializer::<Vec<User>, MyError>(
+    |users| serde_json::to_value(users).unwrap(),
+);
+
+// JSON -> T (used by hydrate to re-prime the cache).
+client.register_deserializer::<Vec<User>, MyError>(
+    |v| serde_json::from_value(v.clone()).ok(),
+);
+```
+
+:::caution
+`hydrate` offers every on-disk entry to every registered deserializer. There is no type tag on `PersistedEntry`, so routing is by trial. A deserializer **must** return `None` for any shape that is not its own, or a foreign entry can be mis-primed. Keep them strict and cheap.
+:::
+
+## Implement a Persister
+
+`Persister` is async and `Send + Sync + 'static`; the save future runs on GPUI's background executor, so blocking I/O is fine there. Be tolerant on load. A missing or corrupt store should yield an empty snapshot, not an error:
+
+```rust
+use gpui_query::client::{Persister, PersistSnapshot, PersistError};
+
+struct DbPersister { /* your handle */ }
+
+impl Persister for DbPersister {
+    async fn load(&self) -> Result<PersistSnapshot, PersistError> {
+        // Read from your backend. Missing/corrupt → Ok(PersistSnapshot::new()).
+        Ok(PersistSnapshot::new())
+    }
+
+    async fn save(&self, snapshot: &PersistSnapshot) -> Result<(), PersistError> {
+        // Serialize `snapshot` (it is Serialize) and write it out.
+        Ok(())
+    }
+}
+```
+
+For tests or a disabled mode, `NoopPersister` persists nothing and loads an empty snapshot.
+
+## Save with persist_with
+
+`QueryClient::persist_with(persister, opts, cx)` observes cache mutations and, after a short debounce, collects a fresh snapshot and calls `persister.save`. Bursts coalesce into one save per window. It returns a `PersistHandle`. Hold it for as long as you want saves to continue; dropping it stops scheduling new saves (one save already waiting on its timer may still finish).
+
+```rust
+use gpui_query::client::{QueryClient, PersistOptions, PersistFilter};
+
+# fn doc(client: &QueryClient, cx: &mut gpui::App) {
+// Defaults: every key, max age 24h, 500ms debounce.
+let _handle = client.persist_with(DbPersister, PersistOptions::default(), cx);
+
+// ...or scope and tune it:
+use std::time::Duration;
+let opts = PersistOptions {
+    filter: PersistFilter::Prefix("users".into()), // only the "users" subtree
+    max_age: Duration::from_secs(60 * 60),
+    debounce: Duration::from_millis(250),
+};
+let _handle = client.persist_with(DbPersister, opts, cx);
+# }
+```
+
+For a one-shot snapshot without the driver, call `client.collect_persist_snapshot(&filter, max_age, cx)` and persist it yourself.
+
+## Restore on cold start
+
+The free `hydrate` function loads a snapshot and re-primes the live cache through the registered deserializers. Call it once during startup, before your views mount.
+
+```rust
+use std::time::Duration;
+use gpui_query::client::{hydrate, PersistFilter};
+
+# async fn doc(client: &mut gpui_query::client::QueryClient, cx: &mut gpui::App) {
+let persister = DbPersister;
+match hydrate(client, &persister, &PersistFilter::All, Duration::from_secs(86_400), cx).await {
+    Ok(snapshot) => {
+        // Entries with a registered deserializer are already primed.
+        // `snapshot` is returned so you can do ad-hoc typed priming for the rest.
+    }
+    Err(e) => eprintln!("hydrate failed: {e}"),
+}
+# }
+```
+
+Entries older than `max_age`, excluded by `filter`, or without a matching deserializer are skipped. A snapshot whose `version` does not match `PERSIST_VERSION` returns `PersistError::VersionMismatch`.
+
+## Reference adapter: FilePersister
+
+The companion crate [`gpui-query-persist`](https://crates.io/crates/gpui-query-persist) ships a production-grade disk adapter, so you usually do not implement `Persister` yourself:
+
+```sh
+cargo add gpui-query-persist
+```
+
+```rust
+use gpui_query_persist::FilePersister;
+use gpui_query::client::{QueryClient, PersistOptions};
+
+# fn doc(client: &QueryClient, cx: &mut gpui::App) {
+// JSON (human-readable) or Bincode (compact); in_cache_dir roots at the OS cache dir.
+let persister = FilePersister::json("path/to/cache.json");
+// let persister = FilePersister::in_cache_dir("my-app").unwrap();
+let _handle = client.persist_with(persister, PersistOptions::default(), cx);
+# }
+```
+
+Each save is atomic and durable: it writes a sibling temp file, `fsync`s it (issuing `F_FULLFSYNC` on macOS), renames it over the target, and `fsync`s the parent directory on POSIX, so a crash mid-write never leaves a corrupt cache. Loading is tolerant: a missing file yields an empty snapshot, a corrupt file is logged and treated as empty, and a version mismatch surfaces as a typed `PersistError::VersionMismatch`.
+
+## Opaque metadata (ETags, etc.)
+
+If you fetch over HTTP, you can attach opaque metadata to a fetched value with `Fetched::with_meta`. It lands in `PersistedEntry::meta` and round-trips back through persistence. That lets you issue cheap `304` refetches after relaunch. See [HTTP cache headers](/docs/guides/http-caching).
+
+## When to persist
+
+- **On app shutdown**: the simplest correct strategy. `persist_with`'s debounce lands a final flush shortly after the last mutation; drop the handle on quit.
+- **Continuously, debounced**: for long-running apps that may be killed without a clean shutdown. The default 500ms debounce keeps write volume bounded.
+- **Scoped**: use `PersistFilter::Prefix` to persist only a subtree (e.g. user data, not ephemeral feed pages).
+
+:::tip
+Sanitize errors before they reach persistence. A `QueryError` built from a raw server response can carry tokens or connection strings. See [Error handling: Error sanitization](/docs/guides/error-handling#error-sanitization).
+:::
+
+## Next steps
+
+- [HTTP cache headers](/docs/guides/http-caching): derive a `CachePolicy` from `Cache-Control` and persist `ETag`s.
+- [Caching](/docs/guides/caching): how `CachePolicy` travels with each persisted entry.
+- [Query keys](/docs/guides/query-keys): keys are what make a restored entry addressable.

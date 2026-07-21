@@ -1,0 +1,29 @@
+import { tintRust } from "./rust-tint";
+
+interface RustCodeProps {
+  code: string;
+  lineNumbers?: boolean;
+  className?: string;
+}
+
+export function RustCode({ code, lineNumbers = false, className = "" }: RustCodeProps) {
+  const lines = code.split("\n");
+  return (
+    <pre
+      className={`overflow-x-auto p-5 font-mono text-[13px] leading-6 text-foreground/85 ${className}`}
+    >
+      <code>
+        {lines.map((line, i) => (
+          <span key={`l-${String(i)}`} className="block">
+            {lineNumbers && (
+              <span className="mr-4 inline-block w-5 text-right text-muted-foreground/40 select-none">
+                {i + 1}
+              </span>
+            )}
+            {tintRust(line, `l-${String(i)}`)}
+          </span>
+        ))}
+      </code>
+    </pre>
+  );
+}

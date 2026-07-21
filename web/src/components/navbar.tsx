@@ -1,10 +1,14 @@
-import { Link } from "@tanstack/react-router";
 import { ListIcon, GithubLogoIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { Button } from "#/components/ui/button";
 import { ThemeToggle } from "#/components/theme-toggle";
-import { MobileNav } from "#/components/mobile-nav";
-import { SearchDialog } from "#/components/search-dialog";
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
+
+const MobileNav = lazy(() =>
+  import("#/components/mobile-nav").then((module) => ({ default: module.MobileNav })),
+);
+const SearchDialog = lazy(() =>
+  import("#/components/search-dialog").then((module) => ({ default: module.SearchDialog })),
+);
 
 const navLinks: { href: string; label: string; external?: boolean }[] = [
   { href: "/docs/", label: "Docs" },
@@ -47,7 +51,7 @@ export function Navbar() {
         }`}
       >
         <div className="mx-auto flex h-14 max-w-7xl items-center px-4 sm:px-6 lg:px-8">
-          <Link to="/" className="mr-6 flex items-center space-x-2">
+          <a href="/" className="mr-6 flex items-center space-x-2">
             <svg viewBox="0 0 32 32" className="h-7 w-7 text-primary">
               <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" strokeWidth="2" />
               <path d="M22 22l4 4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
@@ -60,7 +64,7 @@ export function Navbar() {
               />
             </svg>
             <span className="text-xl font-bold">gpui-query</span>
-          </Link>
+          </a>
 
           <nav className="hidden flex-1 items-center gap-6 md:flex" aria-label="Main navigation">
             {navLinks.map((link) =>
@@ -73,15 +77,13 @@ export function Navbar() {
                   {link.label}
                 </a>
               ) : (
-                <Link
+                <a
                   key={link.href}
-                  to={link.href}
+                  href={link.href}
                   className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground relative after:absolute after:bottom-[-2px] after:left-0 after:h-0.5 after:w-0 after:bg-primary after:transition-all after:duration-200 hover:after:w-full"
-                  activeOptions={{ exact: false }}
-                  activeProps={{ className: "text-primary" }}
                 >
                   {link.label}
-                </Link>
+                </a>
               ),
             )}
           </nav>
@@ -102,7 +104,7 @@ export function Navbar() {
             <ThemeToggle />
             <Button variant="ghost" size="icon" asChild className="hidden md:inline-flex">
               <a
-                href="https://github.com/hmziqrs/gpui-query"
+                href="https://github.com/freeoxide/gpui-query"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="GitHub repository"
@@ -122,10 +124,18 @@ export function Navbar() {
           </div>
         </div>
 
-        <MobileNav open={mobileOpen} onClose={() => setMobileOpen(false)} />
+        {mobileOpen && (
+          <Suspense fallback={null}>
+            <MobileNav open={mobileOpen} onClose={() => setMobileOpen(false)} />
+          </Suspense>
+        )}
       </header>
 
-      <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {searchOpen && (
+        <Suspense fallback={null}>
+          <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+        </Suspense>
+      )}
     </>
   );
 }

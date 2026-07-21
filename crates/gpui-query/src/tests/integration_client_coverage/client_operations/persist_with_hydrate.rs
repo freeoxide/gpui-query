@@ -17,7 +17,7 @@ use crate::core::{
     InfiniteQueryResource, MutationResource, QueryError, QueryKey, QueryResource, QueryStatus,
 };
 use crate::hook::{
-    fetch_query, mutate, use_infinite_query, use_mutation, use_query_manual, InfiniteQueryOptions,
+    InfiniteQueryOptions, fetch_query, mutate, use_infinite_query, use_mutation, use_query_manual,
 };
 use crate::tests::test_support::*;
 
@@ -168,7 +168,7 @@ fn test_persist_with_saves_on_mutation(cx: &mut TestAppContext) {
     // the snapshot. The harness holds it for the life of the test, mirroring a
     // real component holding the `Entity` from `use_query`.
     struct H {
-        entity: Entity<QueryResource<String, QueryError>>,
+        _entity: Entity<QueryResource<String, QueryError>>,
         _handle: PersistHandle,
     }
     let harness = cx.new(|cx| {
@@ -195,7 +195,10 @@ fn test_persist_with_saves_on_mutation(cx: &mut TestAppContext) {
             });
             (handle, entity)
         });
-        H { entity, _handle }
+        H {
+            _entity: entity,
+            _handle,
+        }
     });
 
     // A mutation (on another key) bumps the dirty signal → persist_with collects
@@ -245,7 +248,7 @@ fn test_hydrate_primes_via_deserializer_registry(cx: &mut TestAppContext) {
     // harness; hydrate's `set_query_data` then reuses the retained entity rather
     // than creating one that is immediately dropped.
     struct H {
-        entity: Entity<QueryResource<String, QueryError>>,
+        _entity: Entity<QueryResource<String, QueryError>>,
     }
     let harness = cx.new(|cx| {
         cx.update_global::<QueryClient, _>(|client, _cx| {
@@ -255,7 +258,7 @@ fn test_hydrate_primes_via_deserializer_registry(cx: &mut TestAppContext) {
         let entity = cx.update_global::<QueryClient, _>(|client, cx| {
             client.resource::<String, QueryError>(QueryKey::from("hydrate_k"), cx)
         });
-        H { entity }
+        H { _entity: entity }
     });
 
     // Run the async hydrate on the background executor, then assert priming.
@@ -448,7 +451,7 @@ fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext)
 
     struct H {
         // A retained Success query entry — the thing actually persisted.
-        query: Entity<QueryResource<String, QueryError>>,
+        _query: Entity<QueryResource<String, QueryError>>,
         // The mutation entity; completing it bumps the dirty signal.
         mutation: Entity<MutationResource<String, String, QueryError>>,
         _handle: PersistHandle,
@@ -479,7 +482,7 @@ fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext)
         // Create the mutation via the REAL hook path.
         let (mutation, _msub) = use_mutation::<String, String, QueryError, _>((), cx);
         H {
-            query,
+            _query: query,
             mutation,
             _handle,
         }
@@ -563,10 +566,7 @@ fn test_persist_with_driven_by_real_infinite_completion(cx: &mut TestAppContext)
             |_last_page| async move { Ok::<_, QueryError>((vec!["page-0".to_string()], true)) },
             cx,
         );
-        H {
-            infinite,
-            _handle,
-        }
+        H { infinite, _handle }
     });
 
     // Let the first-page fetch resolve → bumps `CacheMutation` → `persist_with`
@@ -706,7 +706,7 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
     // Hold a live Success entry on the "coalesced" key so the snapshot actually
     // contains something to save (the bucket stores only WeakEntity).
     struct H {
-        entity: Entity<QueryResource<String, QueryError>>,
+        _entity: Entity<QueryResource<String, QueryError>>,
         _handle: PersistHandle,
     }
     let harness = cx.new(|cx| {
@@ -728,7 +728,10 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
             });
             (handle, entity)
         });
-        H { entity, _handle }
+        H {
+            _entity: entity,
+            _handle,
+        }
     });
 
     // Fire N>=3 rapid mutations on the same driver key. Each is issued in its
@@ -758,7 +761,8 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
     // the pending timer tasks; a subsequent `run_until_parked` lets exactly one
     // of them drain the shared slot and run `save`. The remaining tasks wake to
     // find the slot already empty and no-op.
-    cx.background_executor.advance_clock(debounce + Duration::from_millis(1));
+    cx.background_executor
+        .advance_clock(debounce + Duration::from_millis(1));
     cx.run_until_parked();
 
     assert_eq!(
@@ -788,15 +792,9 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
 fn block_on_ready<R>(fut: impl std::future::Future<Output = R>) -> R {
     use std::future::Future;
     use std::pin::Pin;
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
+    use std::task::{Context, Poll, Waker};
 
-    struct NoWake;
-    impl Wake for NoWake {
-        fn wake(self: Arc<Self>) {}
-    }
-    let waker = Waker::from(Arc::new(NoWake));
-    let mut cx = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(Waker::noop());
     let mut fut = Box::pin(fut);
     // SAFETY: pinned on the heap; we hold the only reference.
     let mut pinned: Pin<&mut dyn Future<Output = R>> = Pin::as_mut(&mut fut);

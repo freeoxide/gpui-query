@@ -10,21 +10,21 @@ You write a fetcher. The library manages the lifecycle.
 
 ```toml
 [dependencies]
-gpui-query = "0.1.4"
+gpui-query = "0.2.0"
 ```
 
 The default feature set includes the `client` layer. To use the declarative view hooks, enable the `hook` feature:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.1.4", features = ["hook"] }
+gpui-query = { version = "0.2.0", features = ["hook"] }
 ```
 
 If you only want the core state machine without pulling in GPUI:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.1.4", default-features = false, features = ["core"] }
+gpui-query = { version = "0.2.0", default-features = false, features = ["core"] }
 ```
 
 ## Quick start
@@ -76,11 +76,12 @@ fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
 
 ## Feature layers
 
-The crate is split into three layers, each behind a feature flag:
+The crate is split into four layers, each behind a feature flag:
 
 - `core` is a serde-only state machine with no framework coupling. `QueryResource`, `MutationResource`, `CachePolicy`, `RetryPolicy`, and `QueryKey` live here. You can use this layer in any Rust project.
-- `client` is the default feature. It adds `QueryClient`, a GPUI `Global` that owns type-partitioned storage. It handles garbage collection, cache invalidation, observers, persistence, and devtools diagnostics.
+- `client` is the default feature. It adds `QueryClient`, a GPUI `Global` that owns type-partitioned storage. It handles garbage collection, cache invalidation, observers, and devtools diagnostics.
 - `hook` provides the declarative hooks (`use_query`, `use_mutation`, `use_infinite_query`) that wire the client into GPUI views. All hooks return `(Entity, Subscription)` tuples.
+- `persist` adds the async `Persister` trait, `QueryClient::persist_with` (debounced snapshot saves), the free `hydrate` function, and typed (de)serializer registries to restore a warm cache on cold start. A ready-made disk adapter ships in the companion [`gpui-query-persist`](https://crates.io/crates/gpui-query-persist) crate.
 
 ## What you get
 
@@ -94,13 +95,13 @@ The crate is split into three layers, each behind a feature flag:
 - Mutation callbacks for success, error, and settled states.
 - Infinite queries for paginated data.
 - Error sanitization that strips connection strings, tokens, paths, emails, and hex keys from messages.
-- Persistence through the `QueryPersister` trait.
+- Async persistence through the `Persister` trait (`persist` feature); a disk adapter ships in the [`gpui-query-persist`](https://crates.io/crates/gpui-query-persist) crate, and HTTP cache-header support in [`gpui-query-http`](https://crates.io/crates/gpui-query-http).
 
 ## Links
 
-- Website: <https://gpui-query.hmziq.xyz>
-- Docs: <https://gpui-query.hmziq.xyz/docs/>
-- Source: <https://github.com/hmziqrs/gpui-query>
+- Website: <https://gpui-query.freeoxide.com>
+- Docs: <https://gpui-query.freeoxide.com/docs/>
+- Source: <https://github.com/freeoxide/gpui-query>
 - GPUI: <https://github.com/zed-industries/zed/tree/main/crates/gpui>
 - TanStack Query: <https://tanstack.com/query>
 

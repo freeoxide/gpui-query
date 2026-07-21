@@ -12,7 +12,7 @@ Use **gpui-query** (v2) instead. The v2 crate provides:
 - **Fixed retry loops** and signal lifecycle
 - **Efficient re-renders** with status deduplication
 
-See the migration guide at [https://gpui-query.hmziq.xyz/docs/](https://gpui-query.hmziq.xyz/docs/).
+See the migration guide at [https://gpui-query.freeoxide.com/docs/](https://gpui-query.freeoxide.com/docs/).
 
 ## Author
 
