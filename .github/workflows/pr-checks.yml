@@ -30,10 +30,6 @@ jobs:
       - name: Install web dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install docs dependencies
-        working-directory: docs
-        run: npm ci
-
       - name: Build dry-run
         run: bun run build
         env:
