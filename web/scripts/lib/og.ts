@@ -8,6 +8,10 @@
  * caller.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 export const OG_WIDTH = 1200;
 export const OG_HEIGHT = 630;
 
@@ -15,13 +19,25 @@ export const OG_HEIGHT = 630;
 const BG = "#0a0a0a"; // --color-background: oklch(0.145 0 0)
 const FG = "#fafafa"; // --color-foreground: oklch(0.985 0 0)
 const MUTED = "#a1a1a1"; // --color-muted-foreground: oklch(0.708 0 0)
-const PRIMARY = "#84cc16"; // --color-primary: oklch(0.768 0.233 130.85)
+const PRIMARY = "#9AE600"; // brand lime — shared/tokens.css --color-primary (light)
 const GRID = "rgba(255,255,255,0.05)"; // --color-border: oklch(1 0 0 / 10%), halved for subtlety
 
 // librsvg resolves locally installed fonts; Inter/JetBrains Mono are webfonts
 // on the site, so fall back through common system equivalents.
 const SANS = `'Inter', 'Helvetica Neue', 'Arial', sans-serif`;
 const MONO = `'JetBrains Mono', 'Menlo', 'Consolas', monospace`;
+
+// The real brand mark, inlined into OG cards. Read from the canonical logo SVG
+// (web/public/logo.svg) so social cards stay in sync with the navbar/footer
+// mark — no hand-redrawn copy to drift. Strips the outer <svg> wrapper; the
+// inner paths are in 0..1024 viewBox coords (scaled at the embed site).
+const LOGO_MARK = (() => {
+  const svg = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../public/logo.svg"),
+    "utf8",
+  );
+  return svg.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>[\s\S]*$/, "");
+})();
 
 export interface OgContent {
   /** Top-left label, e.g. { text: "gpui-query", suffix: "/ blog" }. */
@@ -134,12 +150,11 @@ export function composeOgSvg(content: OgContent): string {
     );
   }
 
-  // Magnifier logo mark (navbar logo: circle + handle), top right.
+  // Brand logo mark (same glyph as navbar/footer), top right. The mark fills a
+  // 1024-box; scale it into a 72px box flush with the top-right margin.
+  const MARK_PX = 72;
   parts.push(
-    `<g stroke="${PRIMARY}" stroke-width="4" fill="none" stroke-linecap="round">` +
-      `<circle cx="${OG_WIDTH - MARGIN - 34}" cy="112" r="24"/>` +
-      `<line x1="${OG_WIDTH - MARGIN - 16}" y1="130" x2="${OG_WIDTH - MARGIN}" y2="146"/>` +
-      `</g>`,
+    `<g transform="translate(${OG_WIDTH - MARGIN - MARK_PX} ${112 - MARK_PX / 2}) scale(${MARK_PX / 1024})">${LOGO_MARK}</g>`,
   );
 
   // Title block with the left accent bar.

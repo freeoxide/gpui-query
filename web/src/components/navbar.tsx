@@ -52,17 +52,7 @@ export function Navbar() {
       >
         <div className="mx-auto flex h-14 max-w-7xl items-center px-4 sm:px-6 lg:px-8">
           <a href="/" className="mr-6 flex items-center space-x-2">
-            <svg viewBox="0 0 32 32" className="h-7 w-7 text-primary">
-              <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" strokeWidth="2" />
-              <path d="M22 22l4 4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-              <path
-                d="M16 10v12M10 16h12"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                opacity="0.5"
-              />
-            </svg>
+            <img src="/logo.svg" alt="gpui-query logo" width="28" height="28" className="h-7 w-7" />
             <span className="text-xl font-bold">gpui-query</span>
           </a>
 

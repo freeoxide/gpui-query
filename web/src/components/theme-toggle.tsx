@@ -2,7 +2,7 @@ import { Moon, Sun } from "lucide-react";
 import { Button } from "#/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 
-const THEME_COLOR_LIGHT = "#1E6B5A";
+const THEME_COLOR_LIGHT = "#9AE600";
 const THEME_COLOR_DARK = "#0C1222";
 
 function updateThemeColor(isDark: boolean) {

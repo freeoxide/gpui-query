@@ -1,0 +1,95 @@
+# gpui-query
+
+Async state management for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui), inspired by [TanStack Query](https://tanstack.com/query). Fetch, cache, retry, and synchronize async data without manual lifecycle code. These are library crates; the website lives in `web/`.
+
+## Layout
+
+Workspace (`resolver = "3"`, edition 2024) with three published members:
+
+- `crates/gpui-query` — main crate (v0.2.0), four gated layers (see Feature matrix).
+- `crates/gpui-query-http` — satellite (v0.1.0): RFC 9111 `Cache-Control` → `CachePolicy`, URL-keyed `HttpCache<B>` over a pluggable `HttpBackend`. GPUI-free.
+- `crates/gpui-query-persist` — satellite (v0.1.0): reference atomic disk `FilePersister` (JSON/bincode) implementing the main crate's async `Persister`.
+- `crates/gpui-query-legacy` — DEPRECATED and EXCLUDED from the workspace (`exclude = [...]`). Frozen artifact; publish only via its own workflow.
+
+`gpui-query` layers, each behind a Cargo feature flag:
+
+- `core` — serde-only state machine (`QueryResource`, `MutationResource`, `CachePolicy`, `RetryPolicy`, `QueryKey`). Zero GPUI.
+- `client` — `QueryClient` GPUI `Global`: type-partitioned `QueryBucket<T,E>`, GC, invalidation, observers.
+- `hook` — `use_query` / `use_mutation` / `use_infinite_query`, returning `(Entity, Subscription)`.
+- `persist` — async `Persister` trait, `persist_with` debounced driver, `hydrate()`, serializer registries.
+
+The public API is glob re-exported at the crate root (`pub use core::*; pub use client::*; pub use hook::*;`) — import from `gpui_query::`.
+
+## Commands
+
+Task runner is `just` (justfile at repo root). Recipes shown with their raw equivalent.
+
+- Test everything — `just test` / `cargo test --all-features`.
+- Test one layer — `just test-feature hook` / `cargo test --features "hook"`.
+- Core-only (no GPUI) — `cargo test --no-default-features --features core`.
+- Build all — `cargo build --all-features`.
+- Docs — `cargo doc --all-features`.
+
+Default features are `client` only, so bare `cargo test` builds the `core` + `client` test modules but skips the `hook`/`persist`-gated ones. Always use `just test` (`--all-features`) for the full suite.
+
+Web docs (Astro + Starlight, bun-managed) — run from `web/`:
+
+- `just web-install` / `bun install`.
+- `just web-dev` / `bun run dev` — dev server on port 3000.
+- `just web-build` / `bun run build` — full build to `dist/client/` (OG images → `astro build` → Pagefind → `llms.txt` → md-alt).
+- `just web-preview` / `bun run preview`.
+- `just deploy` — triggers the Deploy Website workflow.
+
+## Feature matrix
+
+Main crate, strictly additive (`core` ← `client` ← `hook` ← `persist`):
+
+| Layer | Cargo line |
+|---|---|
+| core only (no GPUI) | `gpui-query = { version = "0.2.0", default-features = false, features = ["core"] }` |
+| client (DEFAULT) | `gpui-query = "0.2.0"` |
+| hooks | `gpui-query = { version = "0.2.0", features = ["hook"] }` |
+| persistence | `gpui-query = { version = "0.2.0", features = ["persist"] }` |
+
+```
+default = ["client"]
+core    = []
+client  = ["core", "dep:gpui"]
+hook    = ["client"]
+persist = ["client", "hook", "dep:serde_json", "dep:thiserror"]
+```
+
+Satellites depend on `gpui-query` core-only by default: `gpui-query-http` (optional `reqwest` feature adds `ReqwestBackend`); `gpui-query-persist` hard-depends on `persist+client+hook`.
+
+## Release flow
+
+CHANGELOG-driven. The `CHANGELOG.md` version heading is the source of truth; CI bumps `Cargo.toml` and syncs the version literal into the READMEs and the docs install page.
+
+1. Add a `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
+2. `just release x.y.z` — verifies the heading, commits `chore: release vX`, pushes master.
+3. The push triggers `Changelog Release`: tag, GitHub Release, `cargo publish`, and web deploy.
+
+Manual escape hatches: `just publish <tag>` (Publish Crate Manual), `just deploy` (Deploy Website). The legacy crate has its own `Publish Legacy Crate (Manual)` workflow.
+
+## Docs site
+
+`web/` is Astro + Starlight, bun-managed, deployed to Cloudflare Pages project `gpui-query` from `web/dist/client`. Docs served at `/docs/**`; site root is the marketing page.
+
+- `llms.txt` and `llms-full.txt` are AUTO-GENERATED into the site root by `web/scripts/generate-llms-txt.ts` during `just web-build`. Do NOT hand-edit them or anything under `web/dist/**`.
+- Search is one combined Pagefind index.
+- Directory output (`build.format: "directory"`) with `trailingSlash: "ignore"` so both `/docs` and `/docs/` serve; the `Head.astro` override normalizes canonical/OG URLs.
+
+## Conventions
+
+- Tests are inline under `crates/gpui-query/src/tests/`, feature-gated per module. Naming: `core_*` = layer, `integration_*` = cross-layer, `property_tests` = proptest.
+- Shared deps declared once in `[workspace.dependencies]` (serde, serde_json, gpui = "0.2.2"); consume via `{ workspace = true }`.
+- Author identity is `authors = ["hmziqrs"]` in every published crate (no email).
+- Commits are conventional lower-case: `chore:`, `fix:`, `feat:`, `ci:`.
+- docs.rs: `all-features = true`, `--cfg docsrs`; `lib.rs` gates `#![cfg_attr(docsrs, feature(doc_cfg))]`.
+
+## Gotchas
+
+- `Cargo.lock` is NOT committed (library convention; `.gitignore` line 4). Do not `git add` it.
+- macOS builds of the `client`/`hook`/`persist` layers fail without the Metal Toolchain. Run `xcodebuild -downloadComponent MetalToolchain` once. Core-only builds need nothing extra.
+- `gpui-query-legacy` is excluded from the workspace — invisible to `cargo build --workspace`, but still published. Treat as frozen; edit it only via its own workflow.
+- GPUI is pinned to `gpui = "0.2.2"` on crates.io. A `zed-industries/zed` git-rev pin is commented out in the root `Cargo.toml` for local debugging — never commit it uncommented (breaks `cargo publish`).

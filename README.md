@@ -1,5 +1,7 @@
 # gpui-query
 
+<p align="center"><img src="web/public/logo.png" width="120" alt="gpui-query logo" /></p>
+
 Async state management for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui), inspired by [TanStack Query](https://tanstack.com/query).
 
 Fetch, cache, and synchronize async data in GPUI applications without manual lifecycle management. Built for the framework that powers the [Zed editor](https://zed.dev).

@@ -23,5 +23,14 @@ const head = Astro.locals.starlightRoute.head.map((entry) => {
 	if (typeof value !== "string") return entry;
 	return { ...entry, attrs: { ...attrs, [key]: value.replace(/\.html(?=[?#]|$)/, "") } };
 });
+
+// Branded icon links — Starlight only injects the favicon.ico <link> from its
+// `favicon` config (which is already in `head` above); add the vector +
+// apple-touch variants so docs pages match the marketing <head> (see
+// BaseLayout.astro). No dedup risk: BaseLayout never wraps docs pages.
+head.push(
+	{ tag: "link", attrs: { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" } },
+	{ tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },
+);
 ---
 {head.map(({ tag: Tag, attrs, content }) => <Tag {...attrs} set:html={content} />)}
