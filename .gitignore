@@ -24,3 +24,5 @@ Thumbs.db
 .wrangler/cache
 
 .astro-migration-baseline/
+
+.astro
