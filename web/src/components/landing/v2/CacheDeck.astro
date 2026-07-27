@@ -122,7 +122,10 @@ const rows = INITIAL_ENTRIES.map((entry) => {
         </p>
         <ul class="flex-1 space-y-1.5 overflow-hidden px-4 py-3" data-logs>
           {INITIAL_LOGS.map((line) => (
-            <li class={`animate-status-in truncate font-mono text-[11px] ${logKindClass(line.kind)}`}>
+            <li
+              class={`animate-status-in truncate font-mono text-[11px] ${logKindClass(line.kind)}`}
+              data-log-id={line.id}
+            >
               <span class="text-muted-foreground/60">{fmtUptime(line.at)} </span>{line.text}
             </li>
           ))}
@@ -217,15 +220,6 @@ const rows = INITIAL_ENTRIES.map((entry) => {
     return `<span class="inline-block animate-pulse border border-primary/40 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.15em] text-primary">REVALIDATE</span>`;
   }
 
-  function meterHTML(entry: Entry, now: number) {
-    if (entry.state === "revalidating") {
-      return `<span class="v2-meter-busy block h-full w-full opacity-60"></span>`;
-    }
-    const remaining = Math.max(0, entry.expiresAt - now);
-    const frac = Math.max(0, Math.min(1, remaining / entry.ttlMs));
-    return `<span class="block h-full bg-primary transition-[width] duration-150 ease-linear" style="width:${frac * 100}%"></span>`;
-  }
-
   function statusText(entry: Entry, now: number) {
     if (entry.state === "fresh") {
       const remaining = Math.max(0, entry.expiresAt - now);
@@ -235,14 +229,18 @@ const rows = INITIAL_ENTRIES.map((entry) => {
     return "refetching…";
   }
 
-  function logLineHTML(line: LogLine) {
+  function buildLogLi(line: LogLine): HTMLLIElement {
     const cls =
       line.kind === "user"
         ? "text-primary"
         : line.kind === "net"
           ? "text-foreground/85"
           : "text-muted-foreground";
-    return `<li class="animate-status-in truncate font-mono text-[11px] ${cls}"><span class="text-muted-foreground/60">${fmtUptime(line.at)} </span>${escapeHTML(line.text)}</li>`;
+    const li = document.createElement("li");
+    li.setAttribute("data-log-id", String(line.id));
+    li.className = `animate-status-in truncate font-mono text-[11px] ${cls}`;
+    li.innerHTML = `<span class="text-muted-foreground/60">${fmtUptime(line.at)} </span>${escapeHTML(line.text)}`;
+    return li;
   }
 
   function initDeck(root: HTMLElement) {
@@ -257,17 +255,75 @@ const rows = INITIAL_ENTRIES.map((entry) => {
     const countFetches = root.querySelector("[data-count-fetches]");
     const logsEl = root.querySelector("[data-logs]");
 
+    // Cache the last-rendered chip state per entry (so the REVALIDATE chip's
+    // pulse isn't restarted every tick) and track which log ids are already in
+    // the DOM. syncLogs then only ADDS new lines (animate-status-in fires once,
+    // on entry) and REMOVES aged ones — it never rebuilds the list, which is
+    // what re-triggered the entrance animation on every line every 150ms.
+    const entryStateCache = new Map<string, string>();
+    const renderedLogIds = new Set<string>();
+    if (logsEl) {
+      for (const li of Array.from(logsEl.children)) {
+        const id = li.getAttribute("data-log-id");
+        if (id) renderedLogIds.add(id);
+      }
+    }
+
+    function updateMeter(meter: HTMLElement, entry: Entry, now: number) {
+      if (entry.state === "revalidating") {
+        if (meter.dataset.busy !== "1") {
+          meter.innerHTML = '<span class="v2-meter-busy block h-full w-full opacity-60"></span>';
+          meter.dataset.busy = "1";
+        }
+        return;
+      }
+      let bar = meter.firstElementChild as HTMLElement | null;
+      if (meter.dataset.busy === "1" || !bar) {
+        meter.innerHTML =
+          '<span class="block h-full bg-primary transition-[width] duration-150 ease-linear"></span>';
+        bar = meter.firstElementChild as HTMLElement | null;
+        meter.dataset.busy = "0";
+      }
+      if (bar) {
+        const remaining = Math.max(0, entry.expiresAt - now);
+        const frac = Math.max(0, Math.min(1, remaining / entry.ttlMs));
+        bar.style.width = `${(frac * 100).toFixed(2)}%`;
+      }
+    }
+
+    function syncLogs() {
+      if (!logsEl) return;
+      const liveIds = new Set(sim.logs.map((l) => String(l.id)));
+      for (const li of Array.from(logsEl.children)) {
+        const id = li.getAttribute("data-log-id");
+        if (id && !liveIds.has(id)) {
+          li.remove();
+          renderedLogIds.delete(id);
+        }
+      }
+      // sim.logs is newest-first; prepend oldest-new first so newest ends on top.
+      const fresh = sim.logs.filter((l) => !renderedLogIds.has(String(l.id)));
+      for (const log of fresh.slice().reverse()) {
+        logsEl.insertBefore(buildLogLi(log), logsEl.firstChild);
+        renderedLogIds.add(String(log.id));
+      }
+    }
+
     function render() {
       if (uptimeEl) uptimeEl.textContent = fmtUptime(sim.now);
       if (entriesWrap) {
         for (const entry of sim.entries) {
           const row = entriesWrap.querySelector('[data-entry="' + entry.key + '"]');
           if (!row) continue;
-          const chip = row.querySelector("[data-chip]");
-          const meter = row.querySelector("[data-meter]");
+          const prev = entryStateCache.get(entry.key);
+          if (prev !== entry.state) {
+            const chip = row.querySelector("[data-chip]");
+            if (chip) chip.innerHTML = chipHTML(entry.state);
+            entryStateCache.set(entry.key, entry.state);
+          }
+          const meter = row.querySelector<HTMLElement>("[data-meter]");
+          if (meter) updateMeter(meter, entry, sim.now);
           const status = row.querySelector("[data-status]");
-          if (chip) chip.innerHTML = chipHTML(entry.state);
-          if (meter) meter.innerHTML = meterHTML(entry, sim.now);
           if (status) status.textContent = statusText(entry, sim.now);
         }
       }
@@ -275,7 +331,7 @@ const rows = INITIAL_ENTRIES.map((entry) => {
       if (countEntries) countEntries.textContent = String(sim.entries.length);
       if (countInflight) countInflight.textContent = String(inFlight);
       if (countFetches) countFetches.textContent = String(sim.fetches);
-      if (logsEl) logsEl.innerHTML = sim.logs.map(logLineHTML).join("");
+      syncLogs();
     }
 
     function refetch(key: string) {

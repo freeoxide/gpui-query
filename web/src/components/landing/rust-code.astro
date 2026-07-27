@@ -8,17 +8,19 @@ interface Props {
 }
 
 const { code, lineNumbers = false, class: cls = "" } = Astro.props;
+
+// Build the <code> inner HTML as a single string. Astro (unlike React)
+// preserves literal template whitespace, and inside a <pre> the indented,
+// multi-line JSX below would render as big blank gaps between code lines.
+// Assembling the markup here and injecting via set:html avoids that entirely.
 const lines = code.split("\n");
+const inner = lines
+  .map((line, i) => {
+    const ln = lineNumbers
+      ? `<span class="mr-4 inline-block w-5 text-right text-muted-foreground/40 select-none">${i + 1}</span>`
+      : "";
+    return `<span class="block">${ln}${tintRust(line)}</span>`;
+  })
+  .join("");
 ---
-<pre class={`overflow-x-auto p-5 font-mono text-[13px] leading-6 text-foreground/85 ${cls}`}>
-  <code>
-    {lines.map((line, i) => (
-      <span class="block">
-        {lineNumbers && (
-          <span class="mr-4 inline-block w-5 text-right text-muted-foreground/40 select-none">{i + 1}</span>
-        )}
-        <Fragment set:html={tintRust(line)} />
-      </span>
-    ))}
-  </code>
-</pre>
+<pre class={`overflow-x-auto p-5 font-mono text-[13px] leading-6 text-foreground/85 ${cls}`}><code set:html={inner} /></pre>

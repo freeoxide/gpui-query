@@ -132,7 +132,9 @@
 
 <style is:global>
   /* Native <dialog> reset + the original top-anchored overlay layout. ::backdrop
-     gives the dim layer for free. */
+     gives the dim layer for free. NOTE: do NOT set `display` on the closed dialog
+     — a native <dialog> is display:none without [open]; forcing display:flex
+     here would render the closed dialog in-flow after the footer on every page. */
   #search-dialog {
     background: transparent;
     border: 0;
@@ -142,11 +144,13 @@
     max-height: none;
     width: 100%;
     height: 100%;
+    color: inherit;
+  }
+  #search-dialog[open] {
     display: flex;
     justify-content: center;
     align-items: flex-start;
     padding-top: 15vh;
-    color: inherit;
   }
   #search-dialog::backdrop {
     background: rgb(0 0 0 / 0.5);

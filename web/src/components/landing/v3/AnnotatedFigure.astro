@@ -58,6 +58,21 @@ const CALLOUTS = [
 // Local helper (FigCaption) inlined: splits the label on the em dash.
 const figCaption = "FIG. 1 — anatomy of a query · hover a callout";
 const [figLabel, figRest] = figCaption.split("—");
+
+// Build the <code> inner HTML as one string. Astro preserves literal template
+// whitespace, so the indented multi-line .map() inside <pre> below would render
+// as big blank gaps between code lines (same pitfall rust-code.astro avoids).
+// The data-line / data-region / data-line-mark attributes are preserved so the
+// callout hover-highlight interactivity still works.
+const figInner = FIG_LINES.map((line, i) => {
+  const region = Object.entries(REGIONS).find(([, idx]) => idx.includes(i))?.[0];
+  const mark = MARK_AT[i];
+  const regionAttr = region ? ` data-region="${region}"` : "";
+  const markHTML = mark
+    ? `<span class="ml-4 shrink-0 font-mono text-[11px] transition-colors text-muted-foreground/50" data-line-mark="${mark}">⟨${mark}⟩</span>`
+    : "";
+  return `<span class="flex border-l-2 px-4 transition-colors duration-150 border-l-transparent" data-line${regionAttr}><span class="min-w-0 flex-1 whitespace-pre">${tintRust(line)}</span>${markHTML}</span>`;
+}).join("");
 ---
 
 <section class="border-t border-border py-20 sm:py-24" data-annotated-figure>
@@ -77,30 +92,7 @@ const [figLabel, figRest] = figCaption.split("—");
             rust
           </span>
         </div>
-        <pre class="overflow-x-auto py-4 font-mono text-[13px] leading-6 text-foreground/85"><code>{FIG_LINES.map((line, i) => {
-          const region = Object.entries(REGIONS).find(([, idx]) => idx.includes(i))?.[0];
-          const mark = MARK_AT[i];
-          return (
-            <span
-              class="flex border-l-2 px-4 transition-colors duration-150 border-l-transparent"
-              data-line
-              data-region={region}
-            >
-              <span
-                class="min-w-0 flex-1 whitespace-pre"
-                set:html={tintRust(line)}
-              />
-              {mark && (
-                <span
-                  class="ml-4 shrink-0 font-mono text-[11px] transition-colors text-muted-foreground/50"
-                  data-line-mark={mark}
-                >
-                  ⟨{mark}⟩
-                </span>
-              )}
-            </span>
-          );
-        })}</code></pre>
+        <pre class="overflow-x-auto py-4 font-mono text-[13px] leading-6 text-foreground/85"><code set:html={figInner} /></pre>
       </div>
 
       <ul class="space-y-2">
