@@ -1,0 +1,331 @@
+---
+import CornerMarks from "../decor/CornerMarks.astro";
+import Icon from "../../Icon.astro";
+
+type EntryState = "fresh" | "stale" | "revalidating";
+interface Entry {
+  key: string;
+  ttlMs: number;
+  state: EntryState;
+  expiresAt: number;
+  revalidateAt: number;
+  doneAt: number;
+  lastMs: number;
+}
+interface LogLine {
+  id: number;
+  at: number;
+  text: string;
+  kind: "net" | "state" | "user";
+}
+
+const INITIAL_ENTRIES: Entry[] = [
+  { key: "users", ttlMs: 9000, state: "fresh", expiresAt: 5200, revalidateAt: 0, doneAt: 0, lastMs: 142 },
+  { key: "repo:zed/zed", ttlMs: 14000, state: "fresh", expiresAt: 11800, revalidateAt: 0, doneAt: 0, lastMs: 96 },
+  { key: "releases?page=2", ttlMs: 11000, state: "fresh", expiresAt: 4200, revalidateAt: 0, doneAt: 0, lastMs: 175 },
+];
+
+const INITIAL_LOGS: LogLine[] = [
+  { id: 1, at: 0, text: "observers registered · 3", kind: "state" },
+  { id: 0, at: 0, text: "QueryClient::new() · gc 300s · policy swr", kind: "state" },
+];
+
+const NOW = 0;
+function fmtUptime(ms: number) {
+  return `T+${(ms / 1000).toFixed(1).padStart(5, "0")}`;
+}
+function logKindClass(kind: LogLine["kind"]) {
+  return kind === "user" ? "text-primary" : kind === "net" ? "text-foreground/85" : "text-muted-foreground";
+}
+
+const rows = INITIAL_ENTRIES.map((entry) => {
+  const remaining = Math.max(0, entry.expiresAt - NOW);
+  const frac = Math.max(0, Math.min(1, remaining / entry.ttlMs));
+  return {
+    key: entry.key,
+    frac,
+    statusText: `ttl ${(remaining / 1000).toFixed(1)}s`,
+  };
+});
+---
+
+<div class="relative" data-cache-deck>
+  <CornerMarks />
+  <div class="border border-border bg-card shadow-sm">
+    <div class="flex items-center gap-2 border-b border-border px-4 py-2.5">
+      <span class="font-mono text-xs text-muted-foreground">cache://QueryClient · live</span>
+      <span class="ml-auto flex items-center gap-2 font-mono text-[11px] tracking-widest text-primary">
+        <span class="h-1.5 w-1.5 animate-pulse bg-primary"></span>
+        <span data-uptime>{fmtUptime(NOW)}</span>
+      </span>
+    </div>
+
+    <div class="grid lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]">
+      <div class="border-b border-border lg:border-r lg:border-b-0">
+        <div data-entries>
+          {rows.map((row) => (
+            <div
+              class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-3.5 transition-colors last:border-b-0 hover:bg-muted/30"
+              data-entry={row.key}
+            >
+              <span class="w-40 truncate font-mono text-[13px] text-foreground">{row.key}</span>
+              <span class="w-[92px]" data-chip>
+                <span class="inline-block border border-primary/40 bg-primary/5 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.15em] text-primary">FRESH</span>
+              </span>
+
+              <span class="flex min-w-[150px] flex-1 items-center gap-3">
+                <span class="h-[3px] flex-1 bg-border" aria-hidden="true" data-meter>
+                  <span
+                    class="block h-full bg-primary transition-[width] duration-150 ease-linear"
+                    style={`width:${row.frac * 100}%`}
+                  ></span>
+                </span>
+                <span class="w-24 text-right font-mono text-[11px] text-muted-foreground" data-status>{row.statusText}</span>
+              </span>
+
+              <span class="flex gap-1.5">
+                <button
+                  type="button"
+                  data-action="refetch"
+                  data-key={row.key}
+                  aria-label={`Refetch ${row.key}`}
+                  title="refetch()"
+                  class="flex h-7 w-7 items-center justify-center border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+                >
+                  <Icon name="arrows-clockwise" size={13} />
+                </button>
+                <button
+                  type="button"
+                  data-action="invalidate"
+                  data-key={row.key}
+                  aria-label={`Invalidate ${row.key}`}
+                  title="invalidate()"
+                  class="flex h-7 w-7 items-center justify-center border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+                >
+                  <Icon name="prohibit" size={13} />
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+        <div class="flex flex-wrap gap-x-5 gap-y-1 px-4 py-3 font-mono text-[11px] text-muted-foreground">
+          <span>entries <span class="text-foreground" data-count-entries>3</span></span>
+          <span>in-flight <span class="text-foreground" data-count-inflight>0</span></span>
+          <span>fetches <span class="text-foreground" data-count-fetches>3</span></span>
+          <span>policy <span class="text-primary">StaleWhileRevalidate</span></span>
+        </div>
+      </div>
+
+      <div class="flex min-h-[180px] flex-col">
+        <p class="border-b border-border px-4 py-2 font-mono text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
+          event log
+        </p>
+        <ul class="flex-1 space-y-1.5 overflow-hidden px-4 py-3" data-logs>
+          {INITIAL_LOGS.map((line) => (
+            <li class={`animate-status-in truncate font-mono text-[11px] ${logKindClass(line.kind)}`}>
+              <span class="text-muted-foreground/60">{fmtUptime(line.at)} </span>{line.text}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  type EntryState = "fresh" | "stale" | "revalidating";
+  interface Entry {
+    key: string;
+    ttlMs: number;
+    state: EntryState;
+    expiresAt: number;
+    revalidateAt: number;
+    doneAt: number;
+    lastMs: number;
+  }
+  interface LogLine {
+    id: number;
+    at: number;
+    text: string;
+    kind: "net" | "state" | "user";
+  }
+  interface Sim {
+    now: number;
+    entries: Entry[];
+    logs: LogLine[];
+    fetches: number;
+  }
+
+  const MAX_LOGS = 9;
+  let logSeq = 2;
+
+  function makeEntries(): Entry[] {
+    return [
+      { key: "users", ttlMs: 9000, state: "fresh", expiresAt: 5200, revalidateAt: 0, doneAt: 0, lastMs: 142 },
+      { key: "repo:zed/zed", ttlMs: 14000, state: "fresh", expiresAt: 11800, revalidateAt: 0, doneAt: 0, lastMs: 96 },
+      { key: "releases?page=2", ttlMs: 11000, state: "fresh", expiresAt: 4200, revalidateAt: 0, doneAt: 0, lastMs: 175 },
+    ];
+  }
+  function makeLogs(): LogLine[] {
+    return [
+      { id: 1, at: 0, text: "observers registered · 3", kind: "state" },
+      { id: 0, at: 0, text: "QueryClient::new() · gc 300s · policy swr", kind: "state" },
+    ];
+  }
+
+  function pushLog(logs: LogLine[], at: number, text: string, kind: LogLine["kind"]): LogLine[] {
+    logSeq += 1;
+    return [{ id: logSeq, at, text, kind }, ...logs].slice(0, MAX_LOGS);
+  }
+
+  function tick(prev: Sim, now: number): Sim {
+    let logs = prev.logs;
+    let fetches = prev.fetches;
+    const entries = prev.entries.map((e) => {
+      if (e.state === "fresh" && now >= e.expiresAt) {
+        logs = pushLog(logs, now, `${e.key} · ttl elapsed → stale`, "state");
+        return { ...e, state: "stale" as EntryState, revalidateAt: now + 1400 + Math.random() * 1200 };
+      }
+      if (e.state === "stale" && now >= e.revalidateAt) {
+        logs = pushLog(logs, now, `revalidate ${e.key} · background`, "state");
+        return { ...e, state: "revalidating" as EntryState, doneAt: now + 480 + Math.random() * 420 };
+      }
+      if (e.state === "revalidating" && now >= e.doneAt) {
+        const lastMs = Math.floor(60 + Math.random() * 130);
+        fetches += 1;
+        logs = pushLog(logs, now, `GET ${e.key} → 200 · ${String(lastMs)}ms`, "net");
+        return { ...e, state: "fresh" as EntryState, lastMs, expiresAt: now + e.ttlMs };
+      }
+      return e;
+    });
+    return { now, entries, logs, fetches };
+  }
+
+  function fmtUptime(ms: number) {
+    return `T+${(ms / 1000).toFixed(1).padStart(5, "0")}`;
+  }
+
+  function escapeHTML(s: string) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function chipHTML(state: EntryState) {
+    if (state === "fresh")
+      return `<span class="inline-block border border-primary/40 bg-primary/5 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.15em] text-primary">FRESH</span>`;
+    if (state === "stale")
+      return `<span class="inline-block border border-dashed border-border px-1.5 py-0.5 font-mono text-[10px] tracking-[0.15em] text-muted-foreground">STALE</span>`;
+    return `<span class="inline-block animate-pulse border border-primary/40 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.15em] text-primary">REVALIDATE</span>`;
+  }
+
+  function meterHTML(entry: Entry, now: number) {
+    if (entry.state === "revalidating") {
+      return `<span class="v2-meter-busy block h-full w-full opacity-60"></span>`;
+    }
+    const remaining = Math.max(0, entry.expiresAt - now);
+    const frac = Math.max(0, Math.min(1, remaining / entry.ttlMs));
+    return `<span class="block h-full bg-primary transition-[width] duration-150 ease-linear" style="width:${frac * 100}%"></span>`;
+  }
+
+  function statusText(entry: Entry, now: number) {
+    if (entry.state === "fresh") {
+      const remaining = Math.max(0, entry.expiresAt - now);
+      return `ttl ${(remaining / 1000).toFixed(1)}s`;
+    }
+    if (entry.state === "stale") return "serving stale";
+    return "refetching…";
+  }
+
+  function logLineHTML(line: LogLine) {
+    const cls =
+      line.kind === "user"
+        ? "text-primary"
+        : line.kind === "net"
+          ? "text-foreground/85"
+          : "text-muted-foreground";
+    return `<li class="animate-status-in truncate font-mono text-[11px] ${cls}"><span class="text-muted-foreground/60">${fmtUptime(line.at)} </span>${escapeHTML(line.text)}</li>`;
+  }
+
+  function initDeck(root: HTMLElement) {
+    let sim: Sim = { now: 0, entries: makeEntries(), logs: makeLogs(), fetches: 3 };
+    let t0 = 0;
+    let reduced = false;
+
+    const uptimeEl = root.querySelector("[data-uptime]");
+    const entriesWrap = root.querySelector("[data-entries]");
+    const countEntries = root.querySelector("[data-count-entries]");
+    const countInflight = root.querySelector("[data-count-inflight]");
+    const countFetches = root.querySelector("[data-count-fetches]");
+    const logsEl = root.querySelector("[data-logs]");
+
+    function render() {
+      if (uptimeEl) uptimeEl.textContent = fmtUptime(sim.now);
+      if (entriesWrap) {
+        for (const entry of sim.entries) {
+          const row = entriesWrap.querySelector('[data-entry="' + entry.key + '"]');
+          if (!row) continue;
+          const chip = row.querySelector("[data-chip]");
+          const meter = row.querySelector("[data-meter]");
+          const status = row.querySelector("[data-status]");
+          if (chip) chip.innerHTML = chipHTML(entry.state);
+          if (meter) meter.innerHTML = meterHTML(entry, sim.now);
+          if (status) status.textContent = statusText(entry, sim.now);
+        }
+      }
+      const inFlight = sim.entries.filter((e) => e.state === "revalidating").length;
+      if (countEntries) countEntries.textContent = String(sim.entries.length);
+      if (countInflight) countInflight.textContent = String(inFlight);
+      if (countFetches) countFetches.textContent = String(sim.fetches);
+      if (logsEl) logsEl.innerHTML = sim.logs.map(logLineHTML).join("");
+    }
+
+    function refetch(key: string) {
+      const now = Date.now() - t0;
+      const logs = pushLog(sim.logs, now, `→ refetch("${key}") · manual`, "user");
+      const entries = sim.entries.map((e) => {
+        if (e.key !== key) return e;
+        if (reduced) return { ...e, state: "fresh" as EntryState, expiresAt: now + e.ttlMs, lastMs: 118 };
+        return { ...e, state: "revalidating" as EntryState, doneAt: now + 520 };
+      });
+      sim = { ...sim, entries, logs, fetches: reduced ? sim.fetches + 1 : sim.fetches };
+      render();
+    }
+
+    function invalidate(key: string) {
+      const now = Date.now() - t0;
+      sim = {
+        ...sim,
+        logs: pushLog(sim.logs, now, `→ invalidate_queries(Exact("${key}"))`, "user"),
+        entries: sim.entries.map((e) =>
+          e.key === key
+            ? { ...e, state: "stale" as EntryState, expiresAt: now, revalidateAt: now + 1300 }
+            : e,
+        ),
+      };
+      render();
+    }
+
+    root.addEventListener("click", (ev: Event) => {
+      const target = ev.target as HTMLElement;
+      const btn = target.closest("button[data-action]");
+      if (!btn) return;
+      const action = btn.getAttribute("data-action");
+      const key = btn.getAttribute("data-key");
+      if (!key) return;
+      if (action === "refetch") refetch(key);
+      else if (action === "invalidate") invalidate(key);
+    });
+
+    t0 = Date.now();
+    reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    render();
+    if (!reduced) {
+      window.setInterval(() => {
+        if (document.hidden) return;
+        sim = tick(sim, Date.now() - t0);
+        render();
+      }, 150);
+    }
+  }
+
+  document.querySelectorAll("[data-cache-deck]").forEach((el) => initDeck(el as HTMLElement));
+</script>

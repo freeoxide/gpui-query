@@ -1,0 +1,72 @@
+---
+import Icon from "../Icon.astro";
+import SectionHeading from "./decor/SectionHeading.astro";
+
+const archLayers = [
+  {
+    index: "L1",
+    icon: "stack",
+    label: "Hook Layer",
+    items: "use_query / use_mutation / use_infinite_query",
+    tint: "bg-primary/[0.07]",
+  },
+  {
+    index: "L2",
+    icon: "cpu",
+    label: "Client Layer",
+    items: "QueryClient / Registry / GC",
+    tint: "bg-primary/[0.04]",
+  },
+  {
+    index: "L3",
+    icon: "database",
+    label: "Core Layer",
+    items: "QueryResource / CachePolicy / QueryKey",
+    tint: "bg-primary/[0.02]",
+  },
+];
+---
+
+<section class="py-20 sm:py-28">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <SectionHeading
+      eyebrow="architecture"
+      title="Three layers, one direction"
+      description="Each layer has a single responsibility. Data flows down, results flow back up."
+    />
+
+    <div class="mx-auto mt-14 max-w-2xl">
+      {archLayers.map((layer, i) => (
+        <div data-reveal data-reveal-delay={String(i + 1)}>
+          {i > 0 && (
+            <div class="relative mx-auto h-9 w-px bg-border" aria-hidden="true">
+              <span class="animate-flow-down absolute -left-[1.5px] h-1 w-1 bg-primary" />
+            </div>
+          )}
+
+          <div class={`flex items-center gap-5 border border-border border-l-2 border-l-primary ${layer.tint} px-6 py-5`}>
+            <span class="font-mono text-xs text-primary/60">{layer.index}</span>
+            <Icon name={layer.icon} size={20} class="shrink-0 text-primary" />
+            <div class="min-w-0">
+              <p class="font-display text-sm font-bold tracking-widest uppercase text-foreground">{layer.label}</p>
+              <p class="mt-0.5 truncate font-mono text-sm text-muted-foreground">{layer.items}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <div
+        class="mt-10 flex flex-wrap items-center justify-center gap-2 font-mono text-xs text-muted-foreground"
+        data-reveal
+        data-reveal-delay="4"
+      >
+        <span class="text-muted-foreground/60">data flows</span>
+        <span class="text-primary">use_query</span>
+        <Icon name="arrow-right" size={13} />
+        <span class="text-primary/80">QueryClient</span>
+        <Icon name="arrow-right" size={13} />
+        <span class="text-primary/60">QueryResource</span>
+      </div>
+    </div>
+  </div>
+</section>

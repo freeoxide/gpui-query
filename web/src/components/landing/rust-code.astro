@@ -1,0 +1,24 @@
+---
+import { tintRust } from "./rust-tint";
+
+interface Props {
+  code: string;
+  lineNumbers?: boolean;
+  className?: string;
+}
+
+const { code, lineNumbers = false, className = "" } = Astro.props;
+const lines = code.split("\n");
+---
+<pre class={`overflow-x-auto p-5 font-mono text-[13px] leading-6 text-foreground/85 ${className}`}>
+  <code>
+    {lines.map((line, i) => (
+      <span class="block">
+        {lineNumbers && (
+          <span class="mr-4 inline-block w-5 text-right text-muted-foreground/40 select-none">{i + 1}</span>
+        )}
+        <Fragment set:html={tintRust(line)} />
+      </span>
+    ))}
+  </code>
+</pre>

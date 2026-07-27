@@ -1,0 +1,234 @@
+---
+import CornerMarks from "../decor/CornerMarks.astro";
+
+type RouteName = "reqNet" | "reqCache" | "serveNet" | "serveCache" | "clientNet";
+
+const PULSE_PATHS: Record<RouteName, { path: string; dur: number }> = {
+  reqNet: { path: "M144,160 H584 V250 H628", dur: 1000 },
+  reqCache: { path: "M144,160 H584 V70 H628", dur: 1000 },
+  serveNet: { path: "M628,250 H584 V160 H144", dur: 1000 },
+  serveCache: { path: "M628,70 H584 V160 H144", dur: 1000 },
+  clientNet: { path: "M544,160 H584 V250 H628", dur: 600 },
+};
+
+const TRACES = [
+  "M144,160 H204",
+  "M336,160 H396",
+  "M544,160 H584 V70 H628",
+  "M544,160 H584 V250 H628",
+];
+
+const ROUTES: RouteName[] = ["reqNet", "reqCache", "serveNet", "serveCache", "clientNet"];
+---
+
+<div class="relative" data-schematic>
+  <CornerMarks />
+  <div class="border border-border bg-background/80 shadow-sm backdrop-blur-[2px]">
+    <div class="flex items-center gap-2 border-b border-border px-4 py-2.5">
+      <span class="font-mono text-xs text-muted-foreground">schematic://query-path</span>
+      <span class="ml-auto flex items-center gap-2 font-mono text-[11px] tracking-widest text-primary">
+        <span data-live-dot class="h-1.5 w-1.5 bg-primary"></span>
+        LIVE
+      </span>
+    </div>
+
+    <svg
+      viewBox="0 0 760 320"
+      role="img"
+      aria-label="Diagram of a query traveling from your view through use_query and QueryClient to the cache and network"
+      class="block w-full"
+    >
+      {TRACES.map((d) => (
+        <path d={d} class="stroke-border" stroke-width="1" fill="none" />
+      ))}
+
+      <g>
+        <rect x="24" y="136" width="120" height="48" class="fill-card stroke-border transition-[stroke] duration-300" stroke-width="1" />
+        <text x="84" y="158" text-anchor="middle" class="fill-foreground font-mono" font-size="12">render()</text>
+        <text x="84" y="173" text-anchor="middle" class="fill-muted-foreground font-mono" font-size="9" letter-spacing="1">YOUR VIEW</text>
+      </g>
+
+      <g>
+        <rect x="204" y="136" width="132" height="48" class="fill-card stroke-border transition-[stroke] duration-300" stroke-width="1" />
+        <text x="270" y="158" text-anchor="middle" class="fill-foreground font-mono" font-size="12">use_query</text>
+        <text x="270" y="173" text-anchor="middle" class="fill-muted-foreground font-mono" font-size="9" letter-spacing="1">HOOK</text>
+      </g>
+
+      <g>
+        <rect data-client-rect x="396" y="136" width="148" height="48" class="fill-card stroke-border transition-[stroke] duration-300" stroke-width="1" />
+        <text x="470" y="158" text-anchor="middle" class="fill-foreground font-mono" font-size="12">QueryClient</text>
+        <text x="470" y="173" text-anchor="middle" class="fill-muted-foreground font-mono" font-size="9" letter-spacing="1">GLOBAL</text>
+      </g>
+
+      <g>
+        <rect data-cache-rect x="628" y="48" width="108" height="44" class="fill-card stroke-primary/70 transition-[stroke] duration-300" stroke-width="1" />
+        <text x="682" y="68" text-anchor="middle" class="fill-foreground font-mono" font-size="12">CACHE</text>
+        <text data-cache-sub x="682" y="83" text-anchor="middle" class="fill-muted-foreground font-mono" font-size="9" letter-spacing="1">FRESH</text>
+      </g>
+
+      <g>
+        <rect data-network-rect x="628" y="228" width="108" height="44" class="fill-card stroke-border transition-[stroke] duration-300" stroke-width="1" />
+        <text x="682" y="248" text-anchor="middle" class="fill-foreground font-mono" font-size="12">NETWORK</text>
+        <text x="682" y="263" text-anchor="middle" class="fill-muted-foreground font-mono" font-size="9" letter-spacing="1">FETCHER</text>
+      </g>
+
+      {ROUTES.map((route) => (
+        <circle r="3.5" class="fill-primary opacity-0" data-flight={route}>
+          <animateMotion begin="indefinite" dur={`${PULSE_PATHS[route].dur}ms`} path={PULSE_PATHS[route].path} calcMode="linear" />
+        </circle>
+      ))}
+    </svg>
+
+    <div class="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center">
+      <div class="flex gap-2">
+        <button type="button" data-action="refetch" class="border border-primary/40 bg-primary/5 px-3 py-1.5 font-mono text-xs text-primary transition-colors hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none disabled:opacity-40">refetch()</button>
+        <button type="button" data-action="invalidate" class="border border-border px-3 py-1.5 font-mono text-xs text-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none disabled:opacity-40">invalidate()</button>
+      </div>
+      <p class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground sm:text-right">
+        <span aria-hidden="true" class="text-primary/60">▸ </span><span data-log-text>observer attached · watching "users"</span>
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const PULSE_DURS: Record<string, number> = {
+    reqNet: 1000,
+    reqCache: 1000,
+    serveNet: 1000,
+    serveCache: 1000,
+    clientNet: 600,
+  };
+
+  document.querySelectorAll<HTMLElement>("[data-schematic]").forEach((root) => {
+    const liveDot = root.querySelector<HTMLElement>("[data-live-dot]");
+    const clientRect = root.querySelector<SVGRectElement>("[data-client-rect]");
+    const cacheRect = root.querySelector<SVGRectElement>("[data-cache-rect]");
+    const cacheSub = root.querySelector<SVGTextElement>("[data-cache-sub]");
+    const networkRect = root.querySelector<SVGRectElement>("[data-network-rect]");
+    const logText = root.querySelector<HTMLElement>("[data-log-text]");
+    const refetchBtn = root.querySelector<HTMLButtonElement>('[data-action="refetch"]');
+    const invalidateBtn = root.querySelector<HTMLButtonElement>('[data-action="invalidate"]');
+
+    let cache: "fresh" | "stale" = "fresh";
+    let busyGate = false;
+    let reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const flights: Record<string, boolean> = {
+      reqNet: false,
+      reqCache: false,
+      serveNet: false,
+      serveCache: false,
+      clientNet: false,
+    };
+    const timeouts: number[] = [];
+
+    function setActive(rect: Element | null, active: boolean) {
+      if (!rect) return;
+      rect.classList.toggle("stroke-primary/70", active);
+      rect.classList.toggle("stroke-border", !active);
+    }
+
+    function renderNetwork() {
+      setActive(networkRect, flights.reqNet || flights.serveNet || flights.clientNet);
+    }
+
+    function renderCache() {
+      const cacheActive = flights.reqCache || flights.serveCache;
+      setActive(cacheRect, cacheActive || cache === "fresh");
+      if (!cacheRect) return;
+      if (cache === "stale") cacheRect.setAttribute("stroke-dasharray", "4 3");
+      else cacheRect.removeAttribute("stroke-dasharray");
+    }
+
+    function setCacheState(state: "fresh" | "stale") {
+      cache = state;
+      if (cacheSub) cacheSub.textContent = state === "fresh" ? "FRESH" : "STALE";
+      renderCache();
+    }
+
+    function setFlight(route: string, on: boolean) {
+      flights[route] = on;
+      const circle = root.querySelector(`[data-flight="${route}"]`);
+      if (circle) {
+        circle.classList.toggle("opacity-100", on);
+        circle.classList.toggle("opacity-0", !on);
+      }
+      renderNetwork();
+      renderCache();
+    }
+
+    function firePulse(route: string) {
+      if (reduced) return;
+      const circle = root.querySelector<SVGCircleElement>(`[data-flight="${route}"]`);
+      if (!circle) return;
+      setFlight(route, true);
+      const anim = circle.querySelector("animateMotion") as SVGAnimationElement | null;
+      if (anim && typeof anim.beginElement === "function") anim.beginElement();
+      const dur = PULSE_DURS[route] ?? 1000;
+      timeouts.push(window.setTimeout(() => setFlight(route, false), dur));
+    }
+
+    function pushLog(text: string) {
+      if (logText) logText.textContent = text;
+    }
+
+    function setBusyState(on: boolean) {
+      if (liveDot) liveDot.classList.toggle("animate-pulse", on);
+      setActive(clientRect, on);
+      if (refetchBtn) refetchBtn.disabled = on;
+      if (invalidateBtn) invalidateBtn.disabled = on;
+    }
+
+    function after(ms: number, fn: () => void) {
+      timeouts.push(window.setTimeout(fn, ms));
+    }
+
+    function run(steps: { at: number; go: () => void }[]) {
+      if (busyGate) return;
+      busyGate = true;
+      setBusyState(true);
+      const reducedLocal = reduced;
+      let total = 0;
+      steps.forEach((s) => {
+        total = Math.max(total, s.at);
+        after(reducedLocal ? 0 : s.at, s.go);
+      });
+      after(reducedLocal ? 50 : total + 300, () => {
+        busyGate = false;
+        setBusyState(false);
+      });
+    }
+
+    function refetch() {
+      run([
+        { at: 0, go: () => { pushLog('→ refetch("users") · forced'); firePulse("reqNet"); } },
+        { at: 1000, go: () => { firePulse("serveNet"); pushLog("← 200 OK · 142ms"); } },
+        { at: 2000, go: () => { setCacheState("fresh"); pushLog("cache updated · observers notified"); } },
+      ]);
+    }
+
+    function invalidate() {
+      run([
+        { at: 0, go: () => { pushLog('→ invalidate_queries(Exact("users"))'); firePulse("reqCache"); } },
+        { at: 1000, go: () => { setCacheState("stale"); pushLog("entry marked stale"); } },
+        { at: 1600, go: () => { pushLog("refetching in background…"); firePulse("clientNet"); } },
+        { at: 2200, go: () => firePulse("serveNet") },
+        { at: 3200, go: () => { setCacheState("fresh"); pushLog("← 200 OK · 89ms · fresh again"); } },
+      ]);
+    }
+
+    refetchBtn?.addEventListener("click", refetch);
+    invalidateBtn?.addEventListener("click", invalidate);
+
+    window.setInterval(() => {
+      if (busyGate || reduced || document.hidden) return;
+      run([
+        { at: 0, go: () => { setCacheState("stale"); pushLog("ttl elapsed → stale"); } },
+        { at: 400, go: () => { firePulse("serveCache"); pushLog("serving cached data · 0ms"); } },
+        { at: 1500, go: () => { firePulse("clientNet"); pushLog("revalidating in background…"); } },
+        { at: 2100, go: () => firePulse("serveNet") },
+        { at: 3100, go: () => { setCacheState("fresh"); pushLog("revalidated · cache fresh"); } },
+      ]);
+    }, 14000);
+  });
+</script>

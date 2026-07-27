@@ -1,0 +1,145 @@
+---
+import CornerMarks from "../decor/CornerMarks.astro";
+import RustCode from "../rust-code.astro";
+
+const HAND_ROLLED = `struct UserList {
+    users: Option<Vec<User>>,
+    error: Option<String>,
+    loading: bool,
+    generation: u64,
+}
+
+impl UserList {
+    fn fetch(&mut self, cx: &mut Context<Self>) {
+        self.loading = true;
+        self.generation += 1;
+        let generation = self.generation;
+        cx.spawn(async move |this, cx| {
+            let result = fetch_users().await;
+            this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return; // superseded by a newer request
+                }
+                this.loading = false;
+                match result {
+                    Ok(users) => this.users = Some(users),
+                    Err(err) => this.error = Some(err.to_string()),
+                }
+                cx.notify();
+            })
+        })
+        .detach();
+    }
+}
+
+// still missing: caching, ttl, retry, dedup across views…`;
+
+const WITH_QUERY = `let (users, _sub) = use_query(
+    "users",
+    |signal| async move { fetch_users(&signal).await },
+    cx,
+);
+
+// cached · retried · deduped · revalidated · cancellable`;
+
+const handLines = HAND_ROLLED.split("\n").length;
+const queryLines = WITH_QUERY.split("\n").length;
+
+const BASE_TAB =
+  "border-r border-border px-4 py-3 font-mono text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none";
+const ACTIVE_TAB = `${BASE_TAB} bg-primary/10 text-primary`;
+const INACTIVE_TAB = `${BASE_TAB} text-muted-foreground hover:text-foreground`;
+---
+
+<section class="border-t border-border bg-muted/30 py-20 sm:py-24">
+  <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+    <p class="font-mono text-xs tracking-[0.25em] uppercase text-primary">
+      <span class="text-primary/50">// </span>diff
+    </p>
+    <h2 class="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+      The code you stop writing
+    </h2>
+    <p class="mt-4 max-w-2xl text-muted-foreground">
+      The same feature — a fetched, cached user list — written both ways. Toggle to compare.
+    </p>
+
+    <div class="relative mt-10">
+      <CornerMarks />
+      <div class="border border-border bg-card shadow-sm" data-before-after>
+        <div role="tablist" aria-label="Code comparison" class="flex border-b border-border">
+          <button
+            type="button"
+            role="tab"
+            data-tab="hand"
+            data-lines={handLines}
+            aria-selected="true"
+            class={ACTIVE_TAB}
+          >
+            by hand · cx.spawn
+          </button>
+          <button
+            type="button"
+            role="tab"
+            data-tab="query"
+            data-lines={queryLines}
+            aria-selected="false"
+            class={INACTIVE_TAB}
+          >
+            with gpui-query
+          </button>
+          <span class="ml-auto self-center px-4 font-mono text-[11px] text-muted-foreground" data-lines-display>
+            {handLines} lines
+          </span>
+        </div>
+        <div data-panel="hand">
+          <RustCode code={HAND_ROLLED} lineNumbers={true} class="min-h-[300px] sm:min-h-[680px]" className="min-h-[300px] sm:min-h-[680px]" />
+        </div>
+        <div data-panel="query" hidden>
+          <RustCode code={WITH_QUERY} lineNumbers={true} class="min-h-[300px] sm:min-h-[680px]" className="min-h-[300px] sm:min-h-[680px]" />
+        </div>
+      </div>
+    </div>
+
+    <p class="mt-5 font-mono text-xs text-muted-foreground">
+      <span class="text-primary/60">▸ </span>
+      {handLines} lines of lifecycle plumbing → {queryLines} lines, with more behavior.
+    </p>
+  </div>
+</section>
+
+<script>
+  const BASE_TAB =
+    "border-r border-border px-4 py-3 font-mono text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none";
+  const ACTIVE_TAB = `${BASE_TAB} bg-primary/10 text-primary`;
+  const INACTIVE_TAB = `${BASE_TAB} text-muted-foreground hover:text-foreground`;
+
+  function activate(root: HTMLElement, mode: string) {
+    root.querySelectorAll("button[data-tab]").forEach((btn) => {
+      const el = btn as HTMLButtonElement;
+      const active = el.getAttribute("data-tab") === mode;
+      el.setAttribute("aria-selected", active ? "true" : "false");
+      el.className = active ? ACTIVE_TAB : INACTIVE_TAB;
+    });
+    root.querySelectorAll("[data-panel]").forEach((panel) => {
+      const el = panel as HTMLElement;
+      if (el.getAttribute("data-panel") === mode) el.removeAttribute("hidden");
+      else el.setAttribute("hidden", "");
+    });
+    const linesEl = root.querySelector("[data-lines-display]");
+    const activeBtn = root.querySelector('button[data-tab="' + mode + '"]');
+    if (linesEl && activeBtn) {
+      const n = activeBtn.getAttribute("data-lines");
+      linesEl.textContent = n + " lines";
+    }
+  }
+
+  document.querySelectorAll("[data-before-after]").forEach((root) => {
+    root.addEventListener("click", (ev: Event) => {
+      const target = ev.target as HTMLElement;
+      const btn = target.closest("button[data-tab]");
+      if (!btn) return;
+      const mode = btn.getAttribute("data-tab");
+      if (mode) activate(root as HTMLElement, mode);
+    });
+  });
+</script>

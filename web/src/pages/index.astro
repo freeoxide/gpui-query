@@ -1,12 +1,13 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
-import { LandingV4 } from "../components/landing/v4";
+import LandingV4 from "../components/landing/v4.astro";
 import { softwareSourceCode } from "../lib/seo";
 
-// V4 won the landing preview bake-off and renders as the homepage. The whole
-// landing tree is one React island (state, timers, mouse tracking, scroll
-// reveal via src/hooks/use-scroll-reveal.ts) — hydrated eagerly with client:load
-// since the hero is above the fold. The /v1–/v4 preview routes stay disabled.
+// V4 won the landing preview bake-off and renders as the homepage. The landing
+// tree is native Astro + Basecoat CSS (no React): interactivity (mouse tracking,
+// tabs, meters, scroll reveal) runs as small inline <script>s, and [data-reveal]
+// is observed by the global scroll-reveal script in BaseLayout. The /v1–/v4
+// preview routes stay disabled.
 const title = "gpui-query: Async State Management for GPUI";
 const description =
   "Zero-boilerplate async state management for GPUI. Caching, retry, cooperative cancellation, and persistence for the Zed editor's framework.";
@@ -20,5 +21,5 @@ const jsonLd = softwareSourceCode({
 });
 ---
 <BaseLayout title={title} description={description} canonicalPath="/" jsonLd={jsonLd}>
-  <LandingV4 client:load />
+  <LandingV4 />
 </BaseLayout>

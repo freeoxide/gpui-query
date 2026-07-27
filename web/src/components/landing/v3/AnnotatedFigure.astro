@@ -1,0 +1,185 @@
+---
+import { tintRust } from "../rust-tint";
+
+const FIG_LINES: string[] = [
+  "let (users, _sub) = use_query(",
+  '    QueryOptions::new("users")',
+  "        .cache_policy(CachePolicy::StaleWhileRevalidate {",
+  "            ttl_ms: 60_000,",
+  "            stale_ms: 300_000,",
+  "        })",
+  "        .retry_policy(RetryPolicy::new(3)",
+  "            .with_exponential_backoff()),",
+  "    |signal| async move {",
+  "        fetch_users(&signal).await",
+  "    },",
+  "    cx,",
+  ");",
+];
+
+const REGIONS: Record<string, number[]> = {
+  A: [1],
+  B: [2, 3, 4, 5],
+  C: [6, 7],
+  D: [8, 9, 10],
+  E: [11],
+};
+
+const MARK_AT: Record<number, string> = { 1: "A", 2: "B", 6: "C", 8: "D", 11: "E" };
+
+const CALLOUTS = [
+  {
+    mark: "A",
+    title: "the key",
+    desc: 'Cache address and dedup identity. Every use_query("users") anywhere in the app shares this one entry and its in-flight request.',
+  },
+  {
+    mark: "B",
+    title: "the policy",
+    desc: "Past ttl_ms, cached data is served instantly while a background refetch runs — for up to stale_ms.",
+  },
+  {
+    mark: "C",
+    title: "the retry",
+    desc: "Three attempts with exponential backoff, capped. A cancelled query stops retrying immediately.",
+  },
+  {
+    mark: "D",
+    title: "the fetcher",
+    desc: "Runs on the background executor. The QuerySignal makes cancellation cooperative — drop the view, the work stops.",
+  },
+  {
+    mark: "E",
+    title: "the context",
+    desc: "Results land back on the main thread as an Entity + Subscription your view reads in render.",
+  },
+];
+
+// Local helper (FigCaption) inlined: splits the label on the em dash.
+const figCaption = "FIG. 1 — anatomy of a query · hover a callout";
+const [figLabel, figRest] = figCaption.split("—");
+---
+
+<section class="border-t border-border py-20 sm:py-24" data-annotated-figure>
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <p class="font-mono text-[11px] tracking-[0.2em] uppercase text-muted-foreground">
+      <span class="text-primary">{figLabel}</span>—{figRest}
+    </p>
+    <h2 class="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+      Every line, accounted for
+    </h2>
+
+    <div class="mt-12 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+      <div class="border border-border bg-card shadow-sm">
+        <div class="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <span class="font-mono text-xs text-muted-foreground">src/views/users.rs</span>
+          <span class="font-mono text-[10px] tracking-[0.2em] uppercase text-primary/70">
+            rust
+          </span>
+        </div>
+        <pre class="overflow-x-auto py-4 font-mono text-[13px] leading-6 text-foreground/85"><code>{FIG_LINES.map((line, i) => {
+          const region = Object.entries(REGIONS).find(([, idx]) => idx.includes(i))?.[0];
+          const mark = MARK_AT[i];
+          return (
+            <span
+              class="flex border-l-2 px-4 transition-colors duration-150 border-l-transparent"
+              data-line
+              data-region={region}
+            >
+              <span
+                class="min-w-0 flex-1 whitespace-pre"
+                set:html={tintRust(line, `f-${i}`)}
+              />
+              {mark && (
+                <span
+                  class="ml-4 shrink-0 font-mono text-[11px] transition-colors text-muted-foreground/50"
+                  data-line-mark={mark}
+                >
+                  ⟨{mark}⟩
+                </span>
+              )}
+            </span>
+          );
+        })}</code></pre>
+      </div>
+
+      <ul class="space-y-2">
+        {CALLOUTS.map((c) => (
+          <li>
+            <button
+              type="button"
+              class="w-full border border-l-2 p-4 text-left transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none border-transparent border-l-border"
+              data-mark={c.mark}
+            >
+              <span class="flex items-center gap-3">
+                <span
+                  class="flex h-5 w-5 items-center justify-center border font-mono text-[11px] transition-colors border-border text-muted-foreground"
+                  data-badge
+                >
+                  {c.mark}
+                </span>
+                <span class="font-mono text-sm text-foreground">{c.title}</span>
+              </span>
+              <span class="mt-2 block text-sm leading-relaxed text-muted-foreground">
+                {c.desc}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll("[data-annotated-figure]").forEach((figure) => {
+    const lines = figure.querySelectorAll("[data-line]");
+    const callouts = figure.querySelectorAll("[data-mark]");
+
+    const setActive = (mark) => {
+      lines.forEach((line) => {
+        const r = line.getAttribute("data-region");
+        const active = !!r && r === mark;
+        line.classList.toggle("border-l-primary", active);
+        line.classList.toggle("bg-primary/10", active);
+        line.classList.toggle("border-l-transparent", !active);
+        const markSpan = line.querySelector("[data-line-mark]");
+        if (markSpan) {
+          markSpan.classList.toggle("text-primary", active);
+          markSpan.classList.toggle("text-muted-foreground/50", !active);
+        }
+      });
+      callouts.forEach((btn) => {
+        const active = btn.getAttribute("data-mark") === mark;
+        btn.classList.toggle("border-border", active);
+        btn.classList.toggle("border-l-primary", active);
+        btn.classList.toggle("bg-primary/5", active);
+        btn.classList.toggle("border-transparent", !active);
+        btn.classList.toggle("border-l-border", !active);
+        const badge = btn.querySelector("[data-badge]");
+        if (badge) {
+          badge.classList.toggle("border-primary", active);
+          badge.classList.toggle("bg-primary", active);
+          badge.classList.toggle("text-primary-foreground", active);
+          badge.classList.toggle("border-border", !active);
+          badge.classList.toggle("text-muted-foreground", !active);
+        }
+      });
+    };
+
+    lines.forEach((line) => {
+      line.addEventListener("mouseenter", () =>
+        setActive(line.getAttribute("data-region")),
+      );
+      line.addEventListener("mouseleave", () => setActive(null));
+    });
+
+    callouts.forEach((btn) => {
+      const mark = btn.getAttribute("data-mark");
+      btn.addEventListener("mouseenter", () => setActive(mark));
+      btn.addEventListener("mouseleave", () => setActive(null));
+      btn.addEventListener("focus", () => setActive(mark));
+      btn.addEventListener("blur", () => setActive(null));
+    });
+  });
+</script>

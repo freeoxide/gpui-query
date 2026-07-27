@@ -1,0 +1,81 @@
+---
+import Icon from "../Icon.astro";
+import CornerMarks from "./decor/CornerMarks.astro";
+import SectionHeading from "./decor/SectionHeading.astro";
+
+const policies = ["TTL", "SWR", "LatestWins", "IgnoreWhileLoading"];
+
+const features = [
+  {
+    icon: "lightning",
+    title: "Declarative Queries",
+    description:
+      "One hook. gpui-query handles fetching, caching, and state updates so your render code stays a pure function of data.",
+  },
+  {
+    icon: "database",
+    title: "Smart Caching",
+    description: "Cache policies for every use case — pick one per query and move on.",
+    extra: true,
+  },
+  {
+    icon: "arrows-left-right",
+    title: "Mutations",
+    description:
+      "First-class mutation support with success and error callbacks, plus optimistic updates that roll back on failure.",
+  },
+  {
+    icon: "infinity",
+    title: "Infinite Queries",
+    description:
+      "Paginate effortlessly with built-in infinite query support and bidirectional fetching.",
+  },
+  {
+    icon: "x-circle",
+    title: "Cancellation",
+    description:
+      "Signal-checked retries and cooperative cancellation for a clean async lifecycle — no orphaned tasks.",
+  },
+  {
+    icon: "hard-drive",
+    title: "Persistence",
+    description:
+      "Serialize and restore query state across launches with custom persistence backends.",
+  },
+];
+---
+
+<section class="border-b border-border py-20 sm:py-28">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <SectionHeading
+      eyebrow="capabilities"
+      title="Everything the fetch deserves"
+      description="The full TanStack Query feature set, rebuilt around GPUI's entity and async model."
+    />
+
+    <div class="relative mt-14" data-reveal data-reveal-delay="1">
+      <CornerMarks />
+      <div class="grid grid-cols-1 gap-px border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+        {features.map((feature, i) => (
+          <div class="group relative bg-background p-7 transition-colors duration-300 hover:bg-card">
+            <span class="absolute top-6 right-6 font-mono text-xs text-muted-foreground/50 transition-colors duration-300 group-hover:text-primary">
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <div class="text-primary">
+              <Icon name={feature.icon} size={22} />
+            </div>
+            <h3 class="font-display mt-5 text-base font-semibold tracking-wide">{feature.title}</h3>
+            <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{feature.description}</p>
+            {feature.extra && (
+              <div class="mt-4 flex flex-wrap gap-2">
+                {policies.map((policy) => (
+                  <span class="border border-primary/20 bg-primary/5 px-2.5 py-1 font-mono text-[11px] tracking-wide text-primary">{policy}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+</section>

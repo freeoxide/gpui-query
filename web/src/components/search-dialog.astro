@@ -1,0 +1,398 @@
+---
+// ⌘K search dialog — vanilla port of search-dialog.tsx. Uses the Pagefind
+// combined index built into /pagefind by the post-build step. Rendered once in
+// BaseLayout; opens via showModal(), bound here to [data-search-open] buttons
+// and the ⌘K / Ctrl-K shortcut. Markup is plain Tailwind (the original used no
+// ui/* primitives), so only the state machine moved from React to vanilla.
+---
+<dialog
+  id="search-dialog"
+  class="search-dialog"
+  aria-label="Search documentation"
+  onclick="if(event.target===this)this.close()"
+>
+  <div class="search-dialog__card">
+    <div class="search-dialog__accent"></div>
+
+    <div class="flex items-center border-b px-4">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="h-4 w-4 shrink-0 text-muted-foreground"
+        aria-hidden="true"
+        ><path d="m21 21-4.34-4.34"></path><circle cx="11" cy="11" r="8"></circle
+      ></svg>
+      <input
+        type="text"
+        placeholder="Search documentation..."
+        autocomplete="off"
+        class="flex-1 bg-transparent px-3 py-3 text-sm outline-none placeholder:text-muted-foreground"
+      />
+      <kbd
+        class="hidden items-center gap-1 rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground sm:flex"
+        >K</kbd
+      >
+      <button
+        type="button"
+        data-search-close
+        class="ml-2 rounded p-1 hover:bg-muted"
+        aria-label="Close search"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="h-3.5 w-3.5 text-muted-foreground"
+          aria-hidden="true"
+          ><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg
+        >
+      </button>
+    </div>
+
+    <ul data-results class="max-h-80 overflow-y-auto p-2"></ul>
+
+    <div data-empty class="search-dialog__state" hidden>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="h-8 w-8 text-muted-foreground/40"
+        aria-hidden="true"
+        ><path d="m21 21-4.34-4.34"></path><circle cx="11" cy="11" r="8"
+      ></circle></svg>
+      <p class="text-sm text-muted-foreground">Type to search documentation...</p>
+    </div>
+
+    <div data-no-results class="search-dialog__state" hidden>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="h-8 w-8 text-muted-foreground/40"
+        aria-hidden="true"
+        ><path
+          d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
+        ></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path
+          d="M10 9h4"></path><path d="M10 13h4"></path></svg
+      >
+      <p class="text-sm text-muted-foreground">No results found.</p>
+    </div>
+
+    <div class="flex items-center justify-between border-t px-4 py-2.5">
+      <div class="flex items-center gap-4">
+        <span
+          class="flex items-center gap-1.5 text-xs text-muted-foreground"
+        >
+          <kbd
+            class="inline-flex items-center gap-0.5 rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] font-medium shadow-sm"
+            >↑↓</kbd
+          >
+          Navigate
+        </span>
+        <span
+          class="flex items-center gap-1.5 text-xs text-muted-foreground"
+        >
+          <kbd
+            class="inline-flex items-center gap-0.5 rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] font-medium shadow-sm"
+            >Enter</kbd
+          >
+          Open
+        </span>
+        <span
+          class="flex items-center gap-1.5 text-xs text-muted-foreground"
+        >
+          <kbd
+            class="inline-flex items-center gap-0.5 rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] font-medium shadow-sm"
+            >Esc</kbd
+          >
+          Close
+        </span>
+      </div>
+      <span class="text-[10px] text-muted-foreground/50">Powered by Pagefind</span>
+    </div>
+  </div>
+</dialog>
+
+<style is:global>
+  /* Native <dialog> reset + the original top-anchored overlay layout. ::backdrop
+     gives the dim layer for free. */
+  #search-dialog {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    max-width: none;
+    max-height: none;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 15vh;
+    color: inherit;
+  }
+  #search-dialog::backdrop {
+    background: rgb(0 0 0 / 0.5);
+    backdrop-filter: blur(2px);
+  }
+  .search-dialog__card {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    max-width: 32rem;
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--color-border);
+    background: var(--color-background);
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+    animation: searchDialogIn 0.2s ease-out forwards;
+  }
+  .search-dialog__accent {
+    height: 2px;
+    width: 100%;
+    background: linear-gradient(
+      to right,
+      var(--color-primary),
+      color-mix(in oklab, var(--color-primary) 10%, transparent),
+      transparent
+    );
+  }
+  .search-dialog__state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 2.5rem 1rem;
+    text-align: center;
+  }
+  .search-dialog__result {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.875rem;
+    border-left: 2px solid transparent;
+    padding-left: 10px;
+    transition: background-color 0.15s;
+  }
+  .search-dialog__result:hover {
+    background: var(--color-muted);
+  }
+  .search-dialog__result.is-selected {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+    border-left-color: var(--color-primary);
+  }
+  @keyframes searchDialogIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .search-dialog__card {
+      animation: none;
+    }
+  }
+</style>
+
+<script>
+  interface SearchResult {
+    url: string;
+    title: string;
+    excerpt: string;
+    score: number;
+  }
+
+  const dialog = document.getElementById("search-dialog") as HTMLDialogElement | null;
+  if (dialog) {
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    const list = dialog.querySelector<HTMLUListElement>("[data-results]")!;
+    const emptyState = dialog.querySelector<HTMLElement>("[data-empty]")!;
+    const noResults = dialog.querySelector<HTMLElement>("[data-no-results]")!;
+    let pagefind: any = null;
+    let results: SearchResult[] = [];
+    let selected = -1;
+    let debounce: number | undefined;
+
+    async function ensurePagefind() {
+      if (pagefind) return pagefind;
+      try {
+        // Non-literal path to bypass Vite import analysis (Pagefind is emitted
+        // by the post-build step, not present at dev time).
+        const path = ["/pagefind", "pagefind.js"].join("/");
+        const pf = await import(/* @vite-ignore */ path);
+        await pf.init();
+        pagefind = pf;
+      } catch {
+        console.warn("Pagefind not available. Run build first.");
+      }
+      return pagefind;
+    }
+
+    function render() {
+      list.innerHTML = "";
+      if (results.length === 0) {
+        list.hidden = true;
+        const q = input.value.trim();
+        if (q && pagefind) {
+          noResults.hidden = false;
+        } else {
+          noResults.hidden = true;
+        }
+        emptyState.hidden = true;
+        return;
+      }
+      list.hidden = false;
+      noResults.hidden = true;
+      emptyState.hidden = true;
+      const ns = "http://www.w3.org/1999/xhtml";
+      results.forEach((r, i) => {
+        const li = document.createElementNS(ns, "li");
+        const a = document.createElementNS(ns, "a");
+        a.href = r.url;
+        a.className = "search-dialog__result" + (i === selected ? " is-selected" : "");
+        a.innerHTML =
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9h4"></path><path d="M10 13h4"></path></svg>` +
+          `<span class="min-w-0 flex-1"><span class="block truncate font-medium">${escapeHtml(r.title)}</span><span class="mt-0.5 block text-xs text-muted-foreground line-clamp-2"></span></span>`;
+        a.querySelector("span:last-child")!.innerHTML = r.excerpt; // excerpt is pre-sanitized by Pagefind
+        a.addEventListener("click", (e) => {
+          e.preventDefault();
+          window.location.href = r.url;
+          close();
+        });
+        li.append(a);
+        list.append(li);
+      });
+    }
+
+    function escapeHtml(s: string) {
+      return s.replace(
+        /[&<>"']/g,
+        (c) =>
+          ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          })[c]!,
+      );
+    }
+
+    async function runSearch() {
+      const q = input.value.trim();
+      if (!pagefind || !q) {
+        results = [];
+        selected = -1;
+        render();
+        return;
+      }
+      try {
+        const search = await pagefind.search(q);
+        results = await Promise.all(
+          search.results.slice(0, 10).map(async (r: any) => {
+            const data = await r.data();
+            return {
+              url: data.url,
+              title: data.meta?.title ?? data.url,
+              excerpt: data.excerpt ?? "",
+              score: r.score,
+            } satisfies SearchResult;
+          }),
+        );
+        selected = results.length ? 0 : -1;
+        render();
+      } catch {
+        results = [];
+        selected = -1;
+        render();
+      }
+    }
+
+    function open() {
+      dialog.showModal();
+      input.value = "";
+      results = [];
+      selected = -1;
+      list.hidden = true;
+      noResults.hidden = true;
+      emptyState.hidden = false;
+      window.setTimeout(() => input.focus(), 50);
+      void ensurePagefind();
+    }
+
+    function close() {
+      dialog.close();
+    }
+
+    function move(delta: number) {
+      if (!results.length) return;
+      selected = Math.min(Math.max(selected + delta, 0), results.length - 1);
+      render();
+      const item = list.children[selected]?.querySelector("a") as
+        | HTMLElement
+        | undefined;
+      item?.scrollIntoView({ block: "nearest" });
+    }
+
+    input.addEventListener("input", () => {
+      window.clearTimeout(debounce);
+      debounce = window.setTimeout(runSearch, 200);
+    });
+
+    dialog.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        move(1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        move(-1);
+      } else if (e.key === "Enter") {
+        if (results[selected]) {
+          e.preventDefault();
+          window.location.href = results[selected].url;
+          close();
+        }
+      }
+    });
+
+    dialog
+      .querySelector("[data-search-close]")
+      ?.addEventListener("click", close);
+
+    // Bind every [data-search-open] + the ⌘K / Ctrl-K shortcut.
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-search-open]")
+      .forEach((b) => b.addEventListener("click", open));
+    document.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        open();
+      }
+    });
+  }
+</script>

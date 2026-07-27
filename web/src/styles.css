@@ -1,8 +1,16 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource-variable/oxanium";
-@import "../../shared/tokens.css";
 @import "tailwindcss";
+/* Basecoat — imported BEFORE shared/tokens.css + the project @theme inline so
+   the brand (lime primary, zero radius, Inter) declared later wins the
+   --color-* / --radius-* / --font-* theme tokens. base = token skeleton +
+   @theme map + base layer; components = .btn/.card/... classes; sera = the
+   sharp-cornered, uppercase-tracking style presets this site already uses. */
+@import "basecoat-css/base";
+@import "basecoat-css/components";
+@import "basecoat-css/styles/sera";
+@import "../../shared/tokens.css";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));

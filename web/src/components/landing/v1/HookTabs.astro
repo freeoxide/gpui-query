@@ -1,0 +1,141 @@
+---
+import CornerMarks from "../decor/CornerMarks.astro";
+import RustCode from "../rust-code.astro";
+import Icon from "../../Icon.astro";
+
+interface HookTab {
+  id: string;
+  returns: string;
+  code: string;
+}
+
+const HOOK_TABS: HookTab[] = [
+  {
+    id: "use_query",
+    returns: "(Entity<QueryResource<T, E>>, Subscription)",
+    code: `let (users, _sub) = use_query(
+    QueryOptions::new("users")
+        .cache_policy(CachePolicy::StaleWhileRevalidate {
+            ttl_ms: 60_000,
+            stale_ms: 300_000,
+        })
+        .retry_policy(RetryPolicy::new(3).with_exponential_backoff()),
+    |signal| async move { fetch_users(&signal).await },
+    cx,
+);`,
+  },
+  {
+    id: "use_mutation",
+    returns: "(Entity<MutationResource<V, T, E>>, Subscription)",
+    code: `let (create, _sub) = use_mutation((), cx);
+
+mutate_with_callbacks(
+    &create,
+    NewUser { name: "Alice" },
+    |vars| async move { create_user(vars).await },
+    MutationCallbacks::new()
+        .on_success(|_| { /* invalidate "users" */ })
+        .on_error(|err| eprintln!("failed: {err:?}")),
+    cx,
+);`,
+  },
+  {
+    id: "use_infinite_query",
+    returns: "(Entity<InfiniteQueryResource<P, E>>, Subscription)",
+    code: `let (feed, _sub) = use_infinite_query(
+    InfiniteQueryOptions::new(QueryKey::from(["feed"]))
+        .max_pages(Some(10)),
+    |last_page| async move {
+        let cursor = last_page.map(|p| p.cursor());
+        let page = fetch_page(cursor).await?;
+        Ok((page.items, page.has_more))
+    },
+    cx,
+);`,
+  },
+];
+---
+
+<section class="border-t border-border py-20 sm:py-24">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div class="grid items-start gap-12 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div>
+        <p class="font-mono text-xs tracking-[0.25em] uppercase text-primary">
+          <span class="text-primary/50">// </span>surface area
+        </p>
+        <h2 class="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+          Three hooks. That's the API.
+        </h2>
+        <p class="mt-4 text-muted-foreground">
+          Queries, mutations, and pagination share the same shape: a key, an async function, and
+          your context. Everything returns an Entity you read in render.
+        </p>
+        <div class="mt-8">
+          <a href="/docs/" class="btn" data-variant="outline">
+            Read the full guide
+            <Icon name="arrow-right" size={14} class="ml-1" />
+          </a>
+        </div>
+      </div>
+
+      <div class="relative">
+        <CornerMarks />
+        <div class="tabs border border-border bg-card shadow-sm" data-hook-tabs>
+          <nav role="tablist" aria-label="Hook examples" class="flex border-b border-border">
+            {HOOK_TABS.map((t, i) => (
+              <button
+                type="button"
+                role="tab"
+                id={`hook-tab-${t.id}`}
+                aria-controls={`hook-panel-${t.id}`}
+                aria-selected={i === 0 ? "true" : "false"}
+                tabindex={i === 0 ? "0" : "-1"}
+                data-tab={t.id}
+                class={`border-r border-border px-4 py-3 font-mono text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none ${
+                  i === 0 ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t.id}
+              </button>
+            ))}
+          </nav>
+          {HOOK_TABS.map((t, i) => (
+            <div
+              role="tabpanel"
+              id={`hook-panel-${t.id}`}
+              aria-labelledby={`hook-tab-${t.id}`}
+              hidden={i !== 0}
+            >
+              <RustCode code={t.code} class="min-h-[290px]" />
+              <div class="border-t border-border px-5 py-2.5 font-mono text-[11px] text-muted-foreground">
+                <span class="text-primary/60">→ </span>
+                {t.returns}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll("[data-hook-tabs]").forEach((root) => {
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('button[role="tab"]'));
+    function activate(btn: HTMLButtonElement) {
+      tabs.forEach((t) => {
+        const selected = t === btn;
+        t.setAttribute("aria-selected", selected ? "true" : "false");
+        t.tabIndex = selected ? 0 : -1;
+        if (selected) {
+          t.classList.add("bg-primary/10", "text-primary");
+          t.classList.remove("text-muted-foreground", "hover:text-foreground");
+        } else {
+          t.classList.remove("bg-primary/10", "text-primary");
+          t.classList.add("text-muted-foreground", "hover:text-foreground");
+        }
+      });
+    }
+    tabs.forEach((t) => t.addEventListener("click", () => activate(t)));
+  });
+</script>

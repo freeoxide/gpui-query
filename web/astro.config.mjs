@@ -1,6 +1,5 @@
 // @ts-check
 import { defineConfig } from "astro/config";
-import react from "@astrojs/react";
 import mdx from "@astrojs/mdx";
 import starlight from "@astrojs/starlight";
 import tailwindcss from "@tailwindcss/vite";
@@ -33,7 +32,6 @@ export default defineConfig({
     format: "directory",
   },
   integrations: [
-    react(),
     // Starlight must come BEFORE mdx(): it injects astro-expressive-code, which
     // has to precede the MDX integration so code blocks render correctly.
     starlight({

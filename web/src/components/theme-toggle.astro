@@ -1,0 +1,167 @@
+---
+// Theme toggle — vanilla port of theme-toggle.tsx. Clicking toggles the `.dark`
+// class on <html>, persists localStorage("theme"), updates the theme-color meta,
+// and animates the icon. The no-flash <script> in BaseLayout already applied the
+// stored theme before paint; icon visibility is driven purely by CSS (`.dark`
+// ancestor) so there is no wrong-icon flash and no JS needed to pick the glyph.
+---
+<button
+  type="button"
+  class="btn"
+  data-variant="ghost"
+  data-size="icon"
+  aria-label="Toggle theme"
+  data-theme-toggle
+>
+  <span class="inline-flex" data-theme-icon>
+    <svg
+      data-theme-icon-moon
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="h-5 w-5"
+      aria-hidden="true"
+      ><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path
+    ></svg>
+    <svg
+      data-theme-icon-sun
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="hidden h-5 w-5"
+      aria-hidden="true"
+      ><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path
+        d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path
+        d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path
+        d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path
+        d="m19.07 4.93-1.41 1.41"></path
+    ></svg>
+  </span>
+</button>
+
+<style is:global>
+  /* CSS-driven icon swap: Sun shows when <html> is .dark, Moon otherwise.
+     Runs off the no-flash class applied before paint — zero JS, zero flash. */
+  [data-theme-icon-sun] {
+    display: none;
+  }
+  [data-theme-icon-moon] {
+    display: block;
+  }
+  html.dark [data-theme-icon-sun] {
+    display: block;
+  }
+  html.dark [data-theme-icon-moon] {
+    display: none;
+  }
+
+  @keyframes theme-icon-exit {
+    0% {
+      transform: rotate(0deg) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: rotate(90deg) scale(0.5);
+      opacity: 0;
+    }
+  }
+  @keyframes theme-icon-enter {
+    0% {
+      transform: rotate(-90deg) scale(0.5);
+      opacity: 0;
+    }
+    100% {
+      transform: rotate(0deg) scale(1);
+      opacity: 1;
+    }
+  }
+  [data-theme-icon].theme-icon-exit {
+    animation: theme-icon-exit 0.2s ease-in forwards;
+  }
+  [data-theme-icon].theme-icon-enter {
+    animation: theme-icon-enter 0.2s ease-out forwards;
+  }
+</style>
+
+<script>
+  const THEME_COLOR_LIGHT = "#9AE600";
+  const THEME_COLOR_DARK = "#0C1222";
+
+  function updateThemeColor(isDark: boolean) {
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", isDark ? THEME_COLOR_DARK : THEME_COLOR_LIGHT);
+  }
+
+  function applyTheme(next: "light" | "dark") {
+    document.documentElement.classList.toggle("dark", next === "dark");
+    localStorage.setItem("theme", next);
+    updateThemeColor(next === "dark");
+  }
+
+  function syncLabels() {
+    const isDark = document.documentElement.classList.contains("dark");
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-theme-toggle]")
+      .forEach((btn) =>
+        btn.setAttribute(
+          "aria-label",
+          isDark ? "Switch to light mode" : "Switch to dark mode",
+        ),
+      );
+  }
+
+  function setup() {
+    syncLabels();
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-theme-toggle]")
+      .forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const isDark = document.documentElement.classList.contains("dark");
+          const next: "light" | "dark" = isDark ? "light" : "dark";
+          const icon = btn.querySelector<HTMLElement>("[data-theme-icon]");
+          const flip = () => {
+            applyTheme(next);
+            syncLabels();
+          };
+          if (icon) {
+            icon.classList.add("theme-icon-exit");
+            icon.addEventListener(
+              "animationend",
+              () => {
+                flip();
+                icon.classList.remove("theme-icon-exit");
+                icon.classList.add("theme-icon-enter");
+                icon.addEventListener(
+                  "animationend",
+                  () => icon.classList.remove("theme-icon-enter"),
+                  { once: true },
+                );
+              },
+              { once: true },
+            );
+          } else {
+            flip();
+          }
+        });
+      });
+
+    // Follow system changes only when the user hasn't stored a preference.
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    mql.addEventListener("change", (e) => {
+      if (!localStorage.getItem("theme")) {
+        applyTheme(e.matches ? "dark" : "light");
+      }
+    });
+  }
+
+  setup();
+</script>

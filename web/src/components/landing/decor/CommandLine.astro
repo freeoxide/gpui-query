@@ -1,0 +1,48 @@
+---
+import CornerMarks from "./CornerMarks.astro";
+import Icon from "../../Icon.astro";
+
+interface Props {
+  command: string;
+}
+const { command } = Astro.props;
+---
+
+<div class="relative inline-flex items-center gap-3 border border-border bg-card py-3 pr-3 pl-4 font-mono text-sm shadow-sm">
+  <CornerMarks />
+  <span aria-hidden="true" class="text-primary select-none">$</span>
+  <span class="text-foreground">{command}</span>
+  <button
+    type="button"
+    data-copy-button
+    data-command={command}
+    aria-label="Copy command"
+    class="ml-2 flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+  >
+    <span data-icon="copy"><Icon name="copy" size={14} /></span>
+    <span data-icon="check" hidden><Icon name="check" size={14} weight="bold" class="text-primary" /></span>
+  </button>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>("[data-copy-button]").forEach((btn) => {
+    const command = btn.dataset.command ?? "";
+    const copyIcon = btn.querySelector<HTMLElement>('[data-icon="copy"]');
+    const checkIcon = btn.querySelector<HTMLElement>('[data-icon="check"]');
+    let timer: number | undefined;
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(command);
+      } catch {}
+      btn.setAttribute("aria-label", "Copied");
+      if (copyIcon) copyIcon.hidden = true;
+      if (checkIcon) checkIcon.hidden = false;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        btn.setAttribute("aria-label", "Copy command");
+        if (copyIcon) copyIcon.hidden = false;
+        if (checkIcon) checkIcon.hidden = true;
+      }, 2000);
+    });
+  });
+</script>
