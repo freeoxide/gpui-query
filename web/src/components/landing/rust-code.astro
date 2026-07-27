@@ -4,13 +4,13 @@ import { tintRust } from "./rust-tint";
 interface Props {
   code: string;
   lineNumbers?: boolean;
-  className?: string;
+  class?: string;
 }
 
-const { code, lineNumbers = false, className = "" } = Astro.props;
+const { code, lineNumbers = false, class: cls = "" } = Astro.props;
 const lines = code.split("\n");
 ---
-<pre class={`overflow-x-auto p-5 font-mono text-[13px] leading-6 text-foreground/85 ${className}`}>
+<pre class={`overflow-x-auto p-5 font-mono text-[13px] leading-6 text-foreground/85 ${cls}`}>
   <code>
     {lines.map((line, i) => (
       <span class="block">
