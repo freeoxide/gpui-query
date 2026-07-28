@@ -108,6 +108,7 @@ export default defineConfig({
             { label: "HTTP cache headers", link: "/docs/guides/http-caching" },
             { label: "Query Keys", link: "/docs/guides/query-keys" },
             { label: "The Select Pattern", link: "/docs/guides/select-pattern" },
+            { label: "Claude Code skills", link: "/docs/guides/claude-skills" },
           ],
         },
         {

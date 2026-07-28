@@ -261,6 +261,29 @@ Only `Success` entries with a registered serializer are persisted; the typed rou
 
 Garbage collection runs on idle resources older than `gc_time_ms` (default: 5 minutes). Configurable per-query via `QueryOptions::gc_time_ms()`.
 
+## claude code skills
+
+Two installable [Claude Code](https://claude.com/claude-code) skills ship in this repo under [`skills/`](./skills) — knowledge packs that teach an AI assistant the real gpui-query API (signatures, defaults, lifecycle, gotchas) so it writes correct hooks, caching, retry, and persistence code instead of guessing.
+
+- **`gpui-query`** — the essentials: `use_query` / `use_mutation` / `use_infinite_query` / `use_query_select`, in-memory `CachePolicy`, `RetryPolicy`, `QueryKey` filters, `QueryClient` bulk ops, observers, GC.
+- **`gpui-query-extensions`** — the satellites: HTTP `Cache-Control` → `CachePolicy` + `HttpCache` (`gpui-query-http`), and durable disk persistence with `FilePersister` + the `persist` feature (`gpui-query-persist`).
+
+Install both globally (available in every project), from a clone of the repo:
+
+```sh
+cp -R skills/gpui-query skills/gpui-query-extensions ~/.claude/skills/
+```
+
+Or grab a single skill without cloning:
+
+```sh
+mkdir -p ~/.claude/skills/gpui-query
+curl -fsSL https://raw.githubusercontent.com/freeoxide/gpui-query/master/skills/gpui-query/SKILL.md \
+  -o ~/.claude/skills/gpui-query/SKILL.md
+```
+
+Once installed, the skills activate automatically when you work on a GPUI app that depends on gpui-query — no manual invocation needed. See the [Claude Code skills guide](https://gpui-query.freeoxide.com/docs/guides/claude-skills) for details.
+
 ## links
 
 - Documentation: <https://gpui-query.freeoxide.com/docs/>
