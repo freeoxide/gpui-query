@@ -22,6 +22,8 @@ export interface Props {
   noindex?: boolean;
   ogType?: string;
   jsonLd?: object | object[];
+  /** Emit .md/.txt rel=alternate links (default true; false for the 404). */
+  alts?: boolean;
 }
 
 const {
@@ -32,6 +34,7 @@ const {
   noindex = false,
   ogType = "website",
   jsonLd,
+  alts = true,
 } = Astro.props;
 
 const SITE = "https://gpui-query.freeoxide.com";
@@ -62,8 +65,8 @@ const altHref = (ext: string) => `${altBase === "" ? "/index" : altBase}${ext}`;
     <link rel="manifest" href="/manifest.json" />
 
     {/* Token-light alternates (markdown + plain text) for AI agents. */}
-    <link rel="alternate" type="text/markdown" href={altHref(".md")} />
-    <link rel="alternate" type="text/plain" href={altHref(".txt")} />
+    {alts && <link rel="alternate" type="text/markdown" href={altHref(".md")} />}
+    {alts && <link rel="alternate" type="text/plain" href={altHref(".txt")} />}
 
     {/* OpenGraph */}
     <meta property="og:title" content={title} />

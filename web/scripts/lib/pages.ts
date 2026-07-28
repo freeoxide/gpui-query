@@ -121,7 +121,7 @@ function legalPage(doc: (typeof legalDocs)[number]): ParsedPage {
   const lines: string[] = [];
   for (const section of doc.sections) {
     lines.push(`## ${section.title}`, "");
-    lines.push(...section.paragraphs, "");
+    for (const p of section.paragraphs) lines.push(p, "");
   }
   return {
     route: doc.slug,
