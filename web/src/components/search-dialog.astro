@@ -238,12 +238,16 @@
     const emptyState = dialog.querySelector<HTMLElement>("[data-empty]")!;
     const noResults = dialog.querySelector<HTMLElement>("[data-no-results]")!;
     let pagefind: any = null;
+    let pagefindUnavailable = false;
     let results: SearchResult[] = [];
     let selected = -1;
     let debounce: number | undefined;
 
     async function ensurePagefind() {
       if (pagefind) return pagefind;
+      // Once a fetch fails (e.g. dev, where the post-build index isn't present),
+      // don't retry or re-warn on every open.
+      if (pagefindUnavailable) return null;
       try {
         // Non-literal path to bypass Vite import analysis (Pagefind is emitted
         // by the post-build step, not present at dev time).
@@ -252,6 +256,7 @@
         await pf.init();
         pagefind = pf;
       } catch {
+        pagefindUnavailable = true;
         console.warn("Pagefind not available. Run build first.");
       }
       return pagefind;

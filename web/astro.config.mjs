@@ -40,8 +40,8 @@ export default defineConfig({
         src: "./src/assets/logo.svg",
       },
       // Starlight defaults to /favicon.svg, which this project doesn't ship —
-      // the canonical favicon is /favicon.ico (same one the manifest and the
-      // marketing app's __root.tsx reference). Starlight derives the MIME type
+      // the canonical favicon is /favicon.ico (same one the manifest references).
+      // Starlight derives the MIME type
       // from the extension (image/x-icon).
       favicon: "/favicon.ico",
       customCss: ["./src/styles/starlight.css"],

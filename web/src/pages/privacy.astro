@@ -5,7 +5,7 @@ import LegalSection from "../components/LegalSection.astro";
 
 const title = "Privacy Policy - gpui-query";
 const description =
-  "How the gpui-query website handles data: Firebase Analytics, Google Fonts, Cloudflare hosting, and local storage.";
+  "How the gpui-query website handles data: Firebase Analytics, Cloudflare hosting, self-hosted fonts, and local storage.";
 ---
 <BaseLayout title={title} description={description} canonicalPath="/privacy">
   <LegalPage
@@ -60,13 +60,9 @@ const description =
 
     <LegalSection title="Fonts">
       <p>
-        Fonts are loaded from <strong>Google Fonts</strong>. When your browser fetches a font file,
-        your IP address is sent to Google as part of that request. Details are in Google's
-        <a
-          href="https://developers.google.com/fonts/faq/privacy"
-          target="_blank"
-          rel="noopener noreferrer">Google Fonts privacy FAQ</a
-        >.
+        Fonts are <strong>self-hosted</strong>: the font files are bundled with the site and served
+        from the same origin. No font request is sent to any third party, so your IP address is not
+        shared with a font provider.
       </p>
     </LegalSection>
 

@@ -15,7 +15,7 @@ import { loadDocs } from "./lib/docs-md.ts";
 
 const outputDir = process.argv.includes("--output")
   ? process.argv[process.argv.indexOf("--output") + 1]
-  : ".output/public";
+  : "dist/client";
 
 // Scripts run from web/. Starlight docs live under src/content/docs/docs and
 // are served at /docs/** (route "" -> /docs/).

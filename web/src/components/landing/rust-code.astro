@@ -19,7 +19,7 @@ const inner = lines
     const ln = lineNumbers
       ? `<span class="mr-4 inline-block w-5 text-right text-muted-foreground/40 select-none">${i + 1}</span>`
       : "";
-    return `<span class="block">${ln}${tintRust(line)}</span>`;
+    return `<span class="block min-h-[1.5rem]">${ln}${tintRust(line)}</span>`;
   })
   .join("");
 ---
