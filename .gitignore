@@ -9,9 +9,6 @@ dist/
 .output/
 .tanstack/
 
-# Generated docs (built from docs/ by build-docs.mjs)
-web/public/docs/
-
 # OS
 .DS_Store
 Thumbs.db
@@ -22,7 +19,5 @@ Thumbs.db
 .playwright-mcp/
 
 .wrangler/cache
-
-.astro-migration-baseline/
 
 .astro
