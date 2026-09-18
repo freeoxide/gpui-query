@@ -15,6 +15,9 @@ Thumbs.db
 
 .commandcode
 
+# z-workflow state
+.z-workflow/
+
 # Local Playwright/MCP artifacts
 .playwright-mcp/
 
