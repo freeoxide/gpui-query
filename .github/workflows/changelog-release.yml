@@ -105,6 +105,10 @@ jobs:
 
   publish-main:
     needs: check-and-release
+    # Same guard as the check_tag-gated steps above, via the job output —
+    # `needs:` alone would still run this job on the skip path (tag already
+    # exists) and re-attempt `cargo publish` on an already-released version.
+    if: needs.check-and-release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,6 +138,9 @@ jobs:
 
   deploy-web:
     needs: [publish-main, check-and-release]
+    # Skip-path guard as in publish-main — avoids redundant prod redeploys
+    # when the CHANGELOG's first version heading is already tagged.
+    if: needs.check-and-release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     environment: prod
     defaults:
