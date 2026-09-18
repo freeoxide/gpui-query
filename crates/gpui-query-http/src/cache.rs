@@ -253,7 +253,7 @@ fn policy_from_meta(meta: &CacheMeta) -> CachePolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{BackendResponse, Conditionals, HttpBackend};
+    use crate::backend::{BackendResponse, Conditionals, HttpBackend, MaybeSend};
     use bytes::Bytes;
     use http::HeaderMap;
     use std::collections::VecDeque;
@@ -295,7 +295,7 @@ mod tests {
             &self,
             _url: &str,
             _conditionals: Conditionals,
-        ) -> impl Future<Output = Result<BackendResponse, MockError>> + Send {
+        ) -> impl Future<Output = Result<BackendResponse, MockError>> + MaybeSend {
             // Count the call and pop the next canned response.
             let next = {
                 let mut calls = self.calls.lock().unwrap();

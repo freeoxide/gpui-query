@@ -47,7 +47,7 @@ pub mod cache;
 #[cfg(feature = "reqwest")]
 pub mod reqwest_backend;
 
-pub use backend::{BackendResponse, Conditionals, HttpBackend};
+pub use backend::{BackendResponse, Conditionals, HttpBackend, MaybeSend};
 pub use cache::{HttpCache, HttpError};
 #[cfg(feature = "reqwest")]
 pub use reqwest_backend::ReqwestBackend;
