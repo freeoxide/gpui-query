@@ -11,7 +11,7 @@
 //!
 //! [`HttpCache`] is generic over a [`HttpBackend`] — a trait that abstracts a
 //! single conditional `GET`. The crate ships *one* optional backend,
-//! [`ReqwestBackend`](crate::reqwest_backend::ReqwestBackend), behind the
+//! [`ReqwestBackend`], behind the
 //! `reqwest` cargo feature; any other request library can implement
 //! [`HttpBackend`] and plug into [`HttpCache::new`](HttpCache::new) instead.
 //! `reqwest` is never a hard dependency.
@@ -19,7 +19,7 @@
 //! # Server wins
 //!
 //! Parse the response headers with [`cache_policy_from_headers`], hand the
-//! resulting [`CachePolicy`](gpui_query::core::CachePolicy) to
+//! resulting [`CachePolicy`] to
 //! [`Fetched::with_policy`](gpui_query::core::Fetched::with_policy), and the
 //! resource adopts the server's TTL:
 //!

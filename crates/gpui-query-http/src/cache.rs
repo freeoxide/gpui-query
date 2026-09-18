@@ -57,7 +57,7 @@ pub enum HttpError {
         /// The URL that produced the spurious `304`.
         url: String,
     },
-    /// A cache [`Mutex`](std::sync::Mutex) was poisoned by a panicking thread.
+    /// A cache [`Mutex`] was poisoned by a panicking thread.
     ///
     /// Rather than panicking the caller (the previous `.expect` behavior), the
     /// poison is surfaced as a typed error so a poisoned cache fails one
