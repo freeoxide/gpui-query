@@ -34,6 +34,10 @@
 //! ```
 
 #![deny(missing_docs)]
+// docs.rs renders with `--cfg docsrs` (see [package.metadata.docs.rs]); enable
+// `#[doc(cfg(...))]` there so the `reqwest`-gated items are annotated with the
+// feature that enables them, matching the main crate's convention.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::time::Duration;
 
@@ -45,11 +49,13 @@ use thiserror::Error;
 pub mod backend;
 pub mod cache;
 #[cfg(feature = "reqwest")]
+#[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
 pub mod reqwest_backend;
 
 pub use backend::{BackendResponse, Conditionals, HttpBackend, MaybeSend};
 pub use cache::{HttpCache, HttpError};
 #[cfg(feature = "reqwest")]
+#[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
 pub use reqwest_backend::ReqwestBackend;
 
 /// HTTP cache metadata extracted from a response.
