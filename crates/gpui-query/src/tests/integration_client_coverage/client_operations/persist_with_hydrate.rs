@@ -1,7 +1,7 @@
-//! Integration tests for the value-carrying persistence layer (`persist`
-//! feature): `persist_with` debounce/coalescing, the typed serializer/deserializer
-//! registries, `hydrate` round-trip, the [`CacheMutation`] dirty signal firing
-//! on `set_query_data`, and `PersistFilter` / `max_age` behavior.
+//! Integration tests for the value-carrying persistence layer:
+//! `persist_with` debounce/coalescing, the serializer/deserializer registries,
+//! `hydrate` round-trip, the `CacheMutation` dirty signal, and
+//! `PersistFilter`/`max_age` behavior.
 
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -21,12 +21,8 @@ use crate::hook::{
 };
 use crate::tests::test_support::*;
 
-/// An in-memory persister that stores the last saved snapshot, for asserting
-/// on the value-carrying payload in tests.
-///
-/// `save_count` tracks the number of `save` invocations so coalescing tests
-/// can assert exactly how many saves actually fired (additive: existing tests
-/// that ignore it are unaffected).
+/// In-memory persister for asserting on saved payloads. `save_count` counts
+/// `save` calls so coalescing tests can assert exactly how many fired.
 #[derive(Default, Clone)]
 struct MemPersister {
     last_saved: Arc<StdMutex<Option<PersistSnapshot>>>,
@@ -54,19 +50,34 @@ impl Persister for MemPersister {
     }
 }
 
+/// Serializer for the `String`-typed fixtures.
+fn ser_string(s: &String) -> serde_json::Value {
+    serde_json::to_value(s).expect("serialize")
+}
+
+/// Debounce disabled: the TestAppContext mock clock never advances wall-clock
+/// timers on its own, so a non-zero debounce would leave the save un-fired
+/// unless the test calls `advance_clock`.
+fn zero_debounce() -> PersistOptions {
+    PersistOptions {
+        debounce: Duration::ZERO,
+        ..PersistOptions::default()
+    }
+}
+
+const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
 #[gpui::test]
 fn test_set_query_data_bumps_cache_mutation(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
-        // Install persist_with so the CacheMutation observation is live; the
-        // bump must not panic.
+        // The observation must be live when the bump fires, and must not panic.
         let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
             client.persist_with(NoopPersister, PersistOptions::default(), cx)
         });
         cx.update_global::<QueryClient, _>(|client, cx| {
             client.set_query_data::<String, QueryError>("k1", "v1".to_string(), cx);
         });
-        // The marker global now exists.
         assert!(cx.has_global::<CacheMutation>());
     });
 }
@@ -76,20 +87,14 @@ fn test_collect_persist_snapshot_uses_registered_serializer(cx: &mut TestAppCont
     setup_query_client(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            client.register_serializer::<String, QueryError>(|s| {
-                serde_json::to_value(s).expect("serialize")
-            });
+            client.register_serializer::<String, QueryError>(ser_string);
 
             let e = client.resource::<String, QueryError>(QueryKey::from("snap_k"), cx);
             e.update(cx, |r, _| {
                 r.apply_success("payload".to_string(), crate::client::current_time_ms())
             });
 
-            let snap = client.collect_persist_snapshot(
-                &PersistFilter::All,
-                Duration::from_secs(60 * 60 * 24),
-                cx,
-            );
+            let snap = client.collect_persist_snapshot(&PersistFilter::All, DAY, cx);
             assert_eq!(snap.entries.len(), 1);
             let entry = snap.entries.get("snap_k").expect("entry present");
             assert_eq!(entry.value, serde_json::json!("payload"));
@@ -102,17 +107,16 @@ fn test_collect_persist_snapshot_skips_unregistered_types(cx: &mut TestAppContex
     setup_query_client(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // NO serializer registered → entry skipped (metadata-only fallback).
+            // No serializer registered: the entry is skipped entirely.
             let e = client.resource::<String, QueryError>(QueryKey::from("unreg"), cx);
             e.update(cx, |r, _| {
                 r.apply_success("data".to_string(), crate::client::current_time_ms())
             });
 
-            let snap =
-                client.collect_persist_snapshot(&PersistFilter::All, Duration::from_secs(3600), cx);
+            let snap = client.collect_persist_snapshot(&PersistFilter::All, Duration::from_secs(3600), cx);
             assert!(
                 snap.entries.is_empty(),
-                "unregistered type → no value-carrying entry"
+                "unregistered type -> no value-carrying entry"
             );
         });
     });
@@ -123,22 +127,19 @@ fn test_collect_persist_snapshot_filter_and_max_age(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            client.register_serializer::<String, QueryError>(|s| {
-                serde_json::to_value(s).expect("serialize")
-            });
+            client.register_serializer::<String, QueryError>(ser_string);
             let now = crate::client::current_time_ms();
             // Two recent entries under the "users" prefix.
             for parts in [["users", "1"], ["users", "2"]] {
                 let e = client.resource::<String, QueryError>(QueryKey::from(parts), cx);
                 e.update(cx, |r, _| r.apply_success("v".to_string(), now));
             }
-            // One OLD entry (≈2.7 h in the past) under "posts".
+            // One entry ~2.8 h in the past under "posts".
             let e = client.resource::<String, QueryError>(QueryKey::from(["posts", "9"]), cx);
             e.update(cx, |r, _| {
                 r.apply_success("old".to_string(), now.saturating_sub(10_000_000))
             });
 
-            // Prefix "users" → exactly the two users entries.
             let snap = client.collect_persist_snapshot(
                 &PersistFilter::Prefix(QueryKey::from(["users"])),
                 Duration::from_secs(3600),
@@ -146,9 +147,8 @@ fn test_collect_persist_snapshot_filter_and_max_age(cx: &mut TestAppContext) {
             );
             assert_eq!(snap.entries.len(), 2);
 
-            // All + 1 s max_age → the old "posts::9" entry is filtered out; the
-            // two recent users entries (age ~0) survive. (max_age = 0 means
-            // *disabled*, not "all too old", so a positive small max_age is used.)
+            // max_age = 0 means "disabled", not "everything is too old", so
+            // a small positive value is what filters the old entry out here.
             let snap_all =
                 client.collect_persist_snapshot(&PersistFilter::All, Duration::from_secs(1), cx);
             assert_eq!(snap_all.entries.len(), 2);
@@ -163,32 +163,16 @@ fn test_persist_with_saves_on_mutation(cx: &mut TestAppContext) {
     let persister = MemPersister::default();
     let captured = persister.last_saved.clone();
 
-    // The bucket stores only `WeakEntity`, so a Success entry must be held by a
-    // live owner or it is dropped before the (async) observer callback collects
-    // the snapshot. The harness holds it for the life of the test, mirroring a
-    // real component holding the `Entity` from `use_query`.
+    // The bucket stores only WeakEntity, so a live owner must hold the
+    // Success entry or it dies before the observer collects the snapshot.
     struct H {
         _entity: Entity<QueryResource<String, QueryError>>,
         _handle: PersistHandle,
     }
     let harness = cx.new(|cx| {
         let (_handle, entity) = cx.update_global::<QueryClient, _>(|client, cx| {
-            client.register_serializer::<String, QueryError>(|s| {
-                serde_json::to_value(s).expect("serialize")
-            });
-            let handle = client.persist_with(
-                persister.clone(),
-                // Zero debounce: the TestAppContext mock clock does not advance
-                // wall-clock timers, so a non-zero debounce would never let the
-                // save fire here. The debounce *logic* (the `is_zero`
-                // short-circuit) is still exercised; a real app uses a non-zero
-                // debounce.
-                PersistOptions {
-                    debounce: Duration::ZERO,
-                    ..PersistOptions::default()
-                },
-                cx,
-            );
+            client.register_serializer::<String, QueryError>(ser_string);
+            let handle = client.persist_with(persister.clone(), zero_debounce(), cx);
             let entity = client.resource::<String, QueryError>(QueryKey::from("persisted"), cx);
             entity.update(cx, |r, _| {
                 r.apply_success("data".to_string(), crate::client::current_time_ms())
@@ -201,8 +185,8 @@ fn test_persist_with_saves_on_mutation(cx: &mut TestAppContext) {
         }
     });
 
-    // A mutation (on another key) bumps the dirty signal → persist_with collects
-    // the live cache (including the retained Success entry) and saves.
+    // A mutation on another key bumps the dirty signal; persist_with collects
+    // the live cache (including the retained Success entry) and saves it.
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             client.set_query_data::<String, QueryError>("trigger", "x".to_string(), cx);
@@ -228,7 +212,6 @@ fn test_hydrate_primes_via_deserializer_registry(cx: &mut TestAppContext) {
     setup_query_client(cx);
     let persister = MemPersister::default();
 
-    // Pre-load a snapshot with one entry whose value is a JSON string.
     let mut snap = PersistSnapshot {
         entries: Default::default(),
         version: crate::client::PERSIST_VERSION,
@@ -244,9 +227,8 @@ fn test_hydrate_primes_via_deserializer_registry(cx: &mut TestAppContext) {
     );
     *persister.load_value.lock().unwrap() = Some(snap);
 
-    // The bucket stores only `WeakEntity`, so hold the "hydrate_k" entity from a
-    // harness; hydrate's `set_query_data` then reuses the retained entity rather
-    // than creating one that is immediately dropped.
+    // Hold the "hydrate_k" entity alive so hydrate's set_query_data reuses it
+    // instead of creating an entity that is dropped immediately (WeakEntity).
     struct H {
         _entity: Entity<QueryResource<String, QueryError>>,
     }
@@ -261,15 +243,12 @@ fn test_hydrate_primes_via_deserializer_registry(cx: &mut TestAppContext) {
         H { _entity: entity }
     });
 
-    // Run the async hydrate on the background executor, then assert priming.
     let filter = PersistFilter::All;
-    let max_age = Duration::from_secs(60 * 60 * 24);
+    let max_age = DAY;
     let outcome = cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // Drive hydrate synchronously inside the global lease: it is an
-            // async fn whose future is immediately Ready (the MemPersister's
-            // load is a clone, no real await).
-            // We cannot `.await` here, so block on it via a tiny executor.
+            // The MemPersister load resolves immediately, so the hydrate
+            // future is Ready on first poll and can be driven synchronously.
             block_on_ready(hydrate(client, &persister, &filter, max_age, cx))
         })
     });
@@ -298,7 +277,6 @@ fn test_hydrate_primes_via_deserializer_registry(cx: &mut TestAppContext) {
 fn test_hydrate_rejects_version_mismatch(cx: &mut TestAppContext) {
     setup_query_client(cx);
     let persister = MemPersister::default();
-    // A snapshot with a bogus version.
     *persister.load_value.lock().unwrap() = Some(PersistSnapshot {
         entries: Default::default(),
         version: 9999,
@@ -312,7 +290,7 @@ fn test_hydrate_rejects_version_mismatch(cx: &mut TestAppContext) {
     });
 
     let filter = PersistFilter::All;
-    let max_age = Duration::from_secs(60 * 60 * 24);
+    let max_age = DAY;
     let outcome = cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             block_on_ready(hydrate(client, &persister, &filter, max_age, cx))
@@ -328,14 +306,9 @@ fn test_hydrate_rejects_version_mismatch(cx: &mut TestAppContext) {
     }
 }
 
-// ── H1: a REAL FETCH COMPLETION drives persist_with ──────────────────────
-//
-// The marquee Core-Change-2 behavior: when a query transitions to
-// `QueryStatus::Success` through the real hook fetch path (not via
-// `set_query_data`), the `CacheMutation` dirty signal is bumped inside
-// `run_query_retry_loop`, which the `persist_with` observer collects and saves.
-// This was previously untested — every other test in this file primes the
-// cache via `set_query_data` or `apply_success` directly.
+// A real fetch completion (not set_query_data) drives persist_with: the
+// success arm of the hook retry loop bumps CacheMutation, which the
+// persist_with observer collects and saves.
 
 #[gpui::test]
 fn test_persist_with_driven_by_real_fetch_completion(cx: &mut TestAppContext) {
@@ -343,40 +316,18 @@ fn test_persist_with_driven_by_real_fetch_completion(cx: &mut TestAppContext) {
     let persister = MemPersister::default();
     let captured = persister.last_saved.clone();
 
-    // The bucket stores only `WeakEntity`, so a Success entry must be held by a
-    // live owner or it is dropped before the (async) observer collects the
-    // snapshot. The harness holds the `use_query_manual` entity for the life of
-    // the test, mirroring a real component holding the `Entity` from
-    // `use_query`.
     struct H {
         entity: Entity<QueryResource<String, QueryError>>,
         _handle: PersistHandle,
     }
     let harness = cx.new(|cx| {
-        // Global-layer setup: register the serializer and install the
-        // `persist_with` driver. `cx` here is `&mut Context<H>`, which derefs
-        // to `&mut App` for `update_global`.
         let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
-            client.register_serializer::<String, QueryError>(|s| {
-                serde_json::to_value(s).expect("serialize")
-            });
-            client.persist_with(
-                persister.clone(),
-                // Zero debounce: the save task runs immediately once the fetch
-                // resolves and bumps `CacheMutation`. (See
-                // `test_persist_with_debounce_coalesces` for the non-zero
-                // debounce / mock-clock path.)
-                PersistOptions {
-                    debounce: Duration::ZERO,
-                    ..PersistOptions::default()
-                },
-                cx,
-            )
+            client.register_serializer::<String, QueryError>(ser_string);
+            client.persist_with(persister.clone(), zero_debounce(), cx)
         });
-        // Create the resource via the REAL hook path so the bucket owns a
-        // `WeakEntity` keyed under "fetched". `use_query_manual` requires an
-        // entity `Context`, so it must run in the `cx.new` body (not inside
-        // `update_global`, where only `&mut App` is available).
+        // The real hook path keys the bucket under "fetched";
+        // use_query_manual needs an entity Context, so it cannot run inside
+        // update_global (which only offers &mut App).
         let (entity, _sub) = use_query_manual::<String, QueryError, _>(
             QueryKey::from("fetched"),
             crate::core::CachePolicy::NoCache,
@@ -386,10 +337,8 @@ fn test_persist_with_driven_by_real_fetch_completion(cx: &mut TestAppContext) {
         H { entity, _handle }
     });
 
-    // Drive a REAL fetch to completion through the hook layer. The fetcher
-    // resolves with a concrete value; on success the retry loop calls
-    // `complete_success` and bumps `CacheMutation`, waking the `persist_with`
-    // observer.
+    // Resolve a real fetch; the success path bumps the dirty signal, waking
+    // the persist_with observer.
     harness.update(cx, |this, cx| {
         fetch_query(
             &this.entity,
@@ -397,13 +346,8 @@ fn test_persist_with_driven_by_real_fetch_completion(cx: &mut TestAppContext) {
             cx,
         );
     });
-
-    // Pump the executor: the fetch future resolves, the success path bumps the
-    // dirty signal, the observer collects a fresh snapshot, and (with ZERO
-    // debounce) the spawned save task runs immediately.
     cx.run_until_parked();
 
-    // Confirm the fetch really did complete (the trigger is NOT set_query_data).
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(
@@ -419,8 +363,6 @@ fn test_persist_with_driven_by_real_fetch_completion(cx: &mut TestAppContext) {
         .unwrap()
         .clone()
         .expect("persist_with should have saved after the real fetch completed");
-    // The fetched entry's key and value must round-trip into the snapshot via
-    // the registered serializer.
     let entry = saved
         .entries
         .get("fetched")
@@ -433,15 +375,9 @@ fn test_persist_with_driven_by_real_fetch_completion(cx: &mut TestAppContext) {
     let _ = harness;
 }
 
-// ── H2: a REAL MUTATION completion drives persist_with ────────────────────
-//
-// Mirrors `test_persist_with_driven_by_real_fetch_completion` for the mutation
-// family. Mutations are not themselves persisted (mutation buckets are not
-// collected into the snapshot), but a `use_mutation` resolve bumps
-// `CacheMutation` inside `run_mutation_loop_inner`, so a retained Success query
-// entry IS saved. This catches a regression that dropped the mutation-completion
-// bump — previously the only "mutation" test triggered via `set_query_data` on
-// a sibling key, so the real mutate() path was exercised only by compilation.
+// A real mutation completion bumps the dirty signal the same way. Mutation
+// buckets are never collected into the snapshot; what gets saved is the
+// retained Success query entry the bump wakes the observer for.
 
 #[gpui::test]
 fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext) {
@@ -450,28 +386,17 @@ fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext)
     let captured = persister.last_saved.clone();
 
     struct H {
-        // A retained Success query entry — the thing actually persisted.
         _query: Entity<QueryResource<String, QueryError>>,
-        // The mutation entity; completing it bumps the dirty signal.
         mutation: Entity<MutationResource<String, String, QueryError>>,
         _handle: PersistHandle,
     }
     let harness = cx.new(|cx| {
         let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
-            client.register_serializer::<String, QueryError>(|s| {
-                serde_json::to_value(s).expect("serialize")
-            });
-            client.persist_with(
-                persister.clone(),
-                PersistOptions {
-                    debounce: Duration::ZERO,
-                    ..PersistOptions::default()
-                },
-                cx,
-            )
+            client.register_serializer::<String, QueryError>(ser_string);
+            client.persist_with(persister.clone(), zero_debounce(), cx)
         });
-        // Prime a retained Success query entry. `apply_success` does NOT bump
-        // `CacheMutation`, so no save fires from this priming.
+        // Prime a retained Success query entry; apply_success does NOT bump
+        // CacheMutation, so no save fires from the priming itself.
         let query = cx.update_global::<QueryClient, _>(|client, cx| {
             let e = client.resource::<String, QueryError>(QueryKey::from("retained"), cx);
             e.update(cx, |r, _| {
@@ -479,7 +404,6 @@ fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext)
             });
             e
         });
-        // Create the mutation via the REAL hook path.
         let (mutation, _msub) = use_mutation::<String, String, QueryError, _>((), cx);
         H {
             _query: query,
@@ -488,9 +412,6 @@ fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext)
         }
     });
 
-    // Drive a REAL mutation to success. The resolving fetcher hits
-    // `run_mutation_loop_inner`'s success arm, which bumps `CacheMutation`,
-    // waking `persist_with` to collect (and save) the retained Success entry.
     harness.update(cx, |this, cx| {
         mutate(
             &this.mutation,
@@ -501,7 +422,6 @@ fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext)
     });
     cx.run_until_parked();
 
-    // Confirm the mutation really did complete (the trigger is NOT set_query_data).
     cx.update(|cx| {
         let m = harness.read(cx).mutation.read(cx);
         assert_eq!(
@@ -524,13 +444,9 @@ fn test_persist_with_driven_by_real_mutation_completion(cx: &mut TestAppContext)
     let _ = harness;
 }
 
-// ── H3: a REAL INFINITE first-page completion drives persist_with ──────────
-//
-// Mirrors the query marquee for the infinite family. Creating an infinite query
-// via `use_infinite_query` auto-fetches the first page; when it resolves, the
-// success arm in `run_fetch_next_page_with_id` bumps `CacheMutation`. Infinite
-// buckets ARE collected into the snapshot (first page only), so the page is
-// saved. This catches a regression that dropped the infinite-completion bump.
+// The infinite family: use_infinite_query auto-fetches the first page, and
+// its success arm bumps CacheMutation. Infinite buckets are collected (first
+// page only), so the page lands in the snapshot.
 
 #[gpui::test]
 fn test_persist_with_driven_by_real_infinite_completion(cx: &mut TestAppContext) {
@@ -544,22 +460,12 @@ fn test_persist_with_driven_by_real_infinite_completion(cx: &mut TestAppContext)
     }
     let harness = cx.new(|cx| {
         let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
-            // The infinite page type is `Vec<String>`; register a serializer
-            // keyed on that `T` so `collect_persistable_into` emits the page.
+            // The page type is Vec<String>; the serializer is keyed on it.
             client.register_serializer::<Vec<String>, QueryError>(|v| {
                 serde_json::to_value(v).expect("serialize")
             });
-            client.persist_with(
-                persister.clone(),
-                PersistOptions {
-                    debounce: Duration::ZERO,
-                    ..PersistOptions::default()
-                },
-                cx,
-            )
+            client.persist_with(persister.clone(), zero_debounce(), cx)
         });
-        // Create the infinite query via the REAL hook path; the first-page fetch
-        // starts immediately and resolves on `run_until_parked`.
         let (infinite, _isub) = use_infinite_query(
             InfiniteQueryOptions::new("infinite-feed")
                 .cache_policy(crate::core::CachePolicy::Ttl { ttl_ms: 0 }),
@@ -569,11 +475,8 @@ fn test_persist_with_driven_by_real_infinite_completion(cx: &mut TestAppContext)
         H { infinite, _handle }
     });
 
-    // Let the first-page fetch resolve → bumps `CacheMutation` → `persist_with`
-    // collects the infinite first page and saves.
     cx.run_until_parked();
 
-    // Confirm the infinite query really did fetch (the trigger is NOT set_query_data).
     cx.update(|cx| {
         let r = harness.read(cx).infinite.read(cx);
         assert_eq!(
@@ -600,13 +503,9 @@ fn test_persist_with_driven_by_real_infinite_completion(cx: &mut TestAppContext)
     let _ = harness;
 }
 
-// ── H4: an IMPERATIVE PreparedFetch completion drives persist_with ─────────
-//
-// Guards the C1 fix: `PreparedFetch::complete_success` now bumps `CacheMutation`
-// (gated on `persist`), so the imperative escape-hatch (`prepare_fetch_query`,
-// the TanStack `queryClient.fetchQuery()` equivalent) is no longer invisible to
-// `persist_with`. Without the bump, a resolved imperative fetch was silently
-// never saved — the hook-layer completions all bumped, but this path did not.
+// The imperative escape hatch (prepare_fetch_query, the fetchQuery
+// equivalent) also bumps CacheMutation on completion, so imperative results
+// are not invisible to persist_with.
 
 #[gpui::test]
 fn test_persist_with_driven_by_imperative_prepared_fetch(cx: &mut TestAppContext) {
@@ -620,21 +519,12 @@ fn test_persist_with_driven_by_imperative_prepared_fetch(cx: &mut TestAppContext
     }
     let harness = cx.new(|cx| {
         let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
-            client.register_serializer::<String, QueryError>(|s| {
-                serde_json::to_value(s).expect("serialize")
-            });
-            client.persist_with(
-                persister.clone(),
-                PersistOptions {
-                    debounce: Duration::ZERO,
-                    ..PersistOptions::default()
-                },
-                cx,
-            )
+            client.register_serializer::<String, QueryError>(ser_string);
+            client.persist_with(persister.clone(), zero_debounce(), cx)
         });
-        // Create + RETAIN the query resource via the REAL hook path so the
-        // bucket's WeakEntity stays alive until the observer collects it.
-        // (`prepare_fetch_query` reuses this same entity via `resource()`.)
+        // Retain the query via the real hook path so the bucket's WeakEntity
+        // survives until the observer collects (prepare_fetch_query reuses
+        // this same entity via resource()).
         let (query, _qsub) = use_query_manual::<String, QueryError, _>(
             QueryKey::from("imperative"),
             crate::core::CachePolicy::NoCache,
@@ -644,9 +534,6 @@ fn test_persist_with_driven_by_imperative_prepared_fetch(cx: &mut TestAppContext
         H { query, _handle }
     });
 
-    // Start a request imperatively and complete it with success. The C1 fix
-    // bumps `CacheMutation` inside `PreparedFetch::complete_success`, waking
-    // `persist_with` to collect + save the now-Success entry.
     harness.update(cx, |_this, cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let prepared = client
@@ -683,16 +570,9 @@ fn test_persist_with_driven_by_imperative_prepared_fetch(cx: &mut TestAppContext
     let _ = harness;
 }
 
-// ── L12: debounce COALESCING with a NON-zero debounce ────────────────────
-//
-// `TestAppContext::run_until_parked` drives the executor with `tick(false)`,
-// which only fires delayed tasks whose deadline has already passed — it does
-// NOT advance the mock wall-clock. However the background executor exposes
-// `advance_clock(duration)` (gpui `test-support`), which advances the test
-// dispatcher's clock AND matures any due timers. So a non-zero debounce CAN be
-// exercised deterministically: fire several rapid mutations, let the bumps
-// propagate and stash the latest snapshot, advance the clock past the debounce
-// window, then assert EXACTLY ONE save fired containing the latest value.
+// Non-zero debounce with a deterministic clock: fire several rapid bumps,
+// advance the mock clock past the window, and expect exactly one save
+// containing the latest state.
 
 #[gpui::test]
 fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
@@ -703,17 +583,15 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
 
     let debounce = Duration::from_millis(50);
 
-    // Hold a live Success entry on the "coalesced" key so the snapshot actually
-    // contains something to save (the bucket stores only WeakEntity).
+    // The bucket stores only WeakEntity; the harness keeps the Success entry
+    // alive so the snapshot has something to save.
     struct H {
         _entity: Entity<QueryResource<String, QueryError>>,
         _handle: PersistHandle,
     }
     let harness = cx.new(|cx| {
         let (_handle, entity) = cx.update_global::<QueryClient, _>(|client, cx| {
-            client.register_serializer::<String, QueryError>(|s| {
-                serde_json::to_value(s).expect("serialize")
-            });
+            client.register_serializer::<String, QueryError>(ser_string);
             let handle = client.persist_with(
                 persister.clone(),
                 PersistOptions {
@@ -734,12 +612,8 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
         }
     });
 
-    // Fire N>=3 rapid mutations on the same driver key. Each is issued in its
-    // OWN `cx.update` so each bump delivers a separate `observe_global`
-    // notification (GPUI coalesces notifications within a single update),
-    // spawning a fresh debounced save task. All of these tasks share the single
-    // `pending` slot, so only the latest snapshot can ever be saved, and only
-    // one task drains the slot per debounce window.
+    // Each bump needs its own cx.update: GPUI coalesces notifications raised
+    // within a single update, which would deliver only one observer call.
     for i in 0..5_u32 {
         cx.update(|cx| {
             cx.update_global::<QueryClient, _>(|client, cx| {
@@ -747,20 +621,15 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
             });
         });
     }
-    // Let the bumps propagate and stash the latest snapshot; the debounced save
-    // tasks are now parked on their (un-matured) timers.
     cx.run_until_parked();
-    // Nothing saved yet — the debounce window has not elapsed.
     assert_eq!(
         *save_count.lock().unwrap(),
         0,
         "no save should fire before the debounce window elapses"
     );
 
-    // Advance the mock clock past the debounce window. `advance_clock` matures
-    // the pending timer tasks; a subsequent `run_until_parked` lets exactly one
-    // of them drain the shared slot and run `save`. The remaining tasks wake to
-    // find the slot already empty and no-op.
+    // advance_clock matures the pending timer; exactly one task collects and
+    // saves, any others wake to find the window already drained.
     cx.background_executor
         .advance_clock(debounce + Duration::from_millis(1));
     cx.run_until_parked();
@@ -775,10 +644,8 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
         .unwrap()
         .clone()
         .expect("the single coalesced save should have produced a snapshot");
-    // The "trigger" entities are not retained (created and dropped inside each
-    // `set_query_data`), so they do not appear in the snapshot — only the
-    // harness-retained "coalesced" Success entry survives. The point of this
-    // assertion is that the single coalesced save captured the live cache.
+    // The "trigger" entities die inside each update, so only the
+    // harness-retained "coalesced" entry can appear.
     assert!(
         saved.entries.contains_key("coalesced"),
         "the coalesced save should include the retained Success entry: {:?}",
@@ -787,8 +654,8 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
     let _ = harness;
 }
 
-// Poll a future that is always immediately Ready (the MemPersister's load is a
-// plain clone, no real async work) without pulling in an executor crate.
+/// Poll a future that is always immediately Ready (MemPersister's load is a
+/// plain clone, no real async work) without pulling in an executor crate.
 fn block_on_ready<R>(fut: impl std::future::Future<Output = R>) -> R {
     use std::future::Future;
     use std::pin::Pin;
