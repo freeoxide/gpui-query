@@ -1,7 +1,6 @@
-//! `ResourceBucket` in `shared` holds the machinery shared by
-//! [`QueryBucket`] and [`InfiniteQueryBucket`](crate::client::InfiniteQueryBucket):
-//! weak-entity entries with co-located sequencers, capacity-bounded eviction,
-//! GC, bulk key-filter operations, and diagnostics.
+//! `shared` holds the machinery common to [`QueryBucket`] and
+//! [`InfiniteQueryBucket`](crate::client::InfiniteQueryBucket): weak-entity
+//! entries, sequencers, eviction, GC, and bulk key-filter operations.
 
 mod erased_ops;
 mod ops;

@@ -1,12 +1,13 @@
 //! `ResourceBucket<R>` holds everything `QueryBucket` and
 //! `InfiniteQueryBucket` do identically (get-or-create, eviction, GC, bulk
-//! matching, diagnostics); the public bucket types only add erased-trait
-//! impls and persistence specifics.
+//! matching, diagnostics, persistence collection).
 
 use ahash::AHashMap;
 use gpui::{App, AppContext as _, Entity};
 
 use crate::client::devtools::QueryDiagnostic;
+#[cfg(feature = "persist")]
+use crate::client::persist::{PersistFilter, PersistedEntry, SerializerRegistry};
 use crate::core::{
     CachePolicy, InfiniteQueryResource, QueryKey, QueryKeyFilter, QueryResource, QueryStatus,
     RequestId, RequestPolicy,
@@ -33,6 +34,9 @@ pub(crate) trait BucketResource {
     fn resource_cache_age_ms(&self, now_ms: u64) -> Option<u64>;
     fn resource_cache_hits(&self) -> u64;
     fn resource_retry_count(&self) -> u32;
+    fn resource_invalidate(&mut self);
+    fn resource_reset(&mut self);
+    fn resource_cancel_inflight(&mut self);
 }
 
 impl<T: 'static, E: 'static> BucketResource for QueryResource<T, E> {
@@ -73,6 +77,18 @@ impl<T: 'static, E: 'static> BucketResource for QueryResource<T, E> {
     fn resource_retry_count(&self) -> u32 {
         self.retry_count()
     }
+    fn resource_invalidate(&mut self) {
+        self.invalidate();
+    }
+    fn resource_reset(&mut self) {
+        self.reset();
+    }
+    fn resource_cancel_inflight(&mut self) {
+        if let Some(signal) = self.signal() {
+            signal.cancel();
+        }
+        self.mark_ignored_result();
+    }
 }
 
 impl<T: 'static, E: 'static> BucketResource for InfiniteQueryResource<T, E> {
@@ -112,6 +128,18 @@ impl<T: 'static, E: 'static> BucketResource for InfiniteQueryResource<T, E> {
     }
     fn resource_retry_count(&self) -> u32 {
         self.retry_count()
+    }
+    fn resource_invalidate(&mut self) {
+        self.invalidate();
+    }
+    fn resource_reset(&mut self) {
+        self.reset();
+    }
+    fn resource_cancel_inflight(&mut self) {
+        if let Some(signal) = self.signal() {
+            signal.cancel();
+        }
+        self.mark_ignored_result();
     }
 }
 
@@ -285,6 +313,38 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         }
     }
 
+    /// `entity.update` notifies observers even when the closure mutates
+    /// nothing, so bulk ops gate on authoritative reads.
+    pub(crate) fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            // invalidate() only clears last_updated_at; skip the no-op update.
+            let needs_invalidate = entity.read_with(cx, |r, _| r.resource_last_updated().is_some());
+            if needs_invalidate {
+                entity.update(cx, |resource, _| resource.resource_invalidate());
+            }
+        });
+    }
+
+    pub(crate) fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            entity.update(cx, |resource, _| resource.resource_reset());
+        });
+    }
+
+    /// Gates on the authoritative `is_loading()` read: the entry mirror
+    /// could be stale and skip an in-flight cancel.
+    pub(crate) fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
+        self.for_each_matching_entry(filter, cx, |entity, cx| {
+            if entity.read_with(cx, |r, _| r.resource_is_loading()) {
+                entity.update(cx, |resource, _| resource.resource_cancel_inflight());
+            }
+        });
+    }
+
+    pub(crate) fn remove_matching(&mut self, filter: &QueryKeyFilter) {
+        self.entries.retain(|k, _| !filter.matches(k));
+    }
+
     /// Loading always survives; `Success` survives while its cache policy
     /// can still serve it and until `SUCCESS_GC_MULTIPLIER * gc_time_ms`;
     /// `Idle`/`Failure`/`Cancelled` survive `gc_time_ms`. Entries without a
@@ -299,17 +359,16 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             };
             let resource = entity.read(cx);
 
-            entry.last_updated_ms = resource.resource_last_updated();
+            let last_updated = resource.resource_last_updated();
+            entry.last_updated_ms = last_updated;
             entry.loading = resource.resource_is_loading();
 
-            if resource.resource_is_loading() {
+            if entry.loading {
                 return true;
             }
 
             let status = resource.resource_status();
-
-            let age_ms = resource
-                .resource_last_updated()
+            let age_ms = last_updated
                 .map(|updated| now_ms.saturating_sub(updated))
                 .unwrap_or(gc_threshold);
 
@@ -364,6 +423,86 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             };
             let resource = entity.read(cx);
             out.push((key.to_path(), resource.resource_status()));
+        }
+    }
+
+    /// Filter and max-age run before the serializer so skipped entries cost
+    /// nothing. Only `Success` entries are pushed.
+    #[cfg(feature = "persist")]
+    pub(crate) fn collect_persistable_into<S>(
+        &self,
+        cx: &App,
+        collect: &PersistCollect<'_>,
+        out: &mut Vec<(QueryKey, PersistedEntry)>,
+        value_of: impl Fn(&R) -> Option<&S>,
+    ) where
+        S: 'static,
+    {
+        use crate::core::QueryStatus;
+
+        // Serializers are registered by `T` alone, not the `(T, E)` pair.
+        let Some(serialize_fn) = collect.serializers.get(std::any::TypeId::of::<S>()) else {
+            return;
+        };
+        for (key, entry) in self.entries.iter() {
+            if !collect.filter.matches(key) {
+                continue;
+            }
+            let Some(entity) = entry.entity.upgrade() else {
+                continue;
+            };
+            let resource = entity.read(cx);
+            if resource.resource_status() != QueryStatus::Success {
+                continue;
+            }
+            let cached_at = resource.resource_last_updated().unwrap_or(collect.now_ms);
+            if collect.max_age_ms > 0
+                && collect.now_ms.saturating_sub(cached_at) > collect.max_age_ms
+            {
+                continue;
+            }
+            let Some(value_ref) = value_of(resource) else {
+                continue;
+            };
+            // Downcast failure is unreachable by construction; skip rather than persist junk.
+            let Some(value) = serialize_fn(value_ref as &dyn std::any::Any) else {
+                continue;
+            };
+            out.push((
+                key.clone(),
+                PersistedEntry {
+                    value,
+                    cached_at,
+                    cache_policy: resource.resource_cache_policy(),
+                    meta: None,
+                },
+            ));
+        }
+    }
+}
+
+/// Per-sweep inputs for [`ResourceBucket::collect_persistable_into`].
+#[cfg(feature = "persist")]
+pub(crate) struct PersistCollect<'a> {
+    serializers: &'a SerializerRegistry,
+    filter: &'a PersistFilter,
+    now_ms: u64,
+    max_age_ms: u64,
+}
+
+#[cfg(feature = "persist")]
+impl<'a> PersistCollect<'a> {
+    pub(crate) fn new(
+        serializers: &'a SerializerRegistry,
+        filter: &'a PersistFilter,
+        now_ms: u64,
+        max_age_ms: u64,
+    ) -> Self {
+        Self {
+            serializers,
+            filter,
+            now_ms,
+            max_age_ms,
         }
     }
 }

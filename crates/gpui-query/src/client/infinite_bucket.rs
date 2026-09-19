@@ -1,17 +1,16 @@
 //! Shares its machinery with [`QueryBucket`] through
-//! [`ResourceBucket`](super::bucket::shared::ResourceBucket); only the erased
-//! trait impl and the first-page persistence path are infinite-specific.
+//! [`ResourceBucket`](super::bucket::shared::ResourceBucket); only the first-page
+//! persistence hook is infinite-specific.
 
 use gpui::{App, Entity};
 
 use crate::core::{
-    CachePolicy, InfiniteQueryResource, QueryKey, QueryKeyFilter, RequestPolicy,
-    RequestSequencer,
+    CachePolicy, InfiniteQueryResource, QueryKey, QueryKeyFilter, RequestPolicy, RequestSequencer,
 };
 
 use super::bucket::shared::ResourceBucket;
 use super::devtools::QueryDiagnostic;
-use super::ErasedInfiniteBucket;
+use super::erased::ErasedBucket;
 
 pub struct InfiniteQueryBucket<T, E> {
     entries: ResourceBucket<InfiniteQueryResource<T, E>>,
@@ -47,7 +46,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
     }
 }
 
-impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedInfiniteBucket
+impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedBucket
     for InfiniteQueryBucket<T, E>
 {
     fn as_any(&self) -> &dyn std::any::Any {
@@ -67,38 +66,19 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
     }
 
     fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        self.entries.for_each_matching_entry(filter, cx, |entity, cx| {
-            let needs_invalidate =
-                entity.read_with(cx, |r, _| r.last_updated_at_ms().is_some());
-            if needs_invalidate {
-                entity.update(cx, |resource, _| resource.invalidate());
-            }
-        });
+        self.entries.invalidate_matching(filter, cx);
     }
 
     fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        self.entries.for_each_matching_entry(filter, cx, |entity, cx| {
-            entity.update(cx, |resource, _| resource.reset());
-        });
+        self.entries.reset_matching(filter, cx);
     }
 
     fn remove_matching(&mut self, filter: &QueryKeyFilter) {
-        self.entries.entries.retain(|k, _| !filter.matches(k));
+        self.entries.remove_matching(filter);
     }
 
-    /// Bumps `ignored_results` so cancelled infinite fetches match the
-    /// regular query path. See `QueryBucket::cancel_matching`.
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        self.entries.for_each_matching_entry(filter, cx, |entity, cx| {
-            if entity.read_with(cx, |r, _| r.is_loading()) {
-                entity.update(cx, |resource, _| {
-                    if let Some(signal) = resource.signal() {
-                        signal.cancel();
-                    }
-                    resource.mark_ignored_result();
-                });
-            }
-        });
+        self.entries.cancel_matching(filter, cx);
     }
 
     fn collect_diagnostics_into(&self, now_ms: u64, cx: &App, out: &mut Vec<QueryDiagnostic>) {
@@ -120,42 +100,13 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
     fn collect_persistable_into(
         &self,
         cx: &App,
-        serializers: &crate::client::persist::SerializerRegistry,
-        now_ms: u64,
+        collect: &super::bucket::shared::PersistCollect<'_>,
         out: &mut Vec<(
             crate::core::QueryKey,
             crate::client::persist::PersistedEntry,
         )>,
     ) {
-        use crate::core::QueryStatus;
-
-        let type_id = std::any::TypeId::of::<T>();
-        let Some(serialize_fn) = serializers.get(type_id) else {
-            return;
-        };
-        for (key, entry) in self.entries.entries.iter() {
-            let Some(entity) = entry.entity.upgrade() else {
-                continue;
-            };
-            let resource = entity.read(cx);
-            if resource.status() != QueryStatus::Success {
-                continue;
-            }
-            let Some(page) = resource.first_page_arc() else {
-                continue;
-            };
-            let Some(value) = serialize_fn(&*page as &dyn std::any::Any) else {
-                continue;
-            };
-            out.push((
-                key.clone(),
-                crate::client::persist::PersistedEntry {
-                    value,
-                    cached_at: resource.last_updated_at_ms().unwrap_or(now_ms),
-                    cache_policy: resource.cache_policy(),
-                    meta: None,
-                },
-            ));
-        }
+        self.entries
+            .collect_persistable_into(cx, collect, out, |r| r.first_page());
     }
 }

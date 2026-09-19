@@ -149,10 +149,11 @@ impl<
             };
 
             let resource = entity.read(cx);
-            entry.last_updated_ms = resource.last_updated_at_ms();
+            let last_updated = resource.last_updated_at_ms();
+            entry.last_updated_ms = last_updated;
             entry.loading = resource.is_loading();
 
-            if resource.is_loading() {
+            if entry.loading {
                 return true;
             }
 
@@ -162,7 +163,7 @@ impl<
                 MutationStatus::Loading => return true,
             };
 
-            let base = resource.last_updated_at_ms().unwrap_or(entry.updated_at);
+            let base = last_updated.unwrap_or(entry.updated_at);
             now_ms.saturating_sub(base) < threshold
         });
     }

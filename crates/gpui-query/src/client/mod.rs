@@ -46,19 +46,19 @@ use gpui::{App, Entity, Global};
 
 use crate::client::bucket::shared::GC_INTERVAL;
 use crate::client::bucket::types::MIN_GC_TIME_MS;
-use crate::client::erased::{ErasedBucket, ErasedInfiniteBucket, ErasedMutationBucket};
+use crate::client::erased::{ErasedBucket, ErasedMutationBucket};
 use crate::core::{CachePolicy, QueryKey, QueryResource, RequestPolicy};
 
-/// Implements [`Global`]: set once with `cx.set_global(QueryClient::default())`,
-/// read from any component via `cx.global::<QueryClient>()`.
+/// Set once via `cx.set_global(QueryClient::default())`, read from any
+/// component via `cx.global::<QueryClient>()`.
 pub struct QueryClient {
     pub(crate) buckets: AHashMap<TypeId, Box<dyn ErasedBucket>>,
-    pub(crate) infinite_buckets: AHashMap<TypeId, Box<dyn ErasedInfiniteBucket>>,
+    pub(crate) infinite_buckets: AHashMap<TypeId, Box<dyn ErasedBucket>>,
     pub(crate) mutation_buckets: AHashMap<TypeId, Box<dyn ErasedMutationBucket>>,
     pub(crate) default_cache_policy: CachePolicy,
     pub(crate) default_request_policy: RequestPolicy,
     pub(crate) gc_time_ms: u64,
-/// Populated by `register_serializer::<T, E>` (value-carrying persistence path).
+    /// Populated by `register_serializer::<T, E>` (value-carrying persistence path).
     #[cfg(feature = "persist")]
     pub(crate) serializers: Option<crate::client::persist::SerializerRegistry>,
     /// Populated by `register_deserializer::<T, E>`, consumed by [`hydrate`].
@@ -111,14 +111,14 @@ impl QueryClient {
         Self {
             default_cache_policy,
             default_request_policy,
-            gc_time_ms: 300_000,
             ..Default::default()
         }
     }
 
     /// Values below 1000ms are clamped to 1000ms during GC to prevent
     /// aggressive eviction of all Idle/Failure resources on every GC pass.
-    /// A value of 0 disables GC entirely.
+    /// A value of 0 disables the opportunistic sweep only; an explicit
+    /// [`gc`](Self::gc) still sweeps with the clamped floor.
     pub fn with_gc_time(mut self, gc_time_ms: u64) -> Self {
         self.gc_time_ms = gc_time_ms;
         self
@@ -184,7 +184,7 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(QueryBucket::<T, E>::new()));
 
-        let typed = Self::bucket_or_recreate::<T, E>(bucket);
+        let typed = Self::bucket_or_recreate(bucket, QueryBucket::<T, E>::new);
         let entity = typed.get_or_create(key.into(), cache_policy, request_policy, cx);
         self.maybe_opportunistic_gc(cx);
         entity
@@ -204,7 +204,7 @@ impl QueryClient {
             .buckets
             .entry(type_id)
             .or_insert_with(|| Box::new(QueryBucket::<T, E>::new()));
-        let typed = Self::bucket_or_recreate::<T, E>(bucket);
+        let typed = Self::bucket_or_recreate(bucket, QueryBucket::<T, E>::new);
         let (entity, request_id) =
             typed.get_or_create_with_request_id(key.into(), cache_policy, request_policy, cx);
         self.maybe_opportunistic_gc(cx);
@@ -244,31 +244,31 @@ impl QueryClient {
     ) -> Option<crate::core::RequestId> {
         let type_id = TypeId::of::<(T, E)>();
         let bucket = self.buckets.get_mut(&type_id)?;
-        let typed = Self::bucket_or_recreate::<T, E>(bucket);
+        let typed = Self::bucket_or_recreate(bucket, QueryBucket::<T, E>::new);
         typed.sequencer_mut(key).map(|seq| seq.next_request())
     }
 
     /// Recreates the bucket in place on a downcast mismatch (unreachable
     /// while `TypeId` keys are sound) instead of panicking.
-    fn bucket_or_recreate<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
+    fn bucket_or_recreate<B>(
         bucket: &mut Box<dyn ErasedBucket>,
-    ) -> &mut QueryBucket<T, E> {
-        if bucket
-            .as_any_mut()
-            .downcast_mut::<QueryBucket<T, E>>()
-            .is_none()
-        {
+        fresh: impl FnOnce() -> B,
+    ) -> &mut B
+    where
+        B: ErasedBucket + 'static,
+    {
+        if bucket.as_any_mut().downcast_mut::<B>().is_none() {
             eprintln!(
                 "QueryClient: type mismatch in bucket downcast for {}. \
                  Replacing with a fresh bucket.",
-                std::any::type_name::<(T, E)>()
+                std::any::type_name::<B>()
             );
-            *bucket = Box::new(QueryBucket::<T, E>::new());
+            *bucket = Box::new(fresh());
         }
         bucket
             .as_any_mut()
-            .downcast_mut::<QueryBucket<T, E>>()
-            .expect("QueryBucket downcast succeeds after bucket_or_recreate")
+            .downcast_mut::<B>()
+            .expect("downcast succeeds after bucket_or_recreate replaced the box")
     }
 
     /// Returns `None` if no resource exists for the key, the entity was
