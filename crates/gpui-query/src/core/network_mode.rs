@@ -1,5 +1,3 @@
-//! Network mode configuration.
-
 use serde::{Deserialize, Serialize};
 
 /// Forward compatibility only; network detection is not implemented yet.

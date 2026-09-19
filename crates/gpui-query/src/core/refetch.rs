@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// Parsed and stored, but focus/reconnect event integration is not implemented yet.
+/// Inert config: focus/reconnect refetching is not implemented yet, so this
+/// is stored but never acted on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RefetchTrigger {
     #[default]

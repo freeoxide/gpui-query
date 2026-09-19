@@ -1,5 +1,4 @@
 //! Error types for query operations.
-//!
 //! Messages are stored verbatim and may reach logs and serialized output;
 //! use [`QueryError::sanitized`] on server responses.
 

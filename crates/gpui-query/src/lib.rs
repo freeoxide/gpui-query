@@ -1,9 +1,6 @@
 //! gpui-query: async state management for GPUI, inspired by TanStack Query.
-//!
 //! Layers, strictly additive: `core` (serde-only state machine), `client`
 //! (GPUI registry), `hook` (`use_query` & friends), `persist` (disk cache).
-//!
-//! Quick start: `use gpui_query::{use_query, use_mutation, use_infinite_query, QueryClient};`
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 

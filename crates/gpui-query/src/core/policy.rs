@@ -79,7 +79,7 @@ impl CachePolicy {
     }
 
     pub fn is_fresh(self, age_ms: u64) -> bool {
-        self.ttl_ms().map(|ttl| age_ms <= ttl).unwrap_or(false)
+        self.ttl_ms().is_some_and(|ttl| age_ms <= ttl)
     }
 
     pub fn is_stale_but_serveable(self, age_ms: u64) -> bool {

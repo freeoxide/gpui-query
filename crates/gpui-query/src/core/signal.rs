@@ -1,5 +1,3 @@
-//! Cooperative cancellation signal for in-flight query requests.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

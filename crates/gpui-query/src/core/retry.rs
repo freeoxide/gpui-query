@@ -1,5 +1,3 @@
-//! Retry configuration for failed query and mutation requests.
-
 use serde::{Deserialize, Serialize};
 
 /// Defaults: 3 retries, exponential backoff, 1s base delay, 30s cap.

@@ -1,55 +1,5 @@
 //! Select/transform support: [`SelectTransform`] projects cached `T` into a
-//! derived `U` via [`MappedQueryResource`], without duplicating the cache entry.
-//!
-//! The `use_query_select` hook keeps a `MappedQueryResource` in sync with its
-//! source `QueryResource` via an observer; the transform runs on access.
-//!
-//! # Example
-//!
-//! ```
-//! use gpui_query::core::{SelectTransform, MappedQueryResource};
-//!
-//! // Raw query data: a list of users.
-//! let users = vec!["Alice", "Bob", "Carol"];
-//!
-//! // Transform: extract just the count.
-//! let transform = SelectTransform::new(|users: &Vec<&str>| users.len());
-//!
-//! let mapped = MappedQueryResource::<_, usize, ()>::new(Some(std::sync::Arc::new(users)), transform);
-//! assert_eq!(mapped.data(), Some(3));
-//! ```
-//!
-//! ## Example with the hook
-//!
-//! ```ignore
-//! use gpui_query::hook::{use_query_select, QueryOptions};
-//! use gpui_query::core::SelectTransform;
-//! # #[derive(Clone, PartialEq)]
-//! # struct User;
-//! # #[derive(Clone, Debug)]
-//! # struct MyError;
-//!
-//! struct UserCountView {
-//!     mapped: gpui::Entity<gpui_query::core::MappedQueryResource<Vec<User>, usize, MyError>>,
-//!     _subs: (gpui::Subscription, gpui::Subscription),
-//! }
-//!
-//! impl UserCountView {
-//!     fn new(cx: &mut gpui::Context<Self>) -> Self {
-//!         let count_transform = SelectTransform::new(|users: &Vec<User>| users.len());
-//!         let (mapped, _, _subs) = use_query_select(
-//!             QueryOptions::new("users"),
-//!             count_transform,
-//!             |signal| async move {
-//!                 // Your async fetcher here
-//!                 Ok(vec![])
-//!             },
-//!             cx,
-//!         );
-//!         Self { mapped, _subs }
-//!     }
-//! }
-//! ```
+//! derived `U` via [`MappedQueryResource`] without duplicating the cache entry.
 
 use std::sync::Arc;
 

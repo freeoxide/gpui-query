@@ -1,8 +1,3 @@
-//! Request lifecycle primitives: ids, sequencer, guard, timestamps.
-//!
-//! Two-phase completion: `accept_current_request` returns a single-use
-//! [`RequestGuard`] that a `complete_*` method consumes by value.
-
 use serde::{Deserialize, Serialize};
 use std::num::NonZero;
 
@@ -70,10 +65,26 @@ impl Default for RequestSequencer {
     }
 }
 
+/// Id source for begin-request entry points: an external sequencer, or a
+/// caller-provided id falling back to the resource's own sequencer.
+pub(crate) enum MaybeRequestId<'a> {
+    FromSequencer(&'a mut RequestSequencer),
+    Provided(Option<RequestId>),
+}
+
+impl MaybeRequestId<'_> {
+    pub(crate) fn next(&mut self, fallback: &mut RequestSequencer) -> RequestId {
+        match self {
+            Self::FromSequencer(sequencer) => sequencer.next_request(),
+            Self::Provided(maybe_id) => maybe_id.unwrap_or_else(|| fallback.next_request()),
+        }
+    }
+}
+
 impl RequestSequencer {
     pub fn new() -> Self {
         Self {
-            scope_id: NonZero::new(1).unwrap(),
+            scope_id: NonZero::<u64>::MIN,
             next_request_id: 1,
         }
     }

@@ -1,5 +1,3 @@
-//! Query resource completion methods.
-
 use crate::core::{CachePolicy, QueryStatus, QueryTimestamp, RequestGuard, RequestId};
 
 use super::QueryResource;

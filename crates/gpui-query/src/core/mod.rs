@@ -1,7 +1,6 @@
 //! Layer 0: transport-agnostic query lifecycle primitives, serde-only.
-//!
-//! Fetch protocol: `begin_request` → `accept_current_request` (returns a
-//! single-use `RequestGuard`) → `complete_success`/`complete_failure`.
+//! Fetch protocol: `begin_request` → `accept_current_request` (single-use
+//! `RequestGuard`) → `complete_success`/`complete_failure`.
 
 mod error;
 mod fetched;
@@ -37,10 +36,9 @@ pub use status::QueryStatus;
 
 #[cfg(feature = "client")]
 mod current_task {
-    //! `gpui::Task<T>` is Debug but not Clone/PartialEq/Eq, and several
-    //! resource structs derive those. This newtype restores the derives:
-    //! Clone yields an empty handle, all instances compare equal, and Drop
-    //! aborts the task (gpui semantics), so `set` replaces and aborts.
+    //! `gpui::Task<T>` is Debug but not Clone/PartialEq/Eq, and several resource
+    //! structs derive those: Clone yields an empty handle, all instances compare
+    //! equal, and Drop aborts the task (gpui semantics), so `set` replaces.
     use gpui::Task;
 
     #[derive(Debug, Default)]

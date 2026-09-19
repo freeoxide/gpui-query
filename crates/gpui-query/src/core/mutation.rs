@@ -1,5 +1,3 @@
-//! Mutation resource for tracking async write operations.
-
 use serde::{Deserialize, Serialize};
 
 use super::{QueryError, QueryKey, QuerySignal, RetryPolicy};

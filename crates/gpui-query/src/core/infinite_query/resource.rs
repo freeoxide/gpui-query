@@ -1,6 +1,3 @@
-//! Struct definition, serde helpers, and constructors for
-//! [`InfiniteQueryResource`].
-
 use std::collections::VecDeque;
 use std::sync::Arc;
 

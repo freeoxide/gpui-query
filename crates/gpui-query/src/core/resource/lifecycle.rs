@@ -1,16 +1,9 @@
-//! Query resource lifecycle: begin, cancel, reset, optimistic updates.
-
 use crate::core::{
     QueryBeginResult, QueryFetchMode, QuerySignal, QueryStatus, QueryTimestamp, RequestGuard,
-    RequestId, RequestPolicy, RequestSequencer,
+    RequestId, RequestPolicy, RequestSequencer, request::MaybeRequestId,
 };
 
 use super::QueryResource;
-
-enum MaybeRequestId<'a> {
-    FromSequencer(&'a mut RequestSequencer),
-    Provided(Option<RequestId>),
-}
 
 impl<T, E> QueryResource<T, E> {
     /// May short-circuit to `CacheHit` per the cache policy; replacing an
@@ -44,19 +37,9 @@ impl<T, E> QueryResource<T, E> {
         &mut self,
         now_ms: u64,
         fetch_mode: QueryFetchMode,
-        mut id_source: MaybeRequestId,
+        mut id_source: MaybeRequestId<'_>,
     ) -> QueryBeginResult {
-        // Lazy: early-return guards must not consume a sequence number.
-        macro_rules! next_id {
-            () => {{
-                match &mut id_source {
-                    MaybeRequestId::FromSequencer(seq) => seq.next_request(),
-                    MaybeRequestId::Provided(maybe_id) => {
-                        maybe_id.unwrap_or_else(|| self.transient_sequencer.next_request())
-                    }
-                }
-            }};
-        }
+        // Early-return guards must not consume a sequence number.
 
         if fetch_mode == QueryFetchMode::Normal && self.should_short_circuit_cache(now_ms) {
             self.record_cache_hit();
@@ -65,7 +48,7 @@ impl<T, E> QueryResource<T, E> {
 
         // Checked before the IgnoreWhileLoading guard: stale data is always revalidated.
         if fetch_mode == QueryFetchMode::Normal && self.should_serve_stale_and_revalidate(now_ms) {
-            self.record_stale_cache_hit();
+            self.record_cache_hit();
 
             if self.request_policy == RequestPolicy::IgnoreWhileLoading
                 && let Some(active_request_id) = self.active_request_id
@@ -82,7 +65,7 @@ impl<T, E> QueryResource<T, E> {
                 self.cancelled_count = self.cancelled_count.saturating_add(1);
             }
 
-            let request_id = next_id!();
+            let request_id = id_source.next(&mut self.transient_sequencer);
             let status = self.begin_loading(request_id, now_ms);
             return QueryBeginResult::StaleCacheHit {
                 request_id,
@@ -102,7 +85,7 @@ impl<T, E> QueryResource<T, E> {
             self.cancelled_count = self.cancelled_count.saturating_add(1);
         }
 
-        let request_id = next_id!();
+        let request_id = id_source.next(&mut self.transient_sequencer);
         let status = self.begin_loading(request_id, now_ms);
         QueryBeginResult::Started {
             request_id,

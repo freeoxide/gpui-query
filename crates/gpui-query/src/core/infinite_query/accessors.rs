@@ -1,5 +1,3 @@
-//! Accessor (getter / setter) methods for [`InfiniteQueryResource`].
-
 use std::collections::VecDeque;
 use std::sync::Arc;
 

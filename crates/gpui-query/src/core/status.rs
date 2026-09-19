@@ -1,5 +1,3 @@
-//! Query status enum representing the lifecycle states of a query resource.
-
 use serde::{Deserialize, Serialize};
 
 /// `Idle` → `LoadingEmpty` → `Success`/`Failure`; refetch: `Success` → `LoadingWithData` → terminal.
