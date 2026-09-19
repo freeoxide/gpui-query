@@ -30,6 +30,19 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         self.inner.get_or_create(key, cache_policy, request_policy, cx)
     }
 
+    /// Get-or-create that also mints the next `RequestId` from the entry's
+    /// sequencer in the same lookup.
+    pub(crate) fn get_or_create_with_request_id(
+        &mut self,
+        key: QueryKey,
+        cache_policy: CachePolicy,
+        request_policy: RequestPolicy,
+        cx: &mut App,
+    ) -> (Entity<QueryResource<T, E>>, crate::core::RequestId) {
+        self.inner
+            .get_or_create_with_request_id(key, cache_policy, request_policy, cx)
+    }
+
     pub(crate) fn get(&self, key: &QueryKey) -> Option<Entity<QueryResource<T, E>>> {
         self.inner.get(key)
     }

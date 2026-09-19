@@ -113,7 +113,12 @@ impl QueryError {
     /// - Email-like strings
     /// - Long hex sequences (likely API keys)
     ///
-    /// Also truncates the message to `SANITIZE_MAX_LEN` (512) bytes.
+    /// Also truncates the message to
+    /// [`SANITIZE_MAX_LEN`](super::sanitize::SANITIZE_MAX_LEN) bytes.
+    #[expect(
+        rustdoc::private_intra_doc_links,
+        reason = "the const stays internal; the link renders under --document-private-items"
+    )]
     pub fn sanitized(&self) -> Self {
         let redacted = sanitize_message(&self.message);
         Self {

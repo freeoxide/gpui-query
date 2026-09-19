@@ -273,9 +273,8 @@ fn test_hydrate_primes_via_deserializer_registry(cx: &mut TestAppContext) {
     let _ = harness;
 }
 
-// A stored multi-segment path must hydrate under the live segmented key:
-// before the split fix the path string primed as one segment, so Exact and
-// Prefix filters never matched it.
+// A stored multi-segment path must hydrate as a segmented key; priming it
+// as one flat segment would hide it from Exact/Prefix filters.
 
 #[gpui::test]
 fn test_hydrate_rebuilds_multi_segment_keys(cx: &mut TestAppContext) {

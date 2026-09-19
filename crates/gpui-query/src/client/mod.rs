@@ -215,6 +215,28 @@ impl QueryClient {
         entity
     }
 
+    /// Private [`resource_with_policies`](Self::resource_with_policies)
+    /// variant that mints the request id in the same bucket lookup, skipping
+    /// the second TypeId+key hash of a follow-up `next_request_id_for_key`.
+    fn resource_with_request_id<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
+        &mut self,
+        key: impl Into<QueryKey>,
+        cache_policy: CachePolicy,
+        request_policy: RequestPolicy,
+        cx: &mut App,
+    ) -> (Entity<QueryResource<T, E>>, crate::core::RequestId) {
+        let type_id = TypeId::of::<(T, E)>();
+        let bucket = self
+            .buckets
+            .entry(type_id)
+            .or_insert_with(|| Box::new(QueryBucket::<T, E>::new()));
+        let typed = Self::bucket_or_recreate::<T, E>(bucket);
+        let (entity, request_id) =
+            typed.get_or_create_with_request_id(key.into(), cache_policy, request_policy, cx);
+        self.maybe_opportunistic_gc(cx);
+        (entity, request_id)
+    }
+
     /// Get all query entities of a given type pair.
     pub fn all_queries<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
         &self,

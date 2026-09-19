@@ -82,10 +82,8 @@ fn fetch_page_infinite<T, E, C, F, Fut>(
 {
     let weak = entity.downgrade();
 
-    // Mint the RequestId from the bucket's persistent sequencer so ids stay
-    // monotonic; pass it into begin_fetch_*_with_id so the resource's
-    // active_request_id matches the bucket's counter. Falls back to None
-    // (transient sequencer) when no QueryClient is available.
+    // Bucket-sequenced RequestId so event-driven page fetches stay monotonic
+    // per key; without a QueryClient the resource mints a transient one.
     let maybe_request_id = if cx.has_global::<QueryClient>() {
         let key = entity.read_with(cx, |r, _| r.key().clone());
         cx.update_global::<QueryClient, _>(|client, _| {

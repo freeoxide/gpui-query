@@ -252,20 +252,21 @@ impl QueryClient {
         key: impl Into<QueryKey>,
         cx: &mut App,
     ) -> Option<PreparedFetch<T, E>> {
-        let key = key.into();
-        let entity = self.resource::<T, E>(key.clone(), cx);
         let now_ms = current_time_ms();
-        let request_id = self.next_request_id_for_key::<T, E>(&key);
+        let (entity, request_id) = self.resource_with_request_id::<T, E>(
+            key,
+            self.default_cache_policy,
+            self.default_request_policy,
+            cx,
+        );
 
         // Begin the request and pull the signal from the same update.
         let (request_id, signal) = entity.update(cx, |resource, _| {
-            if let Some(rid) = request_id {
-                let _ = resource.begin_request_with_id(
-                    Some(rid),
-                    now_ms,
-                    crate::core::QueryFetchMode::Force,
-                );
-            }
+            let _ = resource.begin_request_with_id(
+                Some(request_id),
+                now_ms,
+                crate::core::QueryFetchMode::Force,
+            );
             let rid = resource.active_request_id()?;
             let signal = resource.signal().cloned()?;
             Some((rid, signal))
@@ -300,29 +301,22 @@ impl QueryClient {
         request_policy: RequestPolicy,
         cx: &mut App,
     ) -> Option<PreparedFetch<T, E>> {
-        let key = key.into();
-        let entity =
-            self.resource_with_policies::<T, E>(key.clone(), cache_policy, request_policy, cx);
         let now_ms = current_time_ms();
-        let request_id = self.next_request_id_for_key::<T, E>(&key);
+        let (entity, request_id) =
+            self.resource_with_request_id::<T, E>(key, cache_policy, request_policy, cx);
 
         // Normal mode respects the cache policy; only Started and
         // StaleCacheHit mean a fetch is actually wanted.
         let (request_id, signal) = entity.update(cx, |resource, _| {
-            let started = match request_id {
-                Some(rid) => {
-                    matches!(
-                        resource.begin_request_with_id(
-                            Some(rid),
-                            now_ms,
-                            crate::core::QueryFetchMode::Normal
-                        ),
-                        crate::core::QueryBeginResult::Started { .. }
-                            | crate::core::QueryBeginResult::StaleCacheHit { .. }
-                    )
-                }
-                None => false,
-            };
+            let started = matches!(
+                resource.begin_request_with_id(
+                    Some(request_id),
+                    now_ms,
+                    crate::core::QueryFetchMode::Normal
+                ),
+                crate::core::QueryBeginResult::Started { .. }
+                    | crate::core::QueryBeginResult::StaleCacheHit { .. }
+            );
             if !started {
                 return None;
             }

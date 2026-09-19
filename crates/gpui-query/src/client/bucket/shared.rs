@@ -11,7 +11,7 @@ use gpui::{App, AppContext as _, Entity};
 use crate::client::devtools::QueryDiagnostic;
 use crate::core::{
     CachePolicy, InfiniteQueryResource, QueryKey, QueryKeyFilter, QueryResource, QueryStatus,
-    RequestPolicy,
+    RequestId, RequestPolicy,
 };
 
 use super::types::{BucketEntry, DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
@@ -133,10 +133,6 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
     }
 
     /// Get an existing entity or create a new one.
-    ///
-    /// Live entries get their policies refreshed in place when they differ.
-    /// A dead weak reference is overwritten in place (length unchanged, no
-    /// eviction); a vacant insert at capacity evicts the oldest entry first.
     pub(crate) fn get_or_create(
         &mut self,
         key: QueryKey,
@@ -144,6 +140,35 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         request_policy: RequestPolicy,
         cx: &mut App,
     ) -> Entity<R> {
+        self.get_or_create_impl(key, cache_policy, request_policy, cx, false)
+            .0
+    }
+
+    /// Get-or-create that also mints the next `RequestId` from the entry's
+    /// sequencer in the same lookup.
+    pub(crate) fn get_or_create_with_request_id(
+        &mut self,
+        key: QueryKey,
+        cache_policy: CachePolicy,
+        request_policy: RequestPolicy,
+        cx: &mut App,
+    ) -> (Entity<R>, RequestId) {
+        let (entity, request_id) =
+            self.get_or_create_impl(key, cache_policy, request_policy, cx, true);
+        (entity, request_id.expect("impl inserts the entry before returning"))
+    }
+
+    /// Live entries get their policies refreshed in place when they differ.
+    /// A dead weak reference is overwritten in place (length unchanged, no
+    /// eviction); a vacant insert at capacity evicts the oldest entry first.
+    fn get_or_create_impl(
+        &mut self,
+        key: QueryKey,
+        cache_policy: CachePolicy,
+        request_policy: RequestPolicy,
+        cx: &mut App,
+        mint_request_id: bool,
+    ) -> (Entity<R>, Option<RequestId>) {
         if let Some(entry) = self.entries.get_mut(&key) {
             if let Some(entity) = entry.entity.upgrade() {
                 let (needs_update, last_updated, loading) =
@@ -164,23 +189,26 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
                         resource.set_resource_request_policy(request_policy);
                     });
                 }
-                return entity;
+                let request_id = mint_request_id.then(|| entry.sequencer.next_request());
+                return (entity, request_id);
             }
         } else if self.entries.len() >= self.max_entries {
             self.evict_oldest(cx);
         }
 
+        let mut sequencer = crate::core::RequestSequencer::new();
+        let request_id = mint_request_id.then(|| sequencer.next_request());
         let entity = cx.new(|_| R::new_resource(key.clone(), cache_policy, request_policy));
         self.entries.insert(
             key,
             BucketEntry {
                 entity: entity.downgrade(),
-                sequencer: crate::core::RequestSequencer::new(),
+                sequencer,
                 last_updated_ms: None,
                 loading: false,
             },
         );
-        entity
+        (entity, request_id)
     }
 
     /// Evict the least-recently-updated entry to make room for a new one.

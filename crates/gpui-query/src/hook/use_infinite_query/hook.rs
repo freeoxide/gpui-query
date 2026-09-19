@@ -127,10 +127,8 @@ where
 
     // Start the initial fetch if idle
     if entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle) {
-        // Mint the RequestId from the bucket's persistent sequencer so ids
-        // stay monotonic across the resource lifetime; pass it into
-        // begin_fetch_next_with_id so the resource's active_request_id matches
-        // the bucket's counter.
+        // The initial fetch also mints from the bucket's sequencer, so later
+        // fetch_next/previous_page ids continue the same sequence.
         let maybe_request_id = if cx.has_global::<QueryClient>() {
             let key = entity.read_with(cx, |r, _| r.key().clone());
             cx.update_global::<QueryClient, _>(|client, _| {
