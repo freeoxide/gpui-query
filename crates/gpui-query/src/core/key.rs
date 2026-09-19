@@ -17,7 +17,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeSeq}
 ///
 /// A `QueryKey` must contain at least one segment. Zero-length keys are
 /// unsupported: constructing one via [`QueryKey::new`] with an empty iterator
-/// will panic unconditionally in all build modes.
+/// will panic unconditionally in all build modes. Deserializing an empty key
+/// array returns a serde error rather than panicking.
 ///
 /// # Examples
 ///
@@ -189,7 +190,12 @@ impl<'de> Deserialize<'de> for QueryKey {
         }
 
         match KeyRepr::deserialize(deserializer)? {
-            KeyRepr::Array(parts) => Ok(Self::new(parts)),
+            // An empty array must surface as an Err, never reach new()'s
+            // assert: deserializing untrusted blobs cannot panic.
+            KeyRepr::Array(parts) if !parts.is_empty() => Ok(Self::new(parts)),
+            KeyRepr::Array(_) => Err(serde::de::Error::custom(
+                "QueryKey must contain at least one segment",
+            )),
             KeyRepr::String(s) => Ok(Self::from_single(s)),
         }
     }
@@ -242,6 +248,29 @@ mod tests {
         let json = serde_json::to_string(&key).unwrap();
         let back: QueryKey = serde_json::from_str(&json).unwrap();
         assert_eq!(key, back);
+    }
+
+    #[test]
+    fn serde_empty_array_returns_err_not_panic() {
+        let err = serde_json::from_str::<QueryKey>("[]").unwrap_err();
+        assert!(err.to_string().contains("at least one segment"));
+    }
+
+    #[test]
+    fn serde_resource_empty_key_field_returns_err_not_panic() {
+        use crate::core::{CachePolicy, QueryResource, RequestPolicy};
+
+        let resource = QueryResource::<String>::new(
+            QueryKey::from(["users"]),
+            CachePolicy::NoCache,
+            RequestPolicy::LatestWins,
+        );
+        let mut value = serde_json::to_value(&resource).unwrap();
+        value["key"] = serde_json::Value::Array(Vec::new());
+        let json = value.to_string();
+
+        let err = serde_json::from_str::<QueryResource<String>>(&json).unwrap_err();
+        assert!(err.to_string().contains("at least one segment"));
     }
 
     #[test]

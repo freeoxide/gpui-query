@@ -161,7 +161,8 @@ fn redact_until_whitespace(
     result
 }
 
-/// Redact bearer/token patterns.
+/// Redact bearer/token patterns. ASCII whitespace after the keyword (or
+/// after the `=`/`:` separator) is tolerated, per `bearer\s+|token[=:]\s*`.
 fn redact_tokens(text: &str, replacement: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
@@ -170,14 +171,17 @@ fn redact_tokens(text: &str, replacement: &str) -> String {
     let mut i = 0;
 
     while i < len {
-        if lower_matches_at(&lower, i, "bearer ") {
+        if lower_matches_at(&lower, i, "bearer")
+            && i + 6 < len
+            && chars[i + 6].is_ascii_whitespace()
+        {
+            // Keep "bearer" plus its first whitespace char, then swallow any
+            // extra whitespace so "bearer<TAB>x" redacts like "bearer x".
             for c in &chars[i..i + 7] {
                 result.push(*c);
             }
             i += 7;
-            while i < len && !chars[i].is_ascii_whitespace() {
-                i += 1;
-            }
+            skip_whitespace_and_token(&chars, &mut i, &mut result);
             result.push_str(replacement);
             continue;
         }
@@ -186,9 +190,7 @@ fn redact_tokens(text: &str, replacement: &str) -> String {
                 result.push(*c);
             }
             i += 6;
-            while i < len && !chars[i].is_ascii_whitespace() {
-                i += 1;
-            }
+            skip_whitespace_and_token(&chars, &mut i, &mut result);
             result.push_str(replacement);
             continue;
         }
@@ -196,6 +198,19 @@ fn redact_tokens(text: &str, replacement: &str) -> String {
         i += 1;
     }
     result
+}
+
+/// Copy the ASCII-whitespace run into `result`, then skip past the
+/// non-whitespace token that follows (dropped from the output).
+fn skip_whitespace_and_token(chars: &[char], i: &mut usize, result: &mut String) {
+    let len = chars.len();
+    while *i < len && chars[*i].is_ascii_whitespace() {
+        result.push(chars[*i]);
+        *i += 1;
+    }
+    while *i < len && !chars[*i].is_ascii_whitespace() {
+        *i += 1;
+    }
 }
 
 /// Check whether `lower` contains the ASCII `pat` (already-lowercased) at index `i`.
@@ -326,6 +341,22 @@ mod tests {
         assert!(out.contains("café "));
         assert!(out.contains("token="));
         assert!(!out.contains("leak"));
+        assert!(out.contains("[REDACTED_TOKEN]"));
+    }
+
+    #[test]
+    fn redact_tokens_tolerates_tab_after_bearer() {
+        let out = redact_tokens("auth failed: bearer\tabc123", "[REDACTED_TOKEN]");
+        assert!(!out.contains("abc123"));
+        assert!(out.contains("bearer\t"));
+        assert!(out.contains("[REDACTED_TOKEN]"));
+    }
+
+    #[test]
+    fn redact_tokens_tolerates_space_after_equals() {
+        let out = redact_tokens("token= abc123", "[REDACTED_TOKEN]");
+        assert!(out.contains("token= "));
+        assert!(!out.contains("abc123"));
         assert!(out.contains("[REDACTED_TOKEN]"));
     }
 
