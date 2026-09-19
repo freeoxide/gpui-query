@@ -1,20 +1,10 @@
-//! HTTP cache-header helpers for [`gpui_query`] — turn server cache headers into
-//! a [`gpui_query::core::CachePolicy`] ("server wins") and layer an in-memory
-//! [`HttpCache`] over any [`HttpBackend`].
+//! HTTP cache-header helpers for [`gpui_query`]: turn server cache headers
+//! into a [`CachePolicy`] ("server wins") and layer an in-memory [`HttpCache`]
+//! over any [`HttpBackend`].
 //!
-//! This crate depends on `gpui-query` with the **`core`** feature only (no
-//! GPUI), so it is usable from any async context, and it keeps
-//! `reqwest` / `http` / `bytes` out of the core crate (Guiding Principle 1 of
-//! `docs/features.md`).
-//!
-//! # Library-agnostic by design
-//!
-//! [`HttpCache`] is generic over a [`HttpBackend`] — a trait that abstracts a
-//! single conditional `GET`. The crate ships *one* optional backend,
-//! [`ReqwestBackend`], behind the
-//! `reqwest` cargo feature; any other request library can implement
-//! [`HttpBackend`] and plug into [`HttpCache::new`](HttpCache::new) instead.
-//! `reqwest` is never a hard dependency.
+//! Depends on `gpui-query` core only (no GPUI), so this works from any async
+//! runtime. [`HttpCache`] is library-agnostic; the optional `reqwest` feature
+//! supplies [`ReqwestBackend`] as one backend.
 //!
 //! # Server wins
 //!
@@ -35,8 +25,7 @@
 
 #![deny(missing_docs)]
 // docs.rs renders with `--cfg docsrs` (see [package.metadata.docs.rs]); enable
-// `#[doc(cfg(...))]` there so the `reqwest`-gated items are annotated with the
-// feature that enables them, matching the main crate's convention.
+// `#[doc(cfg(...))]` there so feature-gated items are annotated.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::time::Duration;
@@ -60,14 +49,9 @@ pub use reqwest_backend::ReqwestBackend;
 
 /// HTTP cache metadata extracted from a response.
 ///
-/// Serializable so a future persistence layer can store it alongside the body
-/// and rehydrate a cold start with valid ETags, enabling cheap `304` refetches
-/// on the first request after launch.
-///
-/// Timestamps use [`SystemTime`](std::time::SystemTime) (serde-supported,
-/// epoch-relative) — never [`std::time::Instant`], which has no serde impl and
-/// is meaningless across process restarts. This matches the `current_time_ms()`
-/// convention in `gpui-query`.
+/// Serializable (epoch-based [`SystemTime`](std::time::SystemTime)) so a
+/// persistence layer can store it alongside the body and rehydrate a cold
+/// start with valid validators for cheap `304` refetches.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CacheMeta {
     /// `ETag` response header, if present (for `If-None-Match` on refetch).
@@ -95,33 +79,30 @@ pub enum ParseError {
 
 /// Derive a [`CachePolicy`] from response cache headers ("server wins").
 ///
-/// Rules, in priority order:
+/// - `no-store` / `no-cache` anywhere returns [`CachePolicy::NoCache`],
+///   regardless of position or malformed directives elsewhere (RFC 9111
+///   §5.2.2: storing is forbidden outright).
+/// - Otherwise the first `s-maxage` (falling back to `max-age`) sets the TTL;
+///   a `stale-while-revalidate` alongside yields
+///   [`CachePolicy::StaleWhileRevalidate`]. Duplicates keep their first
+///   occurrence (RFC 9111 §4.2.1), and a delta-seconds too large for `u64`
+///   saturates instead of erroring (RFC 9111 §1.2.2).
+/// - Anything else returns [`CachePolicy::NoCache`]; malformed values surface
+///   as [`ParseError`].
 ///
-/// 1. `Cache-Control: no-store` or `no-cache` (any value, including bare) →
-///    [`CachePolicy::NoCache`].
-/// 2. `Cache-Control: max-age=N` (seconds) → [`CachePolicy::Ttl`] with
-///    `ttl_ms = N * 1000`. If `stale-while-revalidate=M` is also present, yields
-///    [`CachePolicy::StaleWhileRevalidate`] instead. `s-maxage` is treated like
-///    `max-age` (the shared-cache directive) and takes precedence when both are
-///    present.
-/// 3. Otherwise → [`CachePolicy::NoCache`] (no usable cache directives; an
-///    `Expires`-based heuristic may be added later).
-///
-/// `max-age` / `s-maxage` take precedence over each other and any other
-/// directive per [RFC 9111]. Directive names are matched case-insensitively and
-/// values may be quoted (`max-age="600"`).
-///
-/// [RFC 9111]: https://www.rfc-editor.org/rfc/rfc9111
+/// Directive names match case-insensitively; values may be quoted.
 pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, ParseError> {
-    let mut s_maxage_secs: Option<u64> = None;
-    let mut max_age_secs: Option<u64> = None;
-    let mut stale_while_revalidate_secs: Option<u64> = None;
+    // Slots are Option<Result<..>>: first occurrence wins, and a malformed
+    // value is only surfaced after the scan so no-store/no-cache dominates.
+    let mut s_maxage: Option<Result<u64, ParseError>> = None;
+    let mut max_age: Option<Result<u64, ParseError>> = None;
+    let mut swr: Option<Result<u64, ParseError>> = None;
 
     for value in headers.get_all(http::header::CACHE_CONTROL).iter() {
         let Ok(raw) = value.to_str() else {
             continue;
         };
-        for directive in raw.split(',') {
+        for directive in split_cache_directives(raw) {
             let directive = directive.trim();
             if directive.is_empty() {
                 continue;
@@ -130,62 +111,93 @@ pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, Par
                 Some((n, v)) => (n.trim(), Some(v.trim().trim_matches('"'))),
                 None => (directive, None),
             };
-            match name.to_ascii_lowercase().as_str() {
-                // no-store / no-cache win immediately per rule 1 and RFC 9111 §5.2.1.5:
-                // they are never cacheable, so a malformed directive that happens to
-                // follow them (e.g. `no-store, max-age=abc`) must not surface as a
-                // parse error.
-                "no-store" | "no-cache" => return Ok(CachePolicy::NoCache),
-                "s-maxage" => {
-                    if let Some(v) = val {
-                        s_maxage_secs = Some(parse_secs(false, v)?);
-                    }
-                }
-                "max-age" => {
-                    if let Some(v) = val {
-                        max_age_secs = Some(parse_secs(false, v)?);
-                    }
-                }
-                "stale-while-revalidate" => {
-                    if let Some(v) = val {
-                        stale_while_revalidate_secs = Some(parse_secs(true, v)?);
-                    }
+            if name.eq_ignore_ascii_case("no-store") || name.eq_ignore_ascii_case("no-cache") {
+                return Ok(CachePolicy::NoCache);
+            }
+            let is_swr = name.eq_ignore_ascii_case("stale-while-revalidate");
+            let slot = if is_swr {
+                Some(&mut swr)
+            } else if name.eq_ignore_ascii_case("s-maxage") {
+                Some(&mut s_maxage)
+            } else if name.eq_ignore_ascii_case("max-age") {
+                Some(&mut max_age)
+            } else {
+                None
+            };
+            if let Some(slot) = slot
+                && slot.is_none()
+                && let Some(v) = val
+            {
+                *slot = Some(parse_secs(is_swr, v));
+            }
+        }
+    }
+
+    let s_maxage_secs = s_maxage.transpose()?;
+    let max_age_secs = max_age.transpose()?;
+    let swr_secs = swr.transpose()?;
+
+    match (s_maxage_secs.or(max_age_secs), swr_secs) {
+        (Some(secs), Some(stale)) => Ok(CachePolicy::StaleWhileRevalidate {
+            ttl_ms: secs.saturating_mul(1000),
+            stale_ms: stale.saturating_mul(1000),
+        }),
+        (Some(secs), None) => Ok(CachePolicy::Ttl {
+            ttl_ms: secs.saturating_mul(1000),
+        }),
+        (None, _) => Ok(CachePolicy::NoCache),
+    }
+}
+
+/// Split a `Cache-Control` value on commas outside quoted-strings, so a
+/// quoted argument containing `,` cannot smuggle in extra directives.
+fn split_cache_directives(raw: &str) -> impl Iterator<Item = &str> {
+    let mut pos = 0;
+    std::iter::from_fn(move || {
+        if pos > raw.len() {
+            return None;
+        }
+        let bytes = raw.as_bytes();
+        let start = pos;
+        let mut end = bytes.len();
+        let mut quoted = false;
+        let mut i = start;
+        while i < bytes.len() {
+            match bytes[i] {
+                // Skip the character after a backslash inside a quoted-string.
+                b'\\' if quoted => i += 1,
+                b'"' => quoted = !quoted,
+                b',' if !quoted => {
+                    end = i;
+                    break;
                 }
                 _ => {}
             }
+            i += 1;
         }
-    }
-
-    // s-maxage (shared cache) takes precedence over max-age when both are set.
-    let ttl_secs = s_maxage_secs.or(max_age_secs);
-    if let Some(secs) = ttl_secs {
-        let ttl_ms = secs.saturating_mul(1000);
-        return Ok(if let Some(stale_secs) = stale_while_revalidate_secs {
-            CachePolicy::StaleWhileRevalidate {
-                ttl_ms,
-                stale_ms: stale_secs.saturating_mul(1000),
-            }
+        pos = if end < bytes.len() {
+            end + 1
         } else {
-            CachePolicy::Ttl { ttl_ms }
-        });
-    }
-
-    // No usable cache directives — do not cache.
-    Ok(CachePolicy::NoCache)
+            bytes.len() + 1
+        };
+        Some(&raw[start..end])
+    })
 }
 
-/// Parse a `Cache-Control` delta-seconds value into seconds.
-///
-/// `is_stale` selects which [`ParseError`] variant is returned on a malformed
-/// value. HTTP delta-seconds must be non-negative integers; values larger than
-/// `u64::MAX` are out of scope (the header itself is bounded far below that).
+/// Parse a delta-seconds argument. All-digit values that overflow `u64`
+/// saturate to `u64::MAX` per RFC 9111 §1.2.2; anything else is malformed.
 fn parse_secs(is_stale: bool, raw: &str) -> Result<u64, ParseError> {
-    raw.parse::<u64>().map_err(|_| {
-        if is_stale {
-            ParseError::InvalidStaleWhileRevalidate(raw.to_string())
-        } else {
-            ParseError::InvalidMaxAge(raw.to_string())
-        }
+    if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
+        return Ok(match raw.parse::<u128>() {
+            Ok(n) => n.min(u64::MAX as u128) as u64,
+            // Longer than u128: still all digits, still saturate.
+            Err(_) => u64::MAX,
+        });
+    }
+    Err(if is_stale {
+        ParseError::InvalidStaleWhileRevalidate(raw.to_string())
+    } else {
+        ParseError::InvalidMaxAge(raw.to_string())
     })
 }
 
@@ -245,9 +257,14 @@ mod tests {
 
     #[test]
     fn no_store_short_circuits_before_parsing_later_directives() {
-        // Rule 1 priority: `no-store` wins immediately, so a malformed trailing
-        // `max-age` must NOT surface as `InvalidMaxAge`. (RFC 9111 §5.2.1.5.)
         let policy = cache_policy_from_headers(&cc("no-store, max-age=abc")).unwrap();
+        assert_eq!(policy, CachePolicy::NoCache);
+    }
+
+    #[test]
+    fn no_store_wins_even_after_malformed_value() {
+        // Order-independent: a malformed max-age must not mask no-store.
+        let policy = cache_policy_from_headers(&cc("max-age=abc, no-store")).unwrap();
         assert_eq!(policy, CachePolicy::NoCache);
     }
 
@@ -270,10 +287,22 @@ mod tests {
     }
 
     #[test]
+    fn whitespace_around_equals_is_tolerated() {
+        let policy = cache_policy_from_headers(&cc("max-age = 120")).unwrap();
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 120_000 });
+    }
+
+    #[test]
     fn other_directives_are_ignored() {
-        // `public`/`private` don't map to a CachePolicy variant; max-age still applies.
         let policy = cache_policy_from_headers(&cc("public, max-age=5")).unwrap();
         assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 5_000 });
+    }
+
+    #[test]
+    fn quoted_comma_cannot_smuggle_directives() {
+        // The "max-age" text is inside a quoted argument, not a directive.
+        let policy = cache_policy_from_headers(&cc("private=\"a, max-age=86400\"")).unwrap();
+        assert_eq!(policy, CachePolicy::NoCache);
     }
 
     #[test]
@@ -295,10 +324,40 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_directives_keep_first_occurrence() {
+        // RFC 9111 §4.2.1: first occurrence wins, so a trailing injected
+        // duplicate cannot extend the TTL.
+        let policy = cache_policy_from_headers(&cc("max-age=600, max-age=86400")).unwrap();
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 600_000 });
+    }
+
+    #[test]
+    fn digit_overflow_saturates_instead_of_erroring() {
+        // RFC 9111 §1.2.2: values too large to represent are the largest
+        // representable value, not an error.
+        let policy = cache_policy_from_headers(&cc("max-age=99999999999999999999999")).unwrap();
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: u64::MAX });
+    }
+
+    #[test]
+    fn bare_max_age_without_value_is_ignored() {
+        assert_eq!(
+            cache_policy_from_headers(&cc("max-age")).unwrap(),
+            CachePolicy::NoCache
+        );
+    }
+
+    #[test]
     fn invalid_max_age_is_typed_error() {
         let err = cache_policy_from_headers(&cc("max-age=abc")).unwrap_err();
         assert!(matches!(err, ParseError::InvalidMaxAge(_)));
         assert!(err.to_string().contains("max-age"));
+    }
+
+    #[test]
+    fn negative_max_age_is_typed_error() {
+        let err = cache_policy_from_headers(&cc("max-age=-1")).unwrap_err();
+        assert!(matches!(err, ParseError::InvalidMaxAge(_)));
     }
 
     #[test]
