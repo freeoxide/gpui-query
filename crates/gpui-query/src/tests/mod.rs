@@ -1,4 +1,5 @@
 mod core_cache;
+mod core_error;
 mod core_infinite_query;
 mod core_lifecycle;
 mod core_mutation;
