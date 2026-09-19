@@ -1,6 +1,41 @@
 use crate::core::QueryError;
 
 #[test]
+fn sanitized_redacts_bearer_doubled_separator_run() {
+    let clean = QueryError::response("auth failed: bearer == s3cr3t").sanitized();
+    assert!(!clean.message().contains("s3cr3t"));
+    assert!(clean.message().contains("[REDACTED_TOKEN]"));
+}
+
+#[test]
+fn sanitized_redacts_token_doubled_separator_run() {
+    let clean = QueryError::response("token == x9y8z7").sanitized();
+    assert!(!clean.message().contains("x9y8z7"));
+    assert!(clean.message().contains("[REDACTED_TOKEN]"));
+}
+
+#[test]
+fn sanitized_redacts_bearer_colon_equals_separator_run() {
+    let clean = QueryError::response("bearer := s3cr3t9").sanitized();
+    assert!(!clean.message().contains("s3cr3t9"));
+    assert!(clean.message().contains("[REDACTED_TOKEN]"));
+}
+
+#[test]
+fn sanitized_redacts_token_equals_colon_separator_run() {
+    let clean = QueryError::response("token =: leak7").sanitized();
+    assert!(!clean.message().contains("leak7"));
+    assert!(clean.message().contains("[REDACTED_TOKEN]"));
+}
+
+#[test]
+fn sanitized_redacts_separator_run_mixed_with_whitespace() {
+    let clean = QueryError::response("bearer = = val99").sanitized();
+    assert!(!clean.message().contains("val99"));
+    assert!(clean.message().contains("[REDACTED_TOKEN]"));
+}
+
+#[test]
 fn sanitized_redacts_bearer_equals_with_surrounding_whitespace() {
     let clean = QueryError::response("auth failed: bearer = s3cr3tval").sanitized();
     assert!(!clean.message().contains("s3cr3tval"));

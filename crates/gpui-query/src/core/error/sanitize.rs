@@ -115,10 +115,7 @@ fn redact_tokens(input: Cow<'_, str>) -> Cow<'_, str> {
     result.into()
 }
 
-/// `keyword [ws*] [sep] [ws*] token` with sep `:` or `=`; `bearer` accepts
-/// whitespace alone, `token` requires the separator. Returns the end of the
-/// verbatim prefix (keyword through separators/whitespace) and the resume
-/// index past the redacted token.
+/// Grammar `keyword [ws|:|=]* token`; `token` requires at least one `:`/`=` in the run while `bearer` accepts any, and the tuple is (verbatim prefix end, resume index past the redacted token).
 fn try_match_token(chars: &[char], lower: &[char], i: usize) -> Option<(usize, usize)> {
     let (keyword_len, sep_required) = if lower_matches_at(lower, i, "bearer") {
         (6, false)
@@ -129,23 +126,23 @@ fn try_match_token(chars: &[char], lower: &[char], i: usize) -> Option<(usize, u
     };
     let len = chars.len();
     let mut j = i + keyword_len;
-
     let mut saw_ws = false;
-    while j < len && chars[j].is_ascii_whitespace() {
-        saw_ws = true;
-        j += 1;
-    }
-    let saw_sep = j < len && (chars[j] == ':' || chars[j] == '=');
-    if saw_sep {
+    let mut saw_sep = false;
+    while j < len {
+        let c = chars[j];
+        if c.is_ascii_whitespace() {
+            saw_ws = true;
+        } else if c == ':' || c == '=' {
+            saw_sep = true;
+        } else {
+            break;
+        }
         j += 1;
     }
     if !saw_sep && (sep_required || !saw_ws) {
         return None;
     }
 
-    while j < len && chars[j].is_ascii_whitespace() {
-        j += 1;
-    }
     let verbatim_end = j;
     while j < len && !chars[j].is_ascii_whitespace() {
         j += 1;
