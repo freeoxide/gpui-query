@@ -45,11 +45,11 @@ impl<T> FetchedLike<T> for Fetched<T> {
     }
 }
 
-/// Runs the freshness check, `Loading` transition, and signal read atomically
-/// in one `entity.update`; returns `(None, None)` on `CacheHit` /
-/// `IgnoredWhileLoading` (skip the fetch).
+/// Freshness check, `Loading` transition, and signal read in one
+/// `entity.update`; `(None, None)` means `CacheHit`/`IgnoredWhileLoading`.
 ///
-/// With a [`QueryClient`], the bucket sequencer mints the `RequestId`, shared with `prepare_fetch_query` so the two never collide for the same key.
+/// With a [`QueryClient`], the bucket sequencer mints the `RequestId`, shared
+/// with `prepare_fetch_query` so the two never collide for the same key.
 pub(crate) fn begin_request_on_entity<T, E, C>(
     entity: &Entity<QueryResource<T, E>>,
     cx: &mut Context<C>,
@@ -88,9 +88,8 @@ where
 
 /// Shared retry loop; with `signal = Some`, a fresh signal is re-read after
 /// each delay, and the loop stops once a newer request supersedes this one.
-///
-/// `cx.notify()` fires only when a result is accepted; `entity.update` results
-/// are discarded (`update` returns `Result<R>` under `AsyncApp`).
+/// `cx.notify()` fires only on accepted results; retry counters stay in
+/// `Loading` (the observer dedupes on status).
 async fn run_query_retry_loop<T, E, Out, F, Fut>(
     fetcher: F,
     request_id: RequestId,
@@ -113,15 +112,13 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
         match result {
             Ok(out) => {
                 let parts = out.into_parts();
-                #[cfg(feature = "persist")]
-                let meta = parts.meta;
                 let now_ms = current_time_ms();
                 let Some(e) = entity.upgrade() else {
                     return;
                 };
                 let _ = e.update(cx, |resource, cx| {
-                    resource.reset_retry_count();
                     if let Some(guard) = resource.accept_current_request(request_id) {
+                        resource.reset_retry_count();
                         resource.complete_success(guard, parts.data, now_ms);
                         if let Some(policy) = parts.server_policy {
                             resource.set_cache_policy(policy);
@@ -130,18 +127,12 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                         #[cfg(feature = "persist")]
                         cx.default_global::<crate::client::CacheMutation>();
                         #[cfg(feature = "persist")]
-                        if let Some(meta) = meta {
+                        if let Some(meta) = parts.meta {
                             let key = resource.key().clone();
                             cx.update_global::<QueryClient, _>(|client, _| {
                                 client.record_meta(key, meta);
                             });
                         }
-                    } else {
-                        #[cfg(debug_assertions)]
-                        eprintln!(
-                            "DEBUG: run_query_retry_loop: request {} no longer active on success, result discarded",
-                            request_id.label()
-                        );
                     }
                 });
                 return;
@@ -149,11 +140,6 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
             Err(error) => {
                 if retry_policy.should_retry(attempt) {
                     let delay_ms = retry_policy.delay_for_attempt(attempt);
-                    let Some(e) = entity.upgrade() else { return };
-                    // No notify: retry counters keep status Loading; the observer dedupes on status.
-                    let _ = e.update(cx, |resource, _cx| {
-                        resource.increment_retry();
-                    });
                     attempt += 1;
 
                     if delay_ms > 0 {
@@ -171,13 +157,11 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                     })
                     .unwrap_or_else(|| (false, QuerySignal::new()));
                     if !request_still_active {
-                        #[cfg(debug_assertions)]
-                        eprintln!(
-                            "DEBUG: run_query_retry_loop: request {} no longer active after retry delay, aborting retry",
-                            request_id.label()
-                        );
                         return;
                     }
+                    let _ = e.update(cx, |resource, _cx| {
+                        resource.increment_retry();
+                    });
                     if let Some(ref mut sig) = signal {
                         *sig = fresh_signal;
                     }
@@ -186,17 +170,11 @@ async fn run_query_retry_loop<T, E, Out, F, Fut>(
                     let failure_now_ms = current_time_ms();
                     let _ = e.update(cx, |resource, cx| {
                         if let Some(guard) = resource.accept_current_request(request_id) {
-                            resource.complete_failure(guard, error, failure_now_ms);
                             resource.reset_retry_count();
+                            resource.complete_failure(guard, error, failure_now_ms);
                             cx.notify();
                             #[cfg(feature = "persist")]
                             cx.default_global::<crate::client::CacheMutation>();
-                        } else {
-                            #[cfg(debug_assertions)]
-                            eprintln!(
-                                "DEBUG: run_query_retry_loop: request {} no longer active on failure, result discarded",
-                                request_id.label()
-                            );
                         }
                     });
                     return;

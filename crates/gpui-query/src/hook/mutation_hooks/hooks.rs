@@ -7,7 +7,7 @@ use crate::core::MutationResource;
 
 use super::super::MutationOptions;
 use super::super::options::MutationCallbacks;
-use super::internals::{run_mutation_loop_by_ref, run_mutation_loop_by_ref_with_callbacks};
+use super::internals::run_mutation_loop;
 
 /// The observer dedupes on `MutationStatus` (retry ticks stay in Loading, no re-render); the entity registers with [`QueryClient`] so `use_mutation_state` finds it and GC respects `gc_time_ms`.
 ///
@@ -56,17 +56,12 @@ where
     let entity = cx.new(|_| MutationResource::new(opts.retry_policy));
 
     let observer = MutationObserver::new(&entity);
-    let subscription = match observer.observe(cx) {
-        Some(sub) => sub,
-        None => {
-            // Only reachable on a GPUI internal regression; never panic production.
-            debug_assert!(
-                false,
-                "MutationObserver::observe failed: entity was just created and \
-                 cannot be dropped. This indicates a GPUI internal regression."
-            );
-            Subscription::new(|| {})
-        }
+    let Some(subscription) = observer.observe(cx) else {
+        debug_assert!(
+            false,
+            "MutationObserver::observe failed: entity was just created and cannot be dropped"
+        );
+        return (entity, Subscription::new(|| {}));
     };
 
     if cx.has_global::<QueryClient>() {
@@ -261,21 +256,8 @@ fn begin_and_spawn<V, T, E, C, F, Fut>(
     let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
     let weak = entity.downgrade();
 
-    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| match callbacks {
-        Some(callbacks) => {
-            run_mutation_loop_by_ref_with_callbacks(
-                &weak,
-                variables,
-                mutator,
-                &retry_policy,
-                callbacks,
-                cx,
-            )
-            .await;
-        }
-        None => {
-            run_mutation_loop_by_ref(&weak, variables, mutator, &retry_policy, cx).await;
-        }
+    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+        run_mutation_loop(&weak, variables, mutator, &retry_policy, callbacks, cx).await;
     });
     entity.update(cx, |r, _| {
         r.set_current_task(task);
