@@ -1,8 +1,6 @@
-//! Tests for `FilePersister`: round-trip, concurrent saves, corrupt-file
-//! tolerance, version rejection, and the `NoopPersister` no-op.
-//!
-//! These are plain `#[test]`s; the persister's `save`/`load` futures do no real
-//! async work, so `pollster::block_on` suffices (no tokio needed).
+//! Round-trip, concurrency, and corrupt-file tests for `FilePersister`, plus
+//! the `NoopPersister` no-op. Plain `#[test]`s: the futures do no real async
+//! work, so `pollster::block_on` suffices.
 
 use std::collections::HashMap;
 
@@ -35,12 +33,11 @@ fn file_persister_round_trip_json() {
     let path = dir.path().join("cache.json");
     let p = FilePersister::json(&path);
 
-    // Load from missing file → empty snapshot.
+    // Missing file -> empty snapshot.
     let loaded = pollster::block_on(p.load()).expect("load missing");
     assert!(loaded.entries.is_empty());
     assert_eq!(loaded.version, PERSIST_VERSION);
 
-    // Save + reload round-trips.
     let snap = sample_snapshot();
     pollster::block_on(p.save(&snap)).expect("save");
     let reloaded = pollster::block_on(p.load()).expect("reload");
@@ -73,14 +70,13 @@ fn file_persister_corrupt_file_yields_empty_snapshot() {
 
     let p = FilePersister::json(&path);
     let loaded = pollster::block_on(p.load()).expect("tolerant load");
-    assert!(loaded.entries.is_empty(), "corrupt cache → empty snapshot");
+    assert!(loaded.entries.is_empty(), "corrupt cache -> empty snapshot");
 }
 
 #[test]
 fn file_persister_version_mismatch_is_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cache.json");
-    // Hand-write a snapshot with a wrong version.
     let wrong = serde_json::json!({
         "entries": {},
         "version": 9999,
@@ -104,8 +100,8 @@ fn file_persister_concurrent_saves_do_not_corrupt() {
     let path = dir.path().join("cache.json");
     let p = std::sync::Arc::new(FilePersister::json(&path));
 
-    // Many concurrent saves; the internal Mutex serializes them so the final
-    // on-disk file is always a complete, parseable snapshot.
+    // The internal Mutex serializes saves, so the final file is always one
+    // writer's complete snapshot.
     let mut handles = Vec::new();
     for i in 0..16u64 {
         let p = std::sync::Arc::clone(&p);
@@ -128,7 +124,6 @@ fn file_persister_concurrent_saves_do_not_corrupt() {
     }
 
     let final_ = pollster::block_on(p.load()).expect("final load");
-    // The file is always parseable; the last writer's full snapshot survives.
     assert!(
         !final_.entries.is_empty(),
         "final snapshot should have at least one entry"
@@ -161,10 +156,8 @@ fn file_persister_format_choice_round_trips() {
 
 #[test]
 fn file_persister_large_snapshot_round_trips() {
-    // A large snapshot with distinct keys and realistic-sized JSON values,
-    // round-tripped through BOTH formats. Covers the "large snapshot" row of
-    // docs/features.md and guards against truncation/size-sensitive regressions
-    // in the atomic-write and tolerant-load paths.
+    // Distinct keys with realistic JSON values guard against truncation and
+    // size-sensitive regressions in the atomic-write and tolerant-load paths.
     const N: usize = 10_000;
 
     let mut entries = HashMap::with_capacity(N);
@@ -215,8 +208,7 @@ fn file_persister_large_snapshot_round_trips() {
         );
         assert_eq!(reloaded.version, PERSIST_VERSION);
 
-        // Sample a well-known even-indexed entry (so active==true and policy is
-        // Ttl, matching the loop's parity rules) to lock in value-level integrity.
+        // Even index -> active + Ttl policy, per the loop's parity rules.
         let sample_key = "users::9000";
         let entry = reloaded
             .entries
@@ -243,10 +235,6 @@ fn file_persister_large_snapshot_round_trips() {
 
 #[test]
 fn file_persister_corrupt_bincode_yields_empty_snapshot() {
-    // Mirror of `file_persister_corrupt_file_yields_empty_snapshot`, but for
-    // the bincode deserialize-failure branch (src/lib.rs:208-214), which
-    // previously had zero test coverage: garbage bytes on disk must degrade to
-    // an empty snapshot without panicking or erroring.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cache.bin");
     std::fs::write(
@@ -259,7 +247,73 @@ fn file_persister_corrupt_bincode_yields_empty_snapshot() {
     let loaded = pollster::block_on(p.load()).expect("tolerant load");
     assert!(
         loaded.entries.is_empty(),
-        "corrupt bincode → empty snapshot"
+        "corrupt bincode -> empty snapshot"
     );
+    assert_eq!(loaded.version, PERSIST_VERSION);
+}
+
+#[test]
+fn file_persister_save_creates_missing_parent_dirs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("nested/deeper/cache.json");
+    let p = FilePersister::json(&path);
+
+    pollster::block_on(p.save(&sample_snapshot())).expect("save");
+    let reloaded = pollster::block_on(p.load()).expect("load");
+    assert_eq!(reloaded.entries.len(), 1);
+}
+
+#[test]
+fn file_persister_save_leaves_no_temp_files() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cache.json");
+    let p = FilePersister::json(&path);
+
+    pollster::block_on(p.save(&sample_snapshot())).expect("save");
+
+    let mut names: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("read_dir")
+        .map(|e| e.expect("dir entry").file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["cache.json"], "only the target file remains");
+}
+
+#[cfg(unix)]
+#[test]
+fn file_persister_cache_file_is_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cache.json");
+    let p = FilePersister::json(&path);
+
+    pollster::block_on(p.save(&sample_snapshot())).expect("save");
+
+    let mode = std::fs::metadata(&path)
+        .expect("metadata")
+        .permissions()
+        .mode();
+    assert_eq!(
+        mode & 0o777,
+        0o600,
+        "query cache holds app-private data and must not be group/other-readable"
+    );
+}
+
+#[test]
+fn file_persister_second_instance_overwrite_stays_parseable() {
+    // Separate instances share no lock; the atomic rename still guarantees
+    // the file is always one writer's complete snapshot.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cache.json");
+    let a = FilePersister::json(&path);
+    let b = FilePersister::json(&path);
+
+    pollster::block_on(a.save(&sample_snapshot())).expect("save a");
+    pollster::block_on(b.save(&PersistSnapshot::new())).expect("save b");
+
+    let loaded = pollster::block_on(b.load()).expect("load");
+    assert!(loaded.entries.is_empty(), "last writer wins whole-file");
     assert_eq!(loaded.version, PERSIST_VERSION);
 }
