@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Retry configuration for failed requests.
+/// Defaults: 3 retries, exponential backoff, 1s base delay, 30s cap.
 ///
 /// # Examples
 ///

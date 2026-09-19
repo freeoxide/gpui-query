@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The status of a query resource.
-///
 /// `Idle` → `LoadingEmpty` → `Success`/`Failure`; refetch: `Success` → `LoadingWithData` → terminal.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum QueryStatus {
