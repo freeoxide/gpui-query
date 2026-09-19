@@ -82,11 +82,12 @@ pub enum ParseError {
 /// - `no-store` / `no-cache` anywhere returns [`CachePolicy::NoCache`],
 ///   regardless of position or malformed directives elsewhere (RFC 9111
 ///   §5.2.2: storing is forbidden outright).
-/// - Otherwise the first `s-maxage` (falling back to `max-age`) sets the TTL;
-///   a `stale-while-revalidate` alongside yields
-///   [`CachePolicy::StaleWhileRevalidate`]. Duplicates keep their first
-///   occurrence (RFC 9111 §4.2.1), and a delta-seconds too large for `u64`
-///   saturates instead of erroring (RFC 9111 §1.2.2).
+/// - Otherwise the first `max-age` sets the TTL, falling back to `s-maxage`
+///   when absent ([`HttpCache`] is a private cache, and RFC 9111 §5.2.2.10
+///   scopes `s-maxage` to shared caches). A `stale-while-revalidate`
+///   alongside yields [`CachePolicy::StaleWhileRevalidate`]. Duplicates keep
+///   their first occurrence (RFC 9111 §4.2.1), and a delta-seconds too
+///   large for `u64` saturates instead of erroring (RFC 9111 §1.2.2).
 /// - Anything else returns [`CachePolicy::NoCache`]; malformed values surface
 ///   as [`ParseError`].
 ///
@@ -137,7 +138,7 @@ pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, Par
     let max_age_secs = max_age.transpose()?;
     let swr_secs = swr.transpose()?;
 
-    match (s_maxage_secs.or(max_age_secs), swr_secs) {
+    match (max_age_secs.or(s_maxage_secs), swr_secs) {
         (Some(secs), Some(stale)) => Ok(CachePolicy::StaleWhileRevalidate {
             ttl_ms: secs.saturating_mul(1000),
             stale_ms: stale.saturating_mul(1000),
@@ -234,9 +235,26 @@ mod tests {
     }
 
     #[test]
-    fn s_maxage_takes_precedence() {
+    fn max_age_wins_over_s_maxage() {
+        // Private cache: only a shared cache may prefer s-maxage
+        // (RFC 9111 §5.2.2.10), so max-age wins when both are present.
         let policy = cache_policy_from_headers(&cc("max-age=10, s-maxage=30")).unwrap();
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 10_000 });
+    }
+
+    #[test]
+    fn s_maxage_alone_sets_ttl() {
+        // No max-age to shadow it: s-maxage still applies as the fallback.
+        let policy = cache_policy_from_headers(&cc("s-maxage=30")).unwrap();
         assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 30_000 });
+    }
+
+    #[test]
+    fn no_store_wins_over_s_maxage() {
+        assert_eq!(
+            cache_policy_from_headers(&cc("s-maxage=30, no-store")).unwrap(),
+            CachePolicy::NoCache
+        );
     }
 
     #[test]

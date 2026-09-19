@@ -36,7 +36,7 @@ Parsing rules (priority order):
 2. `max-age=N` (seconds) → `CachePolicy::Ttl { ttl_ms: N * 1000 }`; add `stale-while-revalidate=M` → `CachePolicy::StaleWhileRevalidate { ttl_ms, stale_ms }`. Duplicated directives keep their first occurrence (RFC 9111 §4.2.1), and a delta-seconds too large for `u64` saturates instead of erroring (RFC 9111 §1.2.2).
 3. Otherwise → `CachePolicy::NoCache`; malformed values surface as `ParseError`.
 
-`s-maxage` takes precedence over `max-age` when both are set. Directive names are matched case-insensitively and values may be quoted (`max-age="600"`).
+When both are set, `max-age` wins: `HttpCache` is a private cache, and RFC 9111 §5.2.2.10 scopes `s-maxage` to shared caches. `s-maxage` alone still sets the TTL. Directive names are matched case-insensitively and values may be quoted (`max-age="600"`).
 
 ## Usage
 
