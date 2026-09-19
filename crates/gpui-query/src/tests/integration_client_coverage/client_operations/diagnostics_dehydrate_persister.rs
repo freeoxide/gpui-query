@@ -1,5 +1,3 @@
-//! Diagnostics, dehydrate/hydrate, and legacy persister tests.
-
 use std::sync::Mutex;
 
 use gpui::{BorrowAppContext as _, TestAppContext};
@@ -71,7 +69,6 @@ fn test_dehydrate_includes_infinite_query_success(cx: &mut TestAppContext) {
             let q = client.resource::<String, QueryError>("q1", cx);
             q.update(cx, |r, _| r.apply_success("data".to_string(), 1_000));
 
-            // Idle infinite query: created, never completed.
             let _iq = client.infinite_resource::<String, QueryError>("iq1", cx);
 
             let state = client.dehydrate(cx);
@@ -157,7 +154,6 @@ fn test_persister_records_multiple_entries(cx: &mut TestAppContext) {
                 let e = client.resource::<String, QueryError>(key.clone(), cx);
                 e.update(cx, |r, _| r.apply_success(format!("val_{i}"), 1_000));
             }
-            // Idle resources are never persisted.
             let _idle = client.resource::<String, QueryError>("idle_persist", cx);
 
             struct CapturePersister {
