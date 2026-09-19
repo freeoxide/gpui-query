@@ -15,7 +15,7 @@ cargo add gpui-query-persist
 gpui-query-persist = "0.1.0"
 ```
 
-The crate pulls in [gpui-query](https://crates.io/crates/gpui-query) with the `persist`, `client`, and `hook` features already enabled, plus `dirs`, `tempfile`, `bincode`, `serde`, `serde_json`, and `thiserror`.
+The crate pulls in [gpui-query](https://crates.io/crates/gpui-query) with the `persist`, `client`, and `hook` features already enabled, plus `dirs`, `tempfile`, `bincode`, `serde`, and `serde_json`.
 
 ## What it does
 

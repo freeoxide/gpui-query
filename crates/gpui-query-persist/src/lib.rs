@@ -366,9 +366,8 @@ fn fsync_parent(parent: &Path) {
 mod tests {
     use super::*;
 
-    // Valid bincode frame, garbage inside value_json. The frame round-trips
-    // through bincode, so the failure must come from into_snapshot's JSON
-    // step, not the bincode deserialize step.
+    // Valid bincode frame with garbage value_json: the frame itself
+    // round-trips, so only into_snapshot's JSON step can fail.
     #[test]
     fn bincode_corrupt_inner_json_is_tolerated() {
         let adapter = BincodeSnapshot {
