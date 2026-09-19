@@ -1,13 +1,6 @@
-//! The URL-keyed HTTP cache, [`HttpCache`].
-//!
-//! [`HttpCache`] wraps any [`crate::backend::HttpBackend`] with an in-memory
-//! cache keyed by URL string. Fresh entries skip the network; stale entries
-//! revalidate with `If-None-Match` / `If-Modified-Since`, and a `304`
-//! re-serves the cached body.
-//!
-//! Concurrency: two [`std::sync::Mutex`]es (meta, bodies), each taken in a
-//! short scoped block, never held across an `.await`. The cache is
-//! `Send + Sync` and runtime-agnostic.
+//! The URL-keyed HTTP cache, [`HttpCache`]: fresh entries skip the network,
+//! stale entries revalidate with `If-None-Match` / `If-Modified-Since`, and a
+//! `304` re-serves the cached body.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -24,39 +17,30 @@ use crate::{CacheMeta, ParseError, cache_policy_from_headers};
 /// Errors raised by [`HttpCache::fetch`].
 #[derive(Debug, Error)]
 pub enum HttpError {
-    /// The underlying backend failed to perform the request; the source error
-    /// is preserved for downcasting or cause-chain walks.
+    /// The backend request failed; the source is kept for cause chains.
     #[error("backend request failed")]
     Backend {
-        /// The source error from the backend.
+        /// The underlying backend error.
         #[source]
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
-    /// Response cache headers could not be parsed into a [`CachePolicy`].
-    /// [`HttpCache::fetch`] itself degrades unparseable headers to
-    /// [`CachePolicy::NoCache`] instead of failing, so this surfaces only for
-    /// direct users of [`cache_policy_from_headers`].
+    /// Unparseable cache headers; [`HttpCache::fetch`] degrades them to
+    /// [`CachePolicy::NoCache`], so only direct parser callers see this.
     #[error(transparent)]
     InvalidPolicy(#[from] ParseError),
-    /// The server returned `304 Not Modified` but the cache holds no body for
-    /// this URL to fall back on.
+    /// `304 Not Modified` arrived with no cached body to fall back on.
     #[error("received 304 without a cached body for {url:?}")]
     NotModifiedWithoutCachedBody {
         /// The URL that produced the spurious `304`.
         url: String,
     },
-    /// A cache [`Mutex`] was poisoned; surfaced as a typed error so one
-    /// poisoned cache fails a request instead of panicking the caller.
+    /// A cache mutex was poisoned (fails the request instead of panicking).
     #[error("cache mutex poisoned")]
     Poisoned,
 }
 
-/// A URL-keyed HTTP cache layered over a [`HttpBackend`].
-///
-/// Generic over the backend so dispatch is static (no `Box<dyn>` overhead).
-/// Entries are keyed by the exact URL string: no normalization, and `Vary` is
-/// ignored. There is no eviction: the cache grows with every distinct URL,
-/// so scope instances accordingly.
+/// A URL-keyed cache over a [`HttpBackend`]: exact-string keys (no
+/// normalization, `Vary` ignored), no eviction, mutexes never held across `.await`.
 pub struct HttpCache<B: HttpBackend> {
     backend: B,
     meta: Mutex<HashMap<String, CacheMeta>>,
@@ -64,7 +48,7 @@ pub struct HttpCache<B: HttpBackend> {
 }
 
 impl<B: HttpBackend> HttpCache<B> {
-    /// Create a new cache backed by `backend`, starting empty.
+    /// Creates an empty cache over `backend`.
     pub fn new(backend: B) -> Self {
         Self {
             backend,
@@ -73,13 +57,10 @@ impl<B: HttpBackend> HttpCache<B> {
         }
     }
 
-    /// Fetch `url`: a fresh cached entry skips the network, otherwise the
-    /// backend revalidates.
-    ///
-    /// Returns `(body, policy, meta)`. Only a cacheable `200` populates the
-    /// cache and yields `meta`; every other status (and any `no-store`,
-    /// absent, or unparseable `Cache-Control`) returns the body with
-    /// [`CachePolicy::NoCache`] and `None`. A `304` re-serves the cached body.
+    /// Fetches `url`: a fresh entry skips the network, a stale one
+    /// revalidates. Returns `(body, policy, meta)`: only a cacheable `200`
+    /// stores and yields `meta`, a `304` re-serves the cached body, and
+    /// everything else is [`CachePolicy::NoCache`] with `None`.
     pub async fn fetch(
         &self,
         url: &str,
@@ -89,15 +70,13 @@ impl<B: HttpBackend> HttpCache<B> {
             guard.get(url).cloned()
         };
 
-        // Fresh hit: no backend call at all. checked_add: never panic if a
-        // future serde-hydrated CacheMeta carries an extreme stored_at.
+        // checked_add: an extreme serde-hydrated stored_at must not panic.
         if let Some(meta) = cached_meta.as_ref()
             && meta.stored_at.checked_add(meta.fresh_for).is_none_or(|t| t > SystemTime::now())
             && let Some(body) = self.cached_body(url)?
         {
             return Ok((body, policy_from_meta(meta), cached_meta.clone()));
         }
-        // Not fresh, or meta without a body: revalidate.
 
         let conditionals = Conditionals::from_meta(cached_meta.as_ref());
         let resp = self
@@ -125,7 +104,6 @@ impl<B: HttpBackend> HttpCache<B> {
             return self.store_fresh(url, resp);
         }
 
-        // No other status is stored (conservative subset of RFC 9111 §3).
         Ok((resp.body, CachePolicy::NoCache, None))
     }
 
@@ -134,7 +112,6 @@ impl<B: HttpBackend> HttpCache<B> {
         Ok(guard.get(url).cloned())
     }
 
-    /// Parse the policy from a `200`, store body + meta, return the triple.
     fn store_fresh(
         &self,
         url: &str,
@@ -143,8 +120,6 @@ impl<B: HttpBackend> HttpCache<B> {
         let BackendResponse {
             headers, body, ..
         } = resp;
-        // A malformed cache hint must never fail the data fetch itself:
-        // serve the body uncacheable.
         let Ok(policy) = cache_policy_from_headers(&headers) else {
             return Ok((body, CachePolicy::NoCache, None));
         };
@@ -175,8 +150,6 @@ impl<B: HttpBackend> HttpCache<B> {
     }
 }
 
-/// Read a single header value as an owned [`String`], or `None` if absent or
-/// non-ASCII.
 fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
@@ -184,19 +157,14 @@ fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// `fresh_for` from a policy's TTL window.
 fn fresh_for_from_policy(policy: CachePolicy) -> Duration {
     Duration::from_millis(policy.ttl_ms().unwrap_or(0))
 }
 
-/// `stale_for` from a policy's SWR window.
 fn stale_for_from_policy(policy: CachePolicy) -> Duration {
     Duration::from_millis(policy.stale_ms().unwrap_or(0))
 }
 
-/// Invert the two helpers above: non-zero `stale_for` selects
-/// [`CachePolicy::StaleWhileRevalidate`], non-zero `fresh_for` selects
-/// [`CachePolicy::Ttl`], both-zero collapses to [`CachePolicy::NoCache`].
 fn policy_from_meta(meta: &CacheMeta) -> CachePolicy {
     let ttl_ms = u64::try_from(meta.fresh_for.as_millis()).unwrap_or(0);
     let stale_ms = u64::try_from(meta.stale_for.as_millis()).unwrap_or(0);
@@ -218,8 +186,6 @@ mod tests {
     use std::collections::VecDeque;
     use std::future::Future;
 
-    /// Mock backend: pops canned responses from a FIFO queue and counts
-    /// calls so tests can assert short-circuit behavior.
     struct MockBackend {
         responses: Mutex<VecDeque<Result<BackendResponse, MockError>>>,
         calls: Mutex<usize>,
@@ -259,7 +225,6 @@ mod tests {
                 *calls += 1;
                 self.responses.lock().unwrap().pop_front()
             };
-            // Queue exhausted -> mock error so the test fails loudly.
             async move {
                 match next {
                     Some(Ok(r)) => Ok(r),
@@ -334,7 +299,6 @@ mod tests {
         let (body1, _, _) = cache.fetch("https://example.test/c").await.unwrap();
         assert_eq!(body1, Bytes::from_static(b"payload"));
 
-        // max-age=0 -> not fresh -> conditional refetch -> 304.
         let (body2, _, meta2) = cache.fetch("https://example.test/c").await.unwrap();
         assert_eq!(body2, Bytes::from_static(b"payload"), "304 served cached body");
         assert!(meta2.is_some(), "304 still yields cached meta");
@@ -361,7 +325,6 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_cache_control_degrades_to_no_cache() {
-        // A malformed cache hint must not fail the data fetch.
         let backend = MockBackend::new(vec![Ok(resp_200("body", "max-age=abc"))]);
         let cache = HttpCache::new(backend);
 
@@ -404,8 +367,6 @@ mod tests {
 
     #[tokio::test]
     async fn overflow_max_age_caches_saturated() {
-        // RFC 9111 §1.2.2: over-large delta-seconds saturate; the entry is
-        // effectively fresh forever and later fetches short-circuit.
         let backend = MockBackend::new(vec![
             Ok(resp_200("big", "max-age=99999999999999999999999")),
             Ok(resp_200("second", "max-age=1")),
@@ -425,7 +386,6 @@ mod tests {
 
     #[tokio::test]
     async fn not_modified_without_cached_body_is_typed_error() {
-        // A 304 is only meaningful as a revalidation of a cached entry.
         let backend = MockBackend::new(vec![Ok(resp_304_with_etag("\"v1\""))]);
         let cache = HttpCache::new(backend);
 

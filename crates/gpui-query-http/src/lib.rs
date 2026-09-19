@@ -1,17 +1,8 @@
 //! HTTP cache-header helpers for [`gpui_query`]: turn server cache headers
 //! into a [`CachePolicy`] ("server wins") and layer an in-memory [`HttpCache`]
-//! over any [`HttpBackend`].
-//!
-//! Depends on `gpui-query` core only (no GPUI), so this works from any async
-//! runtime. [`HttpCache`] is library-agnostic; the optional `reqwest` feature
-//! supplies [`ReqwestBackend`] as one backend.
+//! over any [`HttpBackend`]. Core-only dependency, any async runtime.
 //!
 //! # Server wins
-//!
-//! Parse the response headers with [`cache_policy_from_headers`], hand the
-//! resulting [`CachePolicy`] to
-//! [`Fetched::with_policy`](gpui_query::core::Fetched::with_policy), and the
-//! resource adopts the server's TTL:
 //!
 //! ```no_run
 //! # use gpui_query_http::cache_policy_from_headers;
@@ -24,8 +15,6 @@
 //! ```
 
 #![deny(missing_docs)]
-// docs.rs renders with `--cfg docsrs` (see [package.metadata.docs.rs]); enable
-// `#[doc(cfg(...))]` there so feature-gated items are annotated.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::time::Duration;
@@ -47,54 +36,42 @@ pub use cache::{HttpCache, HttpError};
 #[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
 pub use reqwest_backend::ReqwestBackend;
 
-/// HTTP cache metadata extracted from a response.
-///
-/// Serializable (epoch-based [`SystemTime`](std::time::SystemTime)) so a
-/// persistence layer can store it alongside the body and rehydrate a cold
-/// start with valid validators for cheap `304` refetches.
+/// Cache metadata from a response, serializable (epoch-based) so a
+/// persistence layer can rehydrate validators for cheap `304` refetches.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CacheMeta {
-    /// `ETag` response header, if present (for `If-None-Match` on refetch).
+    /// Sent as `If-None-Match` on revalidation.
     pub etag: Option<String>,
-    /// `Last-Modified` response header, if present (for `If-Modified-Since`).
+    /// Sent as `If-Modified-Since` on revalidation.
     pub last_modified: Option<String>,
-    /// When this cached entry was stored.
+    /// When the entry was stored; freshness is measured from here.
     pub stored_at: std::time::SystemTime,
-    /// How long the entry is considered fresh (the TTL window).
+    /// Freshness window, from the policy's TTL.
     pub fresh_for: Duration,
-    /// How long a stale entry may be served while revalidating (the SWR window).
+    /// SWR window: how long a stale entry may serve while revalidating.
     pub stale_for: Duration,
 }
 
 /// Errors parsing cache headers into a [`CachePolicy`].
 #[derive(Debug, Error)]
 pub enum ParseError {
-    /// `max-age` (or `s-maxage`) directive had a non-integer value.
+    /// `max-age` (or `s-maxage`) had a non-integer value.
     #[error("invalid max-age value: {0}")]
     InvalidMaxAge(String),
-    /// `stale-while-revalidate` directive had a non-integer value.
+    /// `stale-while-revalidate` had a non-integer value.
     #[error("invalid stale-while-revalidate value: {0}")]
     InvalidStaleWhileRevalidate(String),
 }
 
-/// Derive a [`CachePolicy`] from response cache headers ("server wins").
-///
-/// - `no-store` / `no-cache` anywhere returns [`CachePolicy::NoCache`],
-///   regardless of position or malformed directives elsewhere (RFC 9111
-///   §5.2.2: storing is forbidden outright).
-/// - Otherwise the first `max-age` sets the TTL, falling back to `s-maxage`
-///   when absent ([`HttpCache`] is a private cache, and RFC 9111 §5.2.2.10
-///   scopes `s-maxage` to shared caches). A `stale-while-revalidate`
-///   alongside yields [`CachePolicy::StaleWhileRevalidate`]. Duplicates keep
-///   their first occurrence (RFC 9111 §4.2.1), and a delta-seconds too
-///   large for `u64` saturates instead of erroring (RFC 9111 §1.2.2).
-/// - Anything else returns [`CachePolicy::NoCache`]; malformed values surface
-///   as [`ParseError`].
-///
-/// Directive names match case-insensitively; values may be quoted.
+/// Derives a [`CachePolicy`] from response `Cache-Control` headers ("server
+/// wins"): `no-store`/`no-cache` anywhere wins regardless of position (RFC
+/// 9111 §5.2.2); otherwise the first `max-age` sets the TTL, falling back to
+/// `s-maxage` only when absent (private cache; §5.2.2.10), and a
+/// `stale-while-revalidate` alongside yields the SWR policy. Duplicates keep
+/// their first occurrence (§4.2.1); over-large delta-seconds saturate
+/// (§1.2.2); malformed values error as [`ParseError`].
 pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, ParseError> {
-    // Slots are Option<Result<..>>: first occurrence wins, and a malformed
-    // value is only surfaced after the scan so no-store/no-cache dominates.
+    // Option<Result>: first occurrence wins; errors surface only after the scan.
     let mut s_maxage: Option<Result<u64, ParseError>> = None;
     let mut max_age: Option<Result<u64, ParseError>> = None;
     let mut swr: Option<Result<u64, ParseError>> = None;
@@ -150,7 +127,7 @@ pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, Par
     }
 }
 
-/// Split a `Cache-Control` value on commas outside quoted-strings, so a
+/// Splits a `Cache-Control` value on commas outside quoted-strings, so a
 /// quoted argument containing `,` cannot smuggle in extra directives.
 fn split_cache_directives(raw: &str) -> impl Iterator<Item = &str> {
     let mut pos = 0;
@@ -185,8 +162,6 @@ fn split_cache_directives(raw: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// Parse a delta-seconds argument. All-digit values that overflow `u64`
-/// saturate to `u64::MAX` per RFC 9111 §1.2.2; anything else is malformed.
 fn parse_secs(is_stale: bool, raw: &str) -> Result<u64, ParseError> {
     if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
         return Ok(match raw.parse::<u128>() {
@@ -208,7 +183,6 @@ mod tests {
     use gpui_query::core::CachePolicy;
     use http::HeaderMap;
 
-    /// Build a `HeaderMap` from a single `Cache-Control` value.
     fn cc(value: &str) -> HeaderMap {
         let mut h = HeaderMap::new();
         h.insert(http::header::CACHE_CONTROL, value.parse().unwrap());
@@ -236,15 +210,12 @@ mod tests {
 
     #[test]
     fn max_age_wins_over_s_maxage() {
-        // Private cache: only a shared cache may prefer s-maxage
-        // (RFC 9111 §5.2.2.10), so max-age wins when both are present.
         let policy = cache_policy_from_headers(&cc("max-age=10, s-maxage=30")).unwrap();
         assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 10_000 });
     }
 
     #[test]
     fn s_maxage_alone_sets_ttl() {
-        // No max-age to shadow it: s-maxage still applies as the fallback.
         let policy = cache_policy_from_headers(&cc("s-maxage=30")).unwrap();
         assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 30_000 });
     }
@@ -281,7 +252,6 @@ mod tests {
 
     #[test]
     fn no_store_wins_even_after_malformed_value() {
-        // Order-independent: a malformed max-age must not mask no-store.
         let policy = cache_policy_from_headers(&cc("max-age=abc, no-store")).unwrap();
         assert_eq!(policy, CachePolicy::NoCache);
     }
@@ -318,7 +288,6 @@ mod tests {
 
     #[test]
     fn quoted_comma_cannot_smuggle_directives() {
-        // The "max-age" text is inside a quoted argument, not a directive.
         let policy = cache_policy_from_headers(&cc("private=\"a, max-age=86400\"")).unwrap();
         assert_eq!(policy, CachePolicy::NoCache);
     }
@@ -343,16 +312,12 @@ mod tests {
 
     #[test]
     fn duplicate_directives_keep_first_occurrence() {
-        // RFC 9111 §4.2.1: first occurrence wins, so a trailing injected
-        // duplicate cannot extend the TTL.
         let policy = cache_policy_from_headers(&cc("max-age=600, max-age=86400")).unwrap();
         assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 600_000 });
     }
 
     #[test]
     fn digit_overflow_saturates_instead_of_erroring() {
-        // RFC 9111 §1.2.2: values too large to represent are the largest
-        // representable value, not an error.
         let policy = cache_policy_from_headers(&cc("max-age=99999999999999999999999")).unwrap();
         assert_eq!(policy, CachePolicy::Ttl { ttl_ms: u64::MAX });
     }
