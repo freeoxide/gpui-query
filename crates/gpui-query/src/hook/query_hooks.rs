@@ -1,11 +1,6 @@
-//! Query hook functions: `use_query`, `use_query_unsignalled`, `use_query_manual`,
-//! `fetch_query`, and `fetch_query_with_signal`.
-//!
-//! Plain-query fetch tasks are deliberately detached. Stale writes are already
-//! prevented by the cooperative `QuerySignal` plus the two-phase
-//! `is_current_request` / `accept_current_request` guard in the retry loop, and
-//! hard-aborting on replacement would break that contract. Each task holds only
-//! a `WeakEntity`, so it self-terminates once the owning entity is dropped.
+//! Plain-query fetch tasks are deliberately detached: stale writes are guarded
+//! by the two-phase `accept_current_request` protocol, and each task holds
+//! only a `WeakEntity`, so it self-terminates on entity drop.
 
 use gpui::{BorrowAppContext as _, Context, Entity, Subscription};
 
@@ -17,15 +12,8 @@ use super::fetch_retry::{
     FetchedLike, begin_request_on_entity, fetch_signal_with_retry, fetch_with_retry,
 };
 
-/// Subscribe to a query resource and re-render when it changes.
-///
-/// The primary hook: creates or reuses the resource in the global
-/// [`QueryClient`], sets up a [`QueryObserver`], propagates the retry policy
-/// from `options`, and spawns a signal-accepting fetch if the resource is
-/// idle. Call it in a component constructor, not in `render`.
-///
-/// If the component unmounts mid-fetch the result is silently discarded; use
-/// [`fetch_query_with_signal`] directly when you need completion guarantees.
+/// Creates or reuses the resource in the global [`QueryClient`] and spawns a
+/// fetch if it is idle; call it in a constructor, never in `render`.
 pub fn use_query<T, E, C, F, Fut>(
     options: impl Into<crate::hook::QueryOptions>,
     fetcher: F,
@@ -41,17 +29,8 @@ where
     use_query_impl(options.into(), fetcher, cx)
 }
 
-/// Like [`use_query`], but the fetcher returns
-/// [`Fetched<T>`](crate::core::Fetched) so a server-derived
-/// [`CachePolicy`](crate::core::CachePolicy) can override the caller's
-/// per-query policy on success ("server wins").
-///
-/// The resource's policy is established at `begin_request` time from
-/// [`QueryOptions`](crate::hook::QueryOptions). A fetcher returning
-/// [`Fetched::with_policy`](crate::core::Fetched::with_policy) replaces that
-/// stored policy right after `complete_success`, so later freshness checks use
-/// the server's TTL; [`Fetched::new`](crate::core::Fetched::new) keeps the
-/// caller's policy.
+/// A fetcher returning [`Fetched::with_policy`](crate::core::Fetched::with_policy)
+/// overrides the resource's stored policy right after success (server wins).
 pub fn use_query_with_policy<T, E, C, F, Fut>(
     options: impl Into<crate::hook::QueryOptions>,
     fetcher: F,
@@ -67,8 +46,6 @@ where
     use_query_impl(options.into(), fetcher, cx)
 }
 
-/// Shared body of [`use_query`] and [`use_query_with_policy`], generic over
-/// the fetcher output via [`FetchedLike`].
 fn use_query_impl<T, E, C, F, Fut, Out>(
     options: crate::hook::QueryOptions,
     fetcher: F,
@@ -92,11 +69,8 @@ where
     } = options;
     let (entity, subscription) = use_query_manual(key.clone(), cache_policy, request_policy, cx);
 
-    // Propagate the user's retry policy; the resource would otherwise keep
-    // its no-retries default.
     entity.update(cx, |r, _| r.set_retry_policy(retry_policy.clone()));
 
-    // Start fetch if resource is idle
     if entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle) {
         let fetch_mode = if force_fetch {
             QueryFetchMode::Force
@@ -119,8 +93,7 @@ where
     (entity, subscription)
 }
 
-/// Like [`use_query`], but the fetcher receives no signal argument. Exists for
-/// backward compatibility; prefer the signal-accepting [`use_query`].
+/// Signal-free fetcher variant; prefer the signal-accepting [`use_query`].
 pub fn use_query_unsignalled<T, E, C, F, Fut>(
     key: QueryKey,
     cache_policy: crate::core::CachePolicy,
@@ -137,7 +110,6 @@ where
 {
     let (entity, subscription) = use_query_manual(key.clone(), cache_policy, request_policy, cx);
 
-    // Start fetch if resource is idle
     if entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle)
         && let (Some(request_id), _signal) =
             begin_request_on_entity(&entity, cx, QueryFetchMode::Normal, Some(key))
@@ -153,10 +125,8 @@ where
     (entity, subscription)
 }
 
-/// Build the entity and observation from a
-/// [`QueryOptions`](crate::hook::QueryOptions) value. Only `key`,
-/// `cache_policy`, and `request_policy` are consumed here; use [`use_query`]
-/// to honor the rest.
+/// Consumes only `key`, `cache_policy`, and `request_policy`; use
+/// [`use_query`] to honor the rest.
 pub fn use_query_manual_opts<T, E, C>(
     options: impl Into<crate::hook::QueryOptions>,
     cx: &mut Context<C>,
@@ -170,8 +140,6 @@ where
     use_query_manual(opts.key, opts.cache_policy, opts.request_policy, cx)
 }
 
-/// Convenience wrapper around [`use_query_unsignalled`] that accepts an
-/// `impl Into<QueryOptions>` instead of the raw policy triple.
 pub fn use_query_unsignalled_opts<T, E, C, F, Fut>(
     options: impl Into<crate::hook::QueryOptions>,
     fetcher: F,
@@ -194,15 +162,7 @@ where
     )
 }
 
-/// Lower-level hook that sets up the entity and observation without starting
-/// a fetch. Use this when you need full control over when and how fetching
-/// happens.
-///
-/// # Panics (debug builds only)
-///
-/// In debug builds, panics if no [`QueryClient`] has been set via
-/// `cx.set_global::<QueryClient>()`. Release builds fall back to a standalone
-/// entity (no shared caching, no GC).
+/// Entity + observer without starting a fetch; panics in debug builds when no [`QueryClient`] global is set (release falls back to a standalone entity).
 pub fn use_query_manual<T, E, C>(
     key: QueryKey,
     cache_policy: crate::core::CachePolicy,
@@ -253,9 +213,8 @@ where
     (entity, subscription)
 }
 
-/// Initiate a fetch on an existing query entity (e.g. on button click or
-/// timer). Respects the resource's retry policy on failure. If the cache is
-/// fresh or a fetch is already loading, no task is spawned.
+/// No-op when the cache is fresh or a fetch is already loading; otherwise
+/// spawns a retry-aware fetch.
 pub fn fetch_query<T, E, C, F, Fut>(
     entity: &Entity<QueryResource<T, E>>,
     fetcher: F,
@@ -270,11 +229,8 @@ pub fn fetch_query<T, E, C, F, Fut>(
     fetch_query_impl(entity, fetcher, cx);
 }
 
-/// Like [`fetch_query`], but the fetcher returns
-/// [`Fetched<T>`](crate::core::Fetched) so a server-derived
-/// [`CachePolicy`](crate::core::CachePolicy) can override the resource's
-/// policy on success. See [`use_query_with_policy`] for the server-wins
-/// semantics.
+/// [`fetch_query`] whose fetcher may return [`Fetched<T>`](crate::core::Fetched)
+/// to override the resource's policy on success.
 pub fn fetch_query_with_policy<T, E, C, F, Fut>(
     entity: &Entity<QueryResource<T, E>>,
     fetcher: F,
@@ -289,7 +245,6 @@ pub fn fetch_query_with_policy<T, E, C, F, Fut>(
     fetch_query_impl(entity, fetcher, cx);
 }
 
-/// Shared body of [`fetch_query`] and [`fetch_query_with_policy`].
 fn fetch_query_impl<T, E, C, F, Fut, Out>(
     entity: &Entity<QueryResource<T, E>>,
     fetcher: F,
@@ -315,12 +270,8 @@ fn fetch_query_impl<T, E, C, F, Fut, Out>(
     task.detach();
 }
 
-/// Like [`fetch_query`], but the fetcher receives a [`QuerySignal`] it can
-/// check for cooperative cancellation.
-///
-/// The fetcher is `FnOnce`, so no retries are possible. Stale writes are
-/// prevented by the `accept_current_request` guard, not by a
-/// `signal.is_cancelled()` check after the fetch (that would be racy).
+/// `FnOnce` fetcher, so no retries; staleness is guarded by
+/// `accept_current_request`, not a post-fetch `is_cancelled()` check (racy).
 pub fn fetch_query_with_signal<T, E, C, F, Fut>(
     entity: &Entity<QueryResource<T, E>>,
     fetcher: F,

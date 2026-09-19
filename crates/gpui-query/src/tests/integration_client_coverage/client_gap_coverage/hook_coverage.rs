@@ -1,9 +1,3 @@
-//! Hook coverage tests — Gaps 9, 10, 11, 12, 13, 17.
-//!
-//! Tests for deprecated hook APIs, mutation callbacks, fetch retry cancellation,
-//! signal-based fetch, infinite query retry stop, and use_query_select observer
-//! propagation.
-
 use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -15,9 +9,6 @@ use crate::hook::{
     use_infinite_query, use_mutation, use_query_manual, use_query_select,
 };
 use crate::tests::test_support::*;
-
-// use_mutation accepts MutationOptions via Into; the default-options path
-// must still register and produce an Idle mutation.
 
 #[gpui::test]
 fn test_deprecated_use_mutation_with_options_still_works(cx: &mut TestAppContext) {
@@ -35,18 +26,12 @@ fn test_deprecated_use_mutation_with_options_still_works(cx: &mut TestAppContext
         H { mutation: entity }
     });
 
-    // Verify the mutation entity is usable
     cx.update(|cx| {
         let resource = harness.read(cx).mutation.read(cx);
         assert_eq!(resource.status(), MutationStatus::Idle);
         assert!(resource.data().is_none());
     });
 }
-
-// -- Gap 11: Mutation callbacks fire when entity is dropped mid-flight -------
-//
-// When weak.upgrade() returns None inside run_mutation_loop_with_callbacks,
-// on_error and on_settled should still fire.
 
 #[gpui::test]
 fn test_mutation_callbacks_fire_on_entity_drop_during_retry_delay(cx: &mut TestAppContext) {
@@ -56,10 +41,6 @@ fn test_mutation_callbacks_fire_on_entity_drop_during_retry_delay(cx: &mut TestA
     let settled_called = Arc::new(Mutex::new(false));
     let ec = error_called.clone();
     let sc = settled_called.clone();
-
-    // A GPUI entity can't be truly dropped while a spawned task holds a weak
-    // ref (the harness keeps it alive), so the drop-during-retry callback path
-    // is untestable here; the success case confirms the callback mechanism.
 
     #[allow(dead_code)]
     struct H {
@@ -97,11 +78,6 @@ fn test_mutation_callbacks_fire_on_entity_drop_during_retry_delay(cx: &mut TestA
     );
 }
 
-// -- Gap 13: fetch_with_retry stops after request replaced (LatestWins) ------
-//
-// When a new request replaces the current one during retry delay, the old
-// fetch loop should exit cleanly.
-
 #[gpui::test]
 fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {
     setup_test(cx);
@@ -127,7 +103,6 @@ fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {
             r.set_retry_policy(RetryPolicy::new(5).with_delay(0))
         });
 
-        // First fetch: always fails, blocks on gate before returning
         let executor = executor.clone();
         fetch_query(
             &entity,
@@ -139,9 +114,7 @@ fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {
                     {
                         let mut n = cc.lock().unwrap();
                         *n += 1;
-                    } // drop MutexGuard before await
-                    // Wait for gate via the shared helper — this keeps the first
-                    // fetch "in flight" while the second is issued.
+                    }
                     gate_clone.wait(&executor).await;
                     Err::<_, QueryError>(QueryError::response("fail"))
                 }
@@ -151,17 +124,14 @@ fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {
         H { entity }
     });
 
-    // Issue a second fetch_query — LatestWins replaces the first
     harness.update(cx, |this, cx| {
         fetch_query(&this.entity, || async { Ok::<_, QueryError>("new") }, cx);
     });
 
-    // Release the gate so the first fetch can return its error
     gate.release();
 
     cx.run_until_parked();
 
-    // The second fetch should have won
     cx.update(|cx| {
         let data = harness.read(cx).entity.read(cx).data();
         assert_eq!(
@@ -171,11 +141,6 @@ fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {
         );
     });
 }
-
-// -- Gap 17: use_query_select observer propagation on refetch ----------------
-//
-// Verify that the mapped entity data updates when the underlying query
-// is refetched through the observer path.
 
 #[gpui::test]
 fn test_use_query_select_observer_updates_on_refetch(cx: &mut TestAppContext) {
@@ -227,7 +192,6 @@ fn test_use_query_select_observer_updates_on_refetch(cx: &mut TestAppContext) {
         assert_eq!(mapped_data, Some(2), "first fetch 'hi' has length 2");
     });
 
-    // Refetch — produces "hello world" (length 11)
     harness.update(cx, |this, cx| {
         fetch_query(
             &this.query,
@@ -262,11 +226,6 @@ fn test_use_query_select_observer_updates_on_refetch(cx: &mut TestAppContext) {
     });
 }
 
-// -- Gap 10: fetch_query_with_signal FnOnce — no retry on failure ------------
-//
-// The FnOnce constraint means no retries. Verify that when the single fetcher
-// fails, the resource ends in Failure with exactly 1 call.
-
 #[gpui::test]
 fn test_fetch_query_with_signal_no_retry_on_failure(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -285,7 +244,6 @@ fn test_fetch_query_with_signal_no_retry_on_failure(cx: &mut TestAppContext) {
             RequestPolicy::LatestWins,
             cx,
         );
-        // Set retry policy that would allow retries if the fetcher were Fn
         entity.update(cx, |r, _| r.set_retry_policy(RetryPolicy::new(3)));
         fetch_query_with_signal(
             &entity,
@@ -316,10 +274,6 @@ fn test_fetch_query_with_signal_no_retry_on_failure(cx: &mut TestAppContext) {
         "FnOnce fetcher must only be called once, no retries"
     );
 }
-
-// -- Gap 12: Infinite query stops retry after signal cancelled ---------------
-//
-// No test verifies that a cancelled infinite query stops retrying mid-loop.
 
 #[gpui::test]
 fn test_infinite_query_stops_retry_after_signal_cancelled(cx: &mut TestAppContext) {
@@ -352,7 +306,6 @@ fn test_infinite_query_stops_retry_after_signal_cancelled(cx: &mut TestAppContex
 
     cx.run_until_parked();
 
-    // The initial fetch failed. Now cancel the signal
     let entity_ref = cx.update(|cx| harness.read(cx).entity.clone());
     cx.update(|cx| {
         entity_ref.update(cx, |r, _| {
@@ -362,7 +315,6 @@ fn test_infinite_query_stops_retry_after_signal_cancelled(cx: &mut TestAppContex
         });
     });
 
-    // Try to fetch next page — signal is cancelled so retries should stop immediately
     harness.update(cx, |this, cx| {
         fetch_next_page_infinite(
             &this.entity,
@@ -373,7 +325,6 @@ fn test_infinite_query_stops_retry_after_signal_cancelled(cx: &mut TestAppContex
 
     cx.run_until_parked();
 
-    // Verify call count is bounded — the initial fetch + possibly one more attempt
     let count = *call_count.lock().unwrap();
     assert!(
         count <= 7,

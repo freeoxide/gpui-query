@@ -1,5 +1,5 @@
-//! The `use_infinite_query` hook: infinite scrolling / pagination for GPUI
-//! components.
+//! The fetcher receives `Option<&T>` (the last page, if any) and returns
+//! `(T, bool)`, where the bool says whether more pages exist.
 //!
 //! # Usage
 //!
@@ -21,7 +21,6 @@
 //!         let (entity, _subscription) = use_infinite_query(
 //!             InfiniteQueryOptions::new(QueryKey::from(["feed"])),
 //!             |last_page| async move {
-//!                 // Your async fetcher here
 //!                 Ok((vec![], false))
 //!             },
 //!             cx,
@@ -33,7 +32,6 @@
 //!         fetch_next_page_infinite(
 //!             &self.feed,
 //!             |last_page| async move {
-//!                 // Your async fetcher here
 //!                 Ok((vec![], false))
 //!             },
 //!             cx,
@@ -51,17 +49,7 @@ use super::fetch_runners::run_fetch_next_page_with_id;
 use crate::hook::current_time_ms;
 use crate::hook::options::InfiniteQueryOptions;
 
-/// Hook for infinite scrolling / pagination.
-///
-/// Creates an [`InfiniteQueryResource`] entity (registered with
-/// [`QueryClient`] for shared caching, GC, and bulk invalidation) and
-/// subscribes via an observer that dedupes on status, so intermediate retry
-/// updates do not re-render. Returns the entity and the subscription; store
-/// both. The retry policy from options is stored on the entity and applied to
-/// every page fetch.
-///
-/// The fetcher receives `Option<&T>` (the last page, if any) and returns
-/// `Result<(T, bool), E>` where the bool says whether more pages exist.
+/// The observer dedupes on status, so retry ticks do not re-render; the options' retry policy applies to every page fetch.
 pub fn use_infinite_query<T, E, C, FNext, Fut>(
     options: InfiniteQueryOptions,
     fetch_next: FNext,
@@ -96,13 +84,9 @@ where
                  Call cx.set_global(QueryClient::new()) in your app setup."
             );
         }
-        // max_pages and retry_policy are applied unconditionally below for
-        // both paths.
         cx.new(|_| InfiniteQueryResource::new(key, cache_policy, request_policy))
     };
 
-    // QueryClient-created entities don't set max_pages; apply it and store
-    // the retry policy in one pass.
     entity.update(cx, |resource, cx| {
         if let Some(max) = max_pages {
             resource.set_max_pages(Some(max));
@@ -125,10 +109,8 @@ where
         }
     };
 
-    // Start the initial fetch if idle
     if entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle) {
-        // The initial fetch also mints from the bucket's sequencer, so later
-        // fetch_next/previous_page ids continue the same sequence.
+        // The initial fetch mints from the bucket's sequencer too, so later page-fetch ids continue the same sequence.
         let maybe_request_id = if cx.has_global::<QueryClient>() {
             let key = entity.read_with(cx, |r, _| r.key().clone());
             cx.update_global::<QueryClient, _>(|client, _| {

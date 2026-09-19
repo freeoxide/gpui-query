@@ -1,5 +1,3 @@
-//! Tests for `use_query_manual`, `fetch_query`, and `fetch_query_with_signal`.
-
 use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -7,8 +5,6 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 use crate::core::{CachePolicy, QueryError, QueryKey, QueryResource, QueryStatus, RequestPolicy};
 use crate::hook::*;
 use crate::tests::test_support::*;
-
-// ── use_query_manual: entity exists but no auto-fetch ───────────────────────
 
 #[gpui::test]
 fn test_use_query_manual_no_auto_fetch_then_manual_fetch(cx: &mut TestAppContext) {
@@ -25,13 +21,11 @@ fn test_use_query_manual_no_auto_fetch_then_manual_fetch(cx: &mut TestAppContext
             RequestPolicy::LatestWins,
             cx,
         );
-        // No auto-fetch: resource stays idle.
         assert_eq!(entity.read(cx).status(), QueryStatus::Idle);
         assert!(entity.read(cx).data().is_none());
         H { entity }
     });
 
-    // Still idle after parking — no fetch was spawned.
     cx.run_until_parked();
 
     cx.update(|cx| {
@@ -42,7 +36,6 @@ fn test_use_query_manual_no_auto_fetch_then_manual_fetch(cx: &mut TestAppContext
         );
     });
 
-    // Now manually fetch.
     harness.update(cx, |this, cx| {
         fetch_query(
             &this.entity,
@@ -59,8 +52,6 @@ fn test_use_query_manual_no_auto_fetch_then_manual_fetch(cx: &mut TestAppContext
         assert_eq!(resource.data(), Some(&"manual-result"));
     });
 }
-
-// ── use_query_manual: entity can be fetched multiple times manually ──────────
 
 #[gpui::test]
 fn test_use_query_manual_multiple_fetches(cx: &mut TestAppContext) {
@@ -84,7 +75,6 @@ fn test_use_query_manual_multiple_fetches(cx: &mut TestAppContext) {
         H { entity }
     });
 
-    // First manual fetch.
     let cc_first = cc1.clone();
     harness.update(cx, |this, cx| {
         fetch_query(
@@ -106,7 +96,6 @@ fn test_use_query_manual_multiple_fetches(cx: &mut TestAppContext) {
         assert_eq!(harness.read(cx).entity.read(cx).data(), Some(&1));
     });
 
-    // Second manual fetch.
     harness.update(cx, |this, cx| {
         fetch_query(
             &this.entity,
@@ -132,8 +121,6 @@ fn test_use_query_manual_multiple_fetches(cx: &mut TestAppContext) {
         "both fetches should have executed"
     );
 }
-
-// ── fetch_query: on non-existent (fresh) key ────────────────────────────────
 
 #[gpui::test]
 fn test_fetch_query_on_idle_entity(cx: &mut TestAppContext) {
@@ -169,8 +156,6 @@ fn test_fetch_query_on_idle_entity(cx: &mut TestAppContext) {
     });
 }
 
-// ── fetch_query: on cancelled resource ──────────────────────────────────────
-
 #[gpui::test]
 fn test_fetch_query_after_resource_reset(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -193,7 +178,6 @@ fn test_fetch_query_after_resource_reset(cx: &mut TestAppContext) {
     cx.update(|cx| {
         assert_eq!(harness.read(cx).entity.read(cx).data(), Some(&"initial"));
     });
-    // Reset the resource to idle in a separate update to avoid borrow conflict.
     let entity = cx.update(|cx| harness.read(cx).entity.clone());
     cx.update(|cx| {
         entity.update(cx, |r, _| {
@@ -205,7 +189,6 @@ fn test_fetch_query_after_resource_reset(cx: &mut TestAppContext) {
         assert_eq!(harness.read(cx).entity.read(cx).status(), QueryStatus::Idle);
     });
 
-    // Fetch again after reset.
     harness.update(cx, |this, cx| {
         fetch_query(
             &this.entity,
@@ -223,8 +206,6 @@ fn test_fetch_query_after_resource_reset(cx: &mut TestAppContext) {
     });
 }
 
-// ── fetch_query: concurrent calls ───────────────────────────────────────────
-
 #[gpui::test]
 fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
     setup_test(cx);
@@ -233,9 +214,6 @@ fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
         entity: Entity<QueryResource<&'static str, QueryError>>,
     }
 
-    // Gate: the first fetcher blocks until the test releases it after the second
-    // fetch_query is issued. Uses the shared `Gate` helper which polls the
-    // executor with 1ms timers instead of thread::sleep.
     let gate = Gate::new();
     let gate_clone = gate.clone();
     let executor = cx.background_executor.clone();
@@ -247,7 +225,6 @@ fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
             RequestPolicy::LatestWins,
             cx,
         );
-        // Fire two fetches. LatestWins means the second cancels the first.
         let executor = executor.clone();
         fetch_query(
             &entity,
@@ -255,8 +232,6 @@ fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
                 let gate_clone = gate_clone.clone();
                 let executor = executor.clone();
                 async move {
-                    // Wait for the gate using the shared helper. This allows
-                    // the second fetch_query to be scheduled while we wait.
                     gate_clone.wait(&executor).await;
                     Ok::<_, QueryError>("first")
                 }
@@ -267,9 +242,6 @@ fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
         H { entity }
     });
 
-    // Release the gate so the first fetcher can proceed — but by now the second
-    // fetch_query has already been issued with LatestWins, so the first will be
-    // cancelled/replaced.
     gate.release();
 
     cx.run_until_parked();
@@ -277,7 +249,6 @@ fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let resource = harness.read(cx).entity.read(cx);
         assert_eq!(resource.status(), QueryStatus::Success);
-        // LatestWins: the last fetch_query wins.
         assert_eq!(
             resource.data(),
             Some(&"second"),
@@ -285,8 +256,6 @@ fn test_fetch_query_concurrent_calls_latest_wins(cx: &mut TestAppContext) {
         );
     });
 }
-
-// ── fetch_query_with_signal: basic success ──────────────────────────────────
 
 #[gpui::test]
 fn test_fetch_query_with_signal_completes(cx: &mut TestAppContext) {
@@ -319,8 +288,6 @@ fn test_fetch_query_with_signal_completes(cx: &mut TestAppContext) {
         assert_eq!(resource.data(), Some(&"signal-result"));
     });
 }
-
-// ── fetch_query_with_signal: failure handled ────────────────────────────────
 
 #[gpui::test]
 fn test_fetch_query_with_signal_failure(cx: &mut TestAppContext) {

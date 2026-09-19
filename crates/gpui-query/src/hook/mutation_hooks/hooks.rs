@@ -1,6 +1,3 @@
-//! Public mutation hooks: `use_mutation`, `mutate`, `mutate_with_callbacks`,
-//! `mutate_by_ref`, `mutate_arc`, and `use_mutation_state`.
-
 use std::sync::Arc;
 
 use gpui::{AppContext as _, BorrowAppContext as _, Context, Entity, Subscription};
@@ -12,17 +9,7 @@ use super::super::MutationOptions;
 use super::super::options::MutationCallbacks;
 use super::internals::{run_mutation_loop_by_ref, run_mutation_loop_by_ref_with_callbacks};
 
-/// Hook for executing mutations (create, update, delete operations).
-///
-/// Creates a [`MutationResource`] entity and returns it with a subscription
-/// for state observation during render. Trigger it with [`mutate`] from event
-/// handlers. Accepts `impl Into<MutationOptions>`, so both `use_mutation((), cx)`
-/// and `use_mutation(MutationOptions::default(), cx)` work.
-///
-/// The observer dedupes on `MutationStatus`: intermediate updates like
-/// `increment_retry()` stay in Loading and do not trigger re-renders. The
-/// entity is registered with the global [`QueryClient`] so `use_mutation_state`
-/// finds it and GC respects `gc_time_ms`.
+/// The observer dedupes on `MutationStatus` (retry ticks stay in Loading, no re-render); the entity registers with [`QueryClient`] so `use_mutation_state` finds it and GC respects `gc_time_ms`.
 ///
 /// # Example
 ///
@@ -72,8 +59,7 @@ where
     let subscription = match observer.observe(cx) {
         Some(sub) => sub,
         None => {
-            // The entity was just created, so this only fires on a GPUI
-            // internal regression. Do not panic production builds.
+            // Only reachable on a GPUI internal regression; never panic production.
             debug_assert!(
                 false,
                 "MutationObserver::observe failed: entity was just created and \
@@ -92,14 +78,13 @@ where
     (entity, subscription)
 }
 
-/// Hook for executing mutations with a custom retry policy. Deprecated alias
-/// of [`use_mutation`], which now accepts `MutationOptions` directly.
+/// Deprecated alias of [`use_mutation`], which now takes `MutationOptions`
+/// via `Into`.
 #[deprecated(
     since = "0.2.0",
     note = "Use `use_mutation(options, cx)` instead — it now accepts MutationOptions via Into"
 )]
-// Retained for the deprecated source-compat path and exercised by
-// `test_deprecated_use_mutation_with_options_still_works`.
+// Not re-exported; kept alive by the deprecated source-compat test.
 #[allow(dead_code)]
 pub fn use_mutation_with_options<V, T, E, C>(
     options: &MutationOptions,
@@ -114,15 +99,12 @@ where
     use_mutation(options.clone(), cx)
 }
 
-/// Observe all mutation state across the application for a given
-/// `(V, T, E)` type triple. Returns an empty vec if no mutations of this type
-/// exist or no [`QueryClient`] is set up.
+/// All registered mutations for the `(V, T, E)` triple; empty when none exist or no [`QueryClient`] is set.
 ///
 /// # Example
 ///
 /// ```no_run
 /// use gpui_query::hook::use_mutation_state;
-/// use gpui_query::MutationResource;
 /// # #[derive(Clone)]
 /// # struct NewUser;
 /// # #[derive(Clone)]
@@ -132,10 +114,6 @@ where
 /// # fn _doc<C: 'static>(cx: &mut gpui::Context<C>) {
 ///
 /// let mutations = use_mutation_state::<NewUser, User, QueryError, _>(cx);
-/// for entity in &mutations {
-///     let status = entity.read(cx).status();
-///     // ...
-/// }
 /// # }
 /// ```
 pub fn use_mutation_state<V, T, E, C>(cx: &mut Context<C>) -> Vec<Entity<MutationResource<V, T, E>>>
@@ -152,17 +130,7 @@ where
     }
 }
 
-/// Trigger a mutation on an existing mutation entity.
-///
-/// Transitions the entity to Loading with the given variables, spawns the
-/// mutator, and retries per the entity's policy. Variables are wrapped in an
-/// `Arc<V>` so each retry only clones once; prefer [`mutate_by_ref`] or
-/// [`mutate_arc`] to skip the per-attempt `V::clone` entirely.
-///
-/// A call while the mutation is already Loading is a no-op: the check and the
-/// `begin` transition happen inside one `entity.update`, so racing callers
-/// cannot both start. The spawned task is stored on the resource, so a
-/// replacement call or entity drop aborts a prior in-flight task.
+/// Variables are wrapped in an `Arc<V>` (one `V::clone` per attempt); a call while Loading is a no-op, and a replacement call or entity drop aborts the prior task.
 ///
 /// # Example
 ///
@@ -192,7 +160,6 @@ pub fn mutate<V, T, E, C, F, Fut>(
     F: Fn(V) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    // One V::clone per attempt, matching the Fn(V) mutator contract.
     begin_and_spawn(
         entity,
         Arc::new(variables),
@@ -202,13 +169,9 @@ pub fn mutate<V, T, E, C, F, Fut>(
     );
 }
 
-/// Like [`mutate`] but with lifecycle callbacks.
-///
-/// Callbacks fire on the final outcome (first success or retries exhausted),
-/// never on intermediate attempts. They receive cloned data/error and run
-/// outside any entity borrow, so they may safely call `entity.update()`. If
-/// the entity is dropped mid-mutation, `on_error` and `on_settled` still fire
-/// so callers always get a terminal callback.
+/// Callbacks fire on the terminal outcome only, outside any entity borrow (safe
+/// to call `entity.update()`); `on_error`/`on_settled` still fire if the entity
+/// drops mid-mutation.
 pub fn mutate_with_callbacks<V, T, E, C, F, Fut>(
     entity: &Entity<MutationResource<V, T, E>>,
     variables: V,
@@ -232,12 +195,8 @@ pub fn mutate_with_callbacks<V, T, E, C, F, Fut>(
     );
 }
 
-/// Like [`mutate`] but the mutator receives `&V`, so the retry loop borrows
-/// the variables from the stored `Arc<V>` and performs no `V::clone` per
-/// attempt. Clone inside the mutator only if it needs an owned value across an
-/// `.await`.
-///
-/// `V` is still `Clone` because `begin` stores an owned copy on the resource.
+/// The mutator receives `&V` borrowed from the stored `Arc<V>`: no `V::clone`
+/// per attempt (`V: Clone` is still required; `begin` stores an owned copy).
 pub fn mutate_by_ref<V, T, E, C, F, Fut>(
     entity: &Entity<MutationResource<V, T, E>>,
     variables: V,
@@ -254,8 +213,7 @@ pub fn mutate_by_ref<V, T, E, C, F, Fut>(
     begin_and_spawn(entity, Arc::new(variables), mutator, cx, None);
 }
 
-/// Like [`mutate_by_ref`] but accepts `Arc<V>` directly, letting the caller
-/// share the variables buffer across invocations without an extra `Arc::new`.
+/// [`mutate_by_ref`] taking `Arc<V>` directly, so callers share one variables buffer.
 pub fn mutate_arc<V, T, E, C, F, Fut>(
     entity: &Entity<MutationResource<V, T, E>>,
     variables: Arc<V>,
@@ -272,11 +230,8 @@ pub fn mutate_arc<V, T, E, C, F, Fut>(
     begin_and_spawn(entity, variables, mutator, cx, None);
 }
 
-/// Shared guard/begin/spawn for every `mutate*` entrypoint.
-///
-/// The `is_loading` guard and the `begin` transition happen inside one
-/// `entity.update` so racing callers cannot both begin. The spawned task is
-/// stored via `set_current_task` so replacement or drop aborts it.
+/// The `is_loading` guard and `begin` run in one `entity.update`, so racing
+/// callers cannot both begin; `set_current_task` makes replacement or drop abort.
 fn begin_and_spawn<V, T, E, C, F, Fut>(
     entity: &Entity<MutationResource<V, T, E>>,
     variables: Arc<V>,
@@ -322,8 +277,6 @@ fn begin_and_spawn<V, T, E, C, F, Fut>(
             run_mutation_loop_by_ref(&weak, variables, mutator, &retry_policy, cx).await;
         }
     });
-    // No notify: set_current_task does not change status (already Loading
-    // from begin, which notified).
     entity.update(cx, |r, _| {
         r.set_current_task(task);
     });

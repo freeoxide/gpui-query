@@ -1,15 +1,11 @@
-//! Query and mutation options with builder pattern and sensible defaults.
-//!
-//! All options implement `Default` and `From<&str>` so callers can pass just a
-//! string key for the simplest case.
+//! Query and mutation options; `From<&str>`/`From<String>` let a bare key
+//! stand in for a full options value.
 
 use std::sync::Arc;
 
 use crate::core::{CachePolicy, RefetchTrigger, RequestPolicy, RetryPolicy};
 
-/// Options for `use_query` and `fetch_query`.
-///
-/// # Quick start
+/// # Examples
 ///
 /// ```no_run
 /// use gpui_query::QueryOptions;
@@ -21,12 +17,10 @@ use crate::core::{CachePolicy, RefetchTrigger, RequestPolicy, RetryPolicy};
 /// # struct MyError;
 /// # fn _doc(cx: &mut gpui::Context<()>) {
 ///
-/// // Simplest: just a string key
 /// let result = use_query("users", |signal| async move {
 ///     Ok::<Vec<User>, MyError>(vec![])
 /// }, cx);
 ///
-/// // With options:
 /// let result = use_query(
 ///     QueryOptions::new("users")
 ///         .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
@@ -40,41 +34,30 @@ use crate::core::{CachePolicy, RefetchTrigger, RequestPolicy, RetryPolicy};
 /// ```
 #[derive(Clone, Debug)]
 pub struct QueryOptions {
-    /// The query key. Can be a string or multi-segment key.
     pub key: crate::core::QueryKey,
-    /// Cache policy. Default: Ttl { ttl_ms: 60_000 }.
+    /// Default: `Ttl { ttl_ms: 60_000 }`.
     pub cache_policy: CachePolicy,
-    /// Request policy. Default: LatestWins.
+    /// Default: `LatestWins`.
     pub request_policy: RequestPolicy,
-    /// Retry policy. Default: 3 retries with exponential backoff.
+    /// Default: 3 retries with exponential backoff.
     pub retry_policy: RetryPolicy,
-    /// GC time in milliseconds. Default: 300_000 (5 minutes).
-    ///
-    /// Reserved: stored but not yet consumed. GC currently runs off the global
-    /// time set via `QueryClient::with_gc_time`; setting this has no effect
-    /// today.
+    /// Default 300_000; reserved: GC runs off `QueryClient::with_gc_time`, so this field has no effect today.
     pub gc_time_ms: u64,
-    /// Keep previous data when the key changes.
-    ///
-    /// Reserved: stored but not yet consumed; setting it has no effect today.
+    /// Reserved: stored but not consumed; setting it has no effect today.
     pub keep_previous_data: bool,
-    /// Whether to force a fetch (ignore cache). When `true`, `use_query`
-    /// passes `QueryFetchMode::Force` to `begin_request`, bypassing freshness
-    /// checks.
+    /// When `true`, `use_query` bypasses freshness checks (`QueryFetchMode::Force`).
     pub force_fetch: bool,
-    /// Refetch on mount trigger. Reserved: stored but not yet consumed.
+    /// Reserved: stored but not consumed.
     pub refetch_on_mount: RefetchTrigger,
-    /// Refetch on window focus trigger. Reserved: stored but not yet consumed.
+    /// Reserved: stored but not consumed.
     pub refetch_on_window_focus: RefetchTrigger,
-    /// Refetch on reconnect trigger. Reserved: stored but not yet consumed.
+    /// Reserved: stored but not consumed.
     pub refetch_on_reconnect: RefetchTrigger,
 }
 
 impl Default for QueryOptions {
     fn default() -> Self {
         Self {
-            // Not const-constructable: QueryKey wraps an Arc, so `from`
-            // allocates. Only reached when a caller omits the key.
             key: crate::core::QueryKey::from("default"),
             cache_policy: CachePolicy::default(),
             request_policy: RequestPolicy::default(),
@@ -89,30 +72,26 @@ impl Default for QueryOptions {
     }
 }
 
-/// Generates the builder methods shared by [`QueryOptions`] and
-/// [`InfiniteQueryOptions`] so the two cannot drift.
+/// Builder methods shared by [`QueryOptions`] and [`InfiniteQueryOptions`] so
+/// the two cannot drift.
 macro_rules! impl_query_options_builders {
     ($t:ident) => {
         impl $t {
-            /// Set the cache policy.
             pub fn cache_policy(mut self, policy: CachePolicy) -> Self {
                 self.cache_policy = policy;
                 self
             }
 
-            /// Set the request policy.
             pub fn request_policy(mut self, policy: RequestPolicy) -> Self {
                 self.request_policy = policy;
                 self
             }
 
-            /// Set the retry policy.
             pub fn retry_policy(mut self, policy: RetryPolicy) -> Self {
                 self.retry_policy = policy;
                 self
             }
 
-            /// Set the GC time in milliseconds.
             pub fn gc_time(mut self, ms: u64) -> Self {
                 self.gc_time_ms = ms;
                 self
@@ -122,7 +101,6 @@ macro_rules! impl_query_options_builders {
 }
 
 impl QueryOptions {
-    /// Create options with just a key.
     pub fn new(key: impl Into<crate::core::QueryKey>) -> Self {
         Self {
             key: key.into(),
@@ -138,16 +116,11 @@ impl QueryOptions {
         }
     }
 
-    /// Force a fetch, ignoring cache freshness checks.
     pub fn force(mut self) -> Self {
         self.force_fetch = true;
         self
     }
 
-    /// Keep previous data when the key changes.
-    ///
-    /// Reserved: sets the field, which is not yet consumed by `use_query`.
-    /// Calling it has no effect today.
     pub fn keep_previous(mut self) -> Self {
         self.keep_previous_data = true;
         self
@@ -187,12 +160,11 @@ impl From<(crate::core::QueryKey, CachePolicy, RequestPolicy)> for QueryOptions 
     }
 }
 
-/// Options for `use_mutation`.
 #[derive(Clone, Debug)]
 pub struct MutationOptions {
-    /// Retry policy. Default: no retries.
+    /// Default: no retries.
     pub retry_policy: RetryPolicy,
-    /// GC time in milliseconds.
+    /// Default: 300_000.
     pub gc_time_ms: u64,
 }
 
@@ -206,13 +178,11 @@ impl Default for MutationOptions {
 }
 
 impl MutationOptions {
-    /// Set the retry policy.
     pub fn retry_policy(mut self, policy: RetryPolicy) -> Self {
         self.retry_policy = policy;
         self
     }
 
-    /// Set the GC time in milliseconds.
     pub fn gc_time(mut self, ms: u64) -> Self {
         self.gc_time_ms = ms;
         self
@@ -225,12 +195,7 @@ pub type MutationErrorCallback<E> = Option<Arc<dyn Fn(&E) + Send + Sync>>;
 
 pub type MutationSettledCallback<T, E> = Option<Arc<dyn Fn(Option<&T>, Option<&E>) + Send + Sync>>;
 
-/// Lifecycle callbacks for mutations.
-///
-/// `Clone` is manual (every field is an `Option<Arc<...>>`, so cloning bumps
-/// refcounts without requiring `T: Clone` / `E: Clone`). Callbacks are shared
-/// across concurrent mutation invocations. `E` should implement `Debug` so
-/// callbacks can log or display error details.
+/// Manual `Clone` (field `Arc`s, no `T: Clone` / `E: Clone` bound); shared across concurrent invocations.
 pub struct MutationCallbacks<T, E> {
     /// Fired on terminal success.
     pub on_success: MutationSuccessCallback<T>,
@@ -261,24 +226,20 @@ impl<T, E> Default for MutationCallbacks<T, E> {
 }
 
 impl<T, E> MutationCallbacks<T, E> {
-    /// Create empty callbacks.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set the success callback.
     pub fn on_success(mut self, f: impl Fn(&T) + Send + Sync + 'static) -> Self {
         self.on_success = Some(Arc::new(f));
         self
     }
 
-    /// Set the error callback.
     pub fn on_error(mut self, f: impl Fn(&E) + Send + Sync + 'static) -> Self {
         self.on_error = Some(Arc::new(f));
         self
     }
 
-    /// Set the settled callback (fires on both success and failure).
     pub fn on_settled(
         mut self,
         f: impl Fn(Option<&T>, Option<&E>) + Send + Sync + 'static,
@@ -288,20 +249,15 @@ impl<T, E> MutationCallbacks<T, E> {
     }
 }
 
-/// Options for infinite queries.
 #[derive(Clone, Debug)]
 pub struct InfiniteQueryOptions {
-    /// The query key.
     pub key: crate::core::QueryKey,
-    /// Cache policy.
     pub cache_policy: CachePolicy,
-    /// Request policy.
     pub request_policy: RequestPolicy,
-    /// Maximum pages to retain. Default: 50.
+    /// Default: 50; oldest pages are evicted beyond it.
     pub max_pages: Option<usize>,
-    /// Retry policy.
     pub retry_policy: RetryPolicy,
-    /// GC time in milliseconds. Default: 300_000 (5 minutes).
+    /// Default: 300_000.
     pub gc_time_ms: u64,
 }
 
@@ -319,7 +275,6 @@ impl Default for InfiniteQueryOptions {
 }
 
 impl InfiniteQueryOptions {
-    /// Create with just a key.
     pub fn new(key: impl Into<crate::core::QueryKey>) -> Self {
         Self {
             key: key.into(),
@@ -331,15 +286,14 @@ impl InfiniteQueryOptions {
         }
     }
 
-    /// Set max pages: the number of retained pages before old ones are
-    /// evicted. Use [`InfiniteQueryOptions::unbounded_pages`] for no limit.
+    /// Retained pages before old ones are evicted; see
+    /// [`InfiniteQueryOptions::unbounded_pages`] for no limit.
     pub fn max_pages(mut self, max: usize) -> Self {
         self.max_pages = Some(max);
         self
     }
 
-    /// Allow unbounded page accumulation (no limit). Use with caution: page
-    /// storage grows without bound if the user scrolls far enough.
+    /// No limit: page storage grows without bound if the user scrolls far enough.
     pub fn unbounded_pages(mut self) -> Self {
         self.max_pages = None;
         self

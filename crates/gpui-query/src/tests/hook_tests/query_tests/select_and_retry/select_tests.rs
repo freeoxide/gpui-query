@@ -1,6 +1,3 @@
-//! Tests for `use_query_select`: transform applied, updated on refetch,
-//! memoization, fetch failure, and multiple selects on same query.
-
 use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -11,8 +8,6 @@ use crate::core::{
 };
 use crate::hook::*;
 use crate::tests::test_support::*;
-
-// ── use_query_select: transform applied ─────────────────────────────────────
 
 #[gpui::test]
 fn test_use_query_select_transform_applied(cx: &mut TestAppContext) {
@@ -54,8 +49,6 @@ fn test_use_query_select_transform_applied(cx: &mut TestAppContext) {
         );
     });
 }
-
-// ── use_query_select: transform updated on refetch ──────────────────────────
 
 #[gpui::test]
 fn test_use_query_select_transform_updated_on_refetch(cx: &mut TestAppContext) {
@@ -105,7 +98,6 @@ fn test_use_query_select_transform_updated_on_refetch(cx: &mut TestAppContext) {
         assert_eq!(mapped_data, Some(1), "first fetch should have 1 item");
     });
 
-    // Refetch — should now produce 2 items, and the transform should give 2.
     harness.update(cx, |this, cx| {
         fetch_query(
             &this.query,
@@ -138,8 +130,6 @@ fn test_use_query_select_transform_updated_on_refetch(cx: &mut TestAppContext) {
     });
 }
 
-// ── use_query_select: memoization (same data, same result) ─────────────────
-
 #[gpui::test]
 fn test_use_query_select_memoization_consistency(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -168,7 +158,6 @@ fn test_use_query_select_memoization_consistency(cx: &mut TestAppContext) {
 
     cx.run_until_parked();
 
-    // Read the mapped data twice — transform should produce consistent results.
     let result1 = cx.update(|cx| harness.read(cx).mapped.read(cx).data());
     let result2 = cx.update(|cx| harness.read(cx).mapped.read(cx).data());
 
@@ -178,8 +167,6 @@ fn test_use_query_select_memoization_consistency(cx: &mut TestAppContext) {
     );
     assert_eq!(result1, Some(5), "length of 'hello' is 5");
 }
-
-// ── use_query_select: handles fetch failure gracefully ──────────────────────
 
 #[gpui::test]
 fn test_use_query_select_handles_fetch_failure(cx: &mut TestAppContext) {
@@ -215,7 +202,6 @@ fn test_use_query_select_handles_fetch_failure(cx: &mut TestAppContext) {
         let query_status = h.query.read(cx).status();
         assert_eq!(query_status, QueryStatus::Failure);
 
-        // Mapped data should be None when query has no data.
         let mapped_data = h.mapped.read(cx).data();
         assert_eq!(
             mapped_data, None,
@@ -224,15 +210,10 @@ fn test_use_query_select_handles_fetch_failure(cx: &mut TestAppContext) {
     });
 }
 
-// ── use_query_select: multiple selects on same query ────────────────────────
-
 #[gpui::test]
 fn test_use_query_select_multiple_transforms_same_query(cx: &mut TestAppContext) {
     setup_query_client(cx);
 
-    // Counting fetchers: each call returns a different value so we can
-    // distinguish "cache hit (re-used first fetcher's data)" from "re-fetched
-    // (second fetcher ran and produced its own data)".
     let fetch_count = Arc::new(Mutex::new(0u32));
     let fc1 = fetch_count.clone();
     let fc2 = fetch_count.clone();
@@ -258,7 +239,6 @@ fn test_use_query_select_multiple_transforms_same_query(cx: &mut TestAppContext)
                         *g += 1;
                         *g
                     };
-                    // Call 1 returns ["a","b","c"], call 2+ returns different data.
                     let items: Vec<String> = (0..n + 2).map(|i| format!("item-{}", i)).collect();
                     Ok::<_, QueryError>(items)
                 }
@@ -284,7 +264,6 @@ fn test_use_query_select_multiple_transforms_same_query(cx: &mut TestAppContext)
             cx,
         );
 
-        // Both selects should reference the same cached query entity.
         assert_eq!(
             query.entity_id(),
             query2.entity_id(),
@@ -306,9 +285,6 @@ fn test_use_query_select_multiple_transforms_same_query(cx: &mut TestAppContext)
         let h = harness.read(cx);
         let len = h.mapped_len.read(cx).data();
         let first = h.mapped_first.read(cx).data();
-        // Only one fetch should have occurred (the second select is a cache hit).
-        // If the second had re-fetched, the data would be 4 items / "item-2"
-        // instead of 3 items / "item-0".
         assert_eq!(
             len,
             Some(3),

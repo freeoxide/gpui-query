@@ -1,16 +1,3 @@
-//! Regression tests for stored-task cancellation and the cross-context
-//! mutate race.
-//!
-//! Stored mutation/infinite tasks are cancelled when superseded: `set_current_task`
-//! drops the previous `gpui::Task`, and dropping a GPUI task aborts its future.
-//! `test_stored_mutation_task_aborted_when_entity_dropped` checks that an in-flight
-//! mutation whose entity is dropped never runs its post-gate side effect.
-//!
-//! `test_mutate_from_two_spawn_contexts_second_rejected` races two `mutate()`
-//! calls from different async spawn contexts (the synchronous double-call case
-//! is covered by `test_mutate_double_while_loading_*`); the atomic check+begin
-//! guard must still reject the second while the first is Loading.
-
 use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -19,14 +6,10 @@ use crate::core::{MutationResource, QueryError};
 use crate::hook::*;
 use crate::tests::test_support::*;
 
-// Stored task is cancelled when its entity is dropped.
-
 #[gpui::test]
 fn test_stored_mutation_task_aborted_when_entity_dropped(cx: &mut TestAppContext) {
     setup_test(cx);
 
-    // Counter incremented after the gate is released: stays at 0 if the task
-    // is correctly aborted on entity drop.
     let landed = Arc::new(Mutex::new(0u32));
     let landed_clone = landed.clone();
 
@@ -51,8 +34,6 @@ fn test_stored_mutation_task_aborted_when_entity_dropped(cx: &mut TestAppContext
                     let gate_clone = gate_clone.clone();
                     let executor = executor.clone();
                     async move {
-                        // Park here. If the task is aborted (entity dropped),
-                        // this future is dropped and the line below never runs.
                         gate_clone.wait(&executor).await;
                         *landed_clone.lock().unwrap() += 1;
                         Ok::<_, QueryError>("done".to_string())
@@ -67,7 +48,6 @@ fn test_stored_mutation_task_aborted_when_entity_dropped(cx: &mut TestAppContext
             H { _mutation: entity }
         });
 
-        // Sanity: still loading before we drop the harness.
         cx.update(|cx| {
             assert!(
                 harness.read(cx)._mutation.read(cx).is_loading(),
@@ -75,19 +55,11 @@ fn test_stored_mutation_task_aborted_when_entity_dropped(cx: &mut TestAppContext
             );
         });
 
-        // Dropping `harness` drops the entity and its CurrentTask, which
-        // aborts the gated future.
         drop(harness);
     }
 
-    // GPUI releases dropped entities at the end of `App::update`, not during
-    // `run_until_parked`. Force that flush so the entity is gone before the
-    // gate opens, otherwise the parked future would still run its post-gate
-    // side effect and `landed` would read 1.
     cx.update(|_| {});
 
-    // If the task had not been aborted, the mutator would proceed past the
-    // gate and increment `landed`.
     gate.release();
     cx.run_until_parked();
 
@@ -99,18 +71,6 @@ fn test_stored_mutation_task_aborted_when_entity_dropped(cx: &mut TestAppContext
     );
 }
 
-// Two mutate() calls from different spawn contexts.
-//
-// The second `mutate()` fires from an independent `Context::spawn` task that
-// re-enters the harness entity via `AsyncApp`: the real cross-context race
-// shape. We assert the rejection contract directly (second fetcher never
-// runs, first stays in-flight and uncorrupted). We deliberately do NOT assert
-// post-release completion of the gated first mutate: a completed
-// `Context::spawn` task interacts with the `TestAppContext` executor such
-// that later `run_until_parked` calls stop draining the background-timer
-// wake-up chain `Gate::wait` relies on. Gated-mutation completion is covered
-// by `retry_reset_tests`.
-
 #[gpui::test]
 fn test_mutate_from_two_spawn_contexts_second_rejected(cx: &mut TestAppContext) {
     setup_test(cx);
@@ -118,13 +78,10 @@ fn test_mutate_from_two_spawn_contexts_second_rejected(cx: &mut TestAppContext) 
     let first_call_count = Arc::new(Mutex::new(0u32));
     let second_call_count = Arc::new(Mutex::new(0u32));
 
-    // Keeps the first mutate's fetcher in flight while the second mutate is
-    // issued from a different spawn context.
     let gate = Gate::new();
     let gate_for_first = gate.clone();
     let executor = cx.background_executor.clone();
 
-    // The first fetcher parks on the gate so the mutation stays Loading.
     #[allow(dead_code)]
     struct H {
         mutation: Entity<MutationResource<String, String, QueryError>>,
@@ -158,12 +115,7 @@ fn test_mutate_from_two_spawn_contexts_second_rejected(cx: &mut TestAppContext) 
         );
     });
 
-    // Second mutate, issued from a different async spawn context: spawn on the
-    // harness `Context<H>` and re-enter the entity via `AsyncApp` to call
-    // mutate. An independent task racing the in-flight one.
     let sc = second_call_count.clone();
-    // A Gate signals that the spawned task ran its context; the main task
-    // drains once.
     let second_ran = Gate::new();
     let second_ran_clone = second_ran.clone();
     let _second_task = harness.update(cx, |_this, cx| {
@@ -189,8 +141,6 @@ fn test_mutate_from_two_spawn_contexts_second_rejected(cx: &mut TestAppContext) 
         })
     });
 
-    // Drain so the spawned second mutate runs (and, because the first is
-    // still Loading, is rejected).
     cx.run_until_parked();
     assert!(
         second_ran.is_released(),
@@ -198,14 +148,12 @@ fn test_mutate_from_two_spawn_contexts_second_rejected(cx: &mut TestAppContext) 
          actually exercised"
     );
 
-    // The second mutate's fetcher never ran (rejected by the is_loading guard).
     assert_eq!(
         *second_call_count.lock().unwrap(),
         0,
         "second mutate from a different spawn context must be rejected while \
          the first is Loading"
     );
-    // The first mutate is still in-flight and uncorrupted.
     assert_eq!(
         *first_call_count.lock().unwrap(),
         1,
@@ -219,8 +167,6 @@ fn test_mutate_from_two_spawn_contexts_second_rejected(cx: &mut TestAppContext) 
         );
     });
 
-    // Hygiene: release the gate so the parked first fetcher can progress
-    // (not asserted; see the note above the test).
     gate.release();
     cx.run_until_parked();
 }

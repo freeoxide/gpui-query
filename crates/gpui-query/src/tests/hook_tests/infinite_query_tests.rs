@@ -1,6 +1,3 @@
-//! Tests for `use_infinite_query`, `fetch_next_page_infinite`, and
-//! `fetch_previous_page_infinite`.
-
 use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -10,8 +7,6 @@ use crate::core::{
 };
 use crate::hook::*;
 use crate::tests::test_support::*;
-
-// ── use_infinite_query ─────────────────────────────────────────────────────
 
 #[gpui::test]
 fn test_use_infinite_query_creates_entity(cx: &mut TestAppContext) {
@@ -89,7 +84,6 @@ fn test_fetch_next_page_appends_page(cx: &mut TestAppContext) {
         assert_eq!(harness.read(cx).entity.read(cx).pages().len(), 1);
     });
 
-    // Fetch the next page.
     harness.update(cx, |this, cx| {
         fetch_next_page_infinite(
             &this.entity,
@@ -109,8 +103,6 @@ fn test_fetch_next_page_appends_page(cx: &mut TestAppContext) {
     });
 }
 
-// ── use_infinite_query: fetch_next_page while already fetching ──────────────
-
 #[gpui::test]
 fn test_fetch_next_page_while_fetching(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -129,14 +121,12 @@ fn test_fetch_next_page_while_fetching(cx: &mut TestAppContext) {
         H { entity }
     });
 
-    // Wait for first page to load.
     cx.run_until_parked();
 
     cx.update(|cx| {
         assert_eq!(harness.read(cx).entity.read(cx).pages().len(), 1);
     });
 
-    // Start a fetch_next_page. This should trigger a loading state.
     harness.update(cx, |this, cx| {
         fetch_next_page_infinite(
             &this.entity,
@@ -157,8 +147,6 @@ fn test_fetch_next_page_while_fetching(cx: &mut TestAppContext) {
         assert!(!resource.has_next_page());
     });
 }
-
-// ── use_infinite_query: fetch_previous_page ─────────────────────────────────
 
 #[gpui::test]
 fn test_fetch_previous_page_prepends_page(cx: &mut TestAppContext) {
@@ -185,7 +173,6 @@ fn test_fetch_previous_page_prepends_page(cx: &mut TestAppContext) {
         assert_eq!(resource.pages()[0].as_ref(), &vec![5]);
     });
 
-    // Enable previous page flag so fetch_previous_page_infinite can proceed.
     let entity = cx.update(|cx| harness.read(cx).entity.clone());
     cx.update(|cx| {
         entity.update(cx, |r, _| {
@@ -193,7 +180,6 @@ fn test_fetch_previous_page_prepends_page(cx: &mut TestAppContext) {
         });
     });
 
-    // Fetch a previous page — it should be prepended.
     harness.update(cx, |this, cx| {
         fetch_previous_page_infinite(
             &this.entity,
@@ -220,8 +206,6 @@ fn test_fetch_previous_page_prepends_page(cx: &mut TestAppContext) {
     });
 }
 
-// ── use_infinite_query: max_pages enforcement through hook ──────────────────
-
 #[gpui::test]
 fn test_infinite_query_max_pages_enforcement(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -243,12 +227,10 @@ fn test_infinite_query_max_pages_enforcement(cx: &mut TestAppContext) {
 
     cx.run_until_parked();
 
-    // First page loaded.
     cx.update(|cx| {
         assert_eq!(harness.read(cx).entity.read(cx).pages().len(), 1);
     });
 
-    // Fetch page 2.
     harness.update(cx, |this, cx| {
         fetch_next_page_infinite(
             &this.entity,
@@ -263,7 +245,6 @@ fn test_infinite_query_max_pages_enforcement(cx: &mut TestAppContext) {
         assert_eq!(pages.len(), 2);
     });
 
-    // Fetch page 3 — max_pages is 2, so page 1 should be evicted.
     harness.update(cx, |this, cx| {
         fetch_next_page_infinite(
             &this.entity,
@@ -286,8 +267,6 @@ fn test_infinite_query_max_pages_enforcement(cx: &mut TestAppContext) {
     });
 }
 
-// ── fetch_next_page_infinite: direct call on existing entity ────────────────
-
 #[gpui::test]
 fn test_fetch_next_page_infinite_direct_call(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -296,8 +275,6 @@ fn test_fetch_next_page_infinite_direct_call(cx: &mut TestAppContext) {
         entity: Entity<InfiniteQueryResource<Vec<&'static str>, QueryError>>,
     }
 
-    // Create entity via use_infinite_query, wait for first page, then call
-    // fetch_next_page_infinite directly.
     let harness = cx.new(|cx| {
         let (entity, _sub) = use_infinite_query(
             InfiniteQueryOptions::new("direct-next").cache_policy(CachePolicy::Ttl { ttl_ms: 0 }),
@@ -327,8 +304,6 @@ fn test_fetch_next_page_infinite_direct_call(cx: &mut TestAppContext) {
     });
 }
 
-// ── fetch_previous_page_infinite: direct call ──────────────────────────────
-
 #[gpui::test]
 fn test_fetch_previous_page_infinite_direct_call(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -348,7 +323,6 @@ fn test_fetch_previous_page_infinite_direct_call(cx: &mut TestAppContext) {
 
     cx.run_until_parked();
 
-    // Enable previous page flag so fetch_previous_page_infinite can proceed.
     let entity = cx.update(|cx| harness.read(cx).entity.clone());
     cx.update(|cx| {
         entity.update(cx, |r, _| {
@@ -377,8 +351,6 @@ fn test_fetch_previous_page_infinite_direct_call(cx: &mut TestAppContext) {
         assert_eq!(resource.pages()[1].as_ref(), &vec!["p2"]);
     });
 }
-
-// ── use_infinite_query: error handling on first page ────────────────────────
 
 #[gpui::test]
 fn test_infinite_query_first_page_failure(cx: &mut TestAppContext) {
@@ -409,8 +381,6 @@ fn test_infinite_query_first_page_failure(cx: &mut TestAppContext) {
         assert!(err.to_string().contains("page-fail"));
     });
 }
-
-// ── use_infinite_query: retry on failure ────────────────────────────────────
 
 #[gpui::test]
 fn test_infinite_query_retry_on_failure(cx: &mut TestAppContext) {
@@ -464,8 +434,6 @@ fn test_infinite_query_retry_on_failure(cx: &mut TestAppContext) {
     );
 }
 
-// ── use_infinite_query: multiple pages appended sequentially ────────────────
-
 #[gpui::test]
 fn test_infinite_query_sequential_pages(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -485,7 +453,6 @@ fn test_infinite_query_sequential_pages(cx: &mut TestAppContext) {
 
     cx.run_until_parked();
 
-    // Fetch 3 more pages sequentially.
     for page_num in 2..=4 {
         let harness_ref = &harness;
         harness_ref.update(cx, |this, cx| {

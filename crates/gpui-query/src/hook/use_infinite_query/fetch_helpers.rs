@@ -1,6 +1,4 @@
-//! Public fetch helpers for infinite query entities, called from event
-//! handlers (scroll-to-bottom, button click) to fetch the next or previous
-//! page.
+//! Event-handler entrypoints for fetching the next or previous page.
 
 use gpui::{BorrowAppContext as _, Context, Entity};
 
@@ -12,11 +10,7 @@ use super::fetch_runners::{
 };
 use crate::hook::current_time_ms;
 
-/// Initiate a fetch of the next page on an existing infinite query entity.
-///
-/// Reads the last page from the entity and passes it to the fetcher. Applies
-/// the retry policy stored on the entity; if a fetch is already in flight the
-/// old signal is cancelled and the new request supersedes it.
+/// If a fetch is already in flight, its signal is cancelled and the new request supersedes it.
 ///
 /// # Example
 ///
@@ -47,11 +41,7 @@ pub fn fetch_next_page_infinite<T, E, C, FNext, Fut>(
     fetch_page_infinite(entity, fetcher, cx, PageDirection::Next);
 }
 
-/// Initiate a fetch of the previous page on an existing infinite query entity.
-///
-/// Like [`fetch_next_page_infinite`] but backward: the fetcher receives the
-/// first page (not the last) so it can determine the cursor for the previous
-/// page.
+/// Backward variant: the fetcher receives the first page (not the last) as its cursor.
 pub fn fetch_previous_page_infinite<T, E, C, FPrev, Fut>(
     entity: &Entity<InfiniteQueryResource<T, E>>,
     fetcher: FPrev,
@@ -66,8 +56,6 @@ pub fn fetch_previous_page_infinite<T, E, C, FPrev, Fut>(
     fetch_page_infinite(entity, fetcher, cx, PageDirection::Previous);
 }
 
-/// Shared body of [`fetch_next_page_infinite`] / [`fetch_previous_page_infinite`];
-/// only `direction` differs (which `begin_fetch_*` call and which runner).
 fn fetch_page_infinite<T, E, C, F, Fut>(
     entity: &Entity<InfiniteQueryResource<T, E>>,
     fetcher: F,
@@ -82,8 +70,6 @@ fn fetch_page_infinite<T, E, C, F, Fut>(
 {
     let weak = entity.downgrade();
 
-    // Bucket-sequenced RequestId so event-driven page fetches stay monotonic
-    // per key; without a QueryClient the resource mints a transient one.
     let maybe_request_id = if cx.has_global::<QueryClient>() {
         let key = entity.read_with(cx, |r, _| r.key().clone());
         cx.update_global::<QueryClient, _>(|client, _| {
@@ -105,8 +91,7 @@ fn fetch_page_infinite<T, E, C, F, Fut>(
 
     if let Some(request_id) = request_id {
         let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-        // Stored on the resource so a replacement fetch or unmount aborts the
-        // prior in-flight task.
+        // Stored on the resource: a replacement fetch or unmount aborts the prior task.
         let task: gpui::Task<()> = cx.spawn(async move |_this, cx| match direction {
             PageDirection::Next => {
                 run_fetch_next_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx).await;

@@ -1,5 +1,4 @@
-//! Internal async fetch runners for infinite query page fetches: retry-aware,
-//! running with a captured [`RequestId`] and two-phase completion.
+//! Retry-aware page-fetch runners with two-phase completion.
 
 use std::sync::Arc;
 
@@ -7,12 +6,8 @@ use crate::core::{InfiniteQueryResource, RequestId};
 
 use crate::hook::{current_time_ms, read_entity};
 
-/// Direction of an infinite-query page fetch.
-///
-/// The next/previous runners differ only in which page they read as the
-/// cursor and which `is_next` flag they pass to
-/// [`InfiniteQueryResource::complete_success_with_guard`]; this enum
-/// parameterizes that difference so the body lives in one place.
+/// The runners differ only in cursor page and the `is_next` flag passed to
+/// [`InfiniteQueryResource::complete_success_with_guard`]; this enum carries that.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PageDirection {
     Next,
@@ -20,14 +15,11 @@ pub(super) enum PageDirection {
 }
 
 impl PageDirection {
-    /// The `is_next` flag handed to `complete_success_with_guard`.
     fn is_next(self) -> bool {
         matches!(self, PageDirection::Next)
     }
 
-    /// The page used as the fetcher cursor: the last page for `Next`, the
-    /// first page for `Previous`. Read via the refcount-bumped `Arc<T>`
-    /// accessor (no full page clone).
+    /// Last page for `Next`, first for `Previous`; the `Arc<T>` accessor is a refcount bump, no page clone.
     fn cursor_page_arc<T: Clone + Send + Sync + 'static, E>(
         self,
         resource: &InfiniteQueryResource<T, E>,
@@ -39,13 +31,9 @@ impl PageDirection {
     }
 }
 
-/// Execute a page fetch with a captured `RequestId` in the given direction.
-///
-/// The `request_id` is the one returned from `begin_fetch_*`, not re-read
-/// after the fetcher completes, and completion is two-phase
-/// (`accept_current_request` then complete) so a superseded request can never
-/// write. After each retry delay the signal and the active request are checked
-/// in one read pass; a cancelled or superseded fetch stops retrying.
+/// The `request_id` comes from `begin_fetch_*` (never re-read after the fetcher),
+/// and completion is two-phase so a superseded request can never write; a
+/// cancelled or superseded fetch stops retrying after the delay.
 async fn run_fetch_page_with_id<T, E, F, Fut>(
     entity: &gpui::WeakEntity<InfiniteQueryResource<T, E>>,
     fetcher: &F,
@@ -62,8 +50,6 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
     let mut attempt: u32 = 0;
 
     loop {
-        // Re-read the cursor fresh each attempt so the fetcher sees
-        // up-to-date data; the Arc access is a cheap refcount bump.
         let cursor_page_arc: Option<Arc<T>> = {
             let Some(e) = entity.upgrade() else { return };
             read_entity(&e, cx, |r, _| direction.cursor_page_arc(r)).flatten()
@@ -104,8 +90,6 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
                             .await;
                     }
 
-                    // No notify during retry wait: status stays Loading and
-                    // the InfiniteQueryObserver dedupes.
                     let Some(e) = entity.upgrade() else { return };
                     let (cancelled, still_current) = read_entity(&e, cx, |r, _| {
                         (
@@ -133,8 +117,6 @@ async fn run_fetch_page_with_id<T, E, F, Fut>(
     }
 }
 
-/// Execute a fetch-next-page operation with a captured `RequestId`. Thin
-/// direction-specific wrapper around [`run_fetch_page_with_id`].
 pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
     entity: &gpui::WeakEntity<InfiniteQueryResource<T, E>>,
     fetcher: &F,
@@ -158,8 +140,6 @@ pub(super) async fn run_fetch_next_page_with_id<T, E, F, Fut>(
     .await;
 }
 
-/// Execute a fetch-previous-page operation with a captured `RequestId`. Thin
-/// direction-specific wrapper around [`run_fetch_page_with_id`].
 pub(super) async fn run_fetch_previous_page_with_id<T, E, F, Fut>(
     entity: &gpui::WeakEntity<InfiniteQueryResource<T, E>>,
     fetcher: &F,

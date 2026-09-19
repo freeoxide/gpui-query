@@ -1,12 +1,8 @@
-//! Fetch, prefetch, and cancel query tests (tests 31–38).
-
 use gpui::{BorrowAppContext as _, TestAppContext};
 
 use crate::client::QueryClient;
 use crate::core::*;
 use crate::tests::test_support::*;
-
-// -- 31. prepare_fetch_query always starts (uses Force mode) -----------------
 
 #[gpui::test]
 fn test_prepare_fetch_query_uses_force_mode_always_starts(cx: &mut TestAppContext) {
@@ -18,32 +14,23 @@ fn test_prepare_fetch_query_uses_force_mode_always_starts(cx: &mut TestAppContex
     });
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // First fetch succeeds
             let prepared = client
                 .prepare_fetch_query::<String, QueryError>("cached_key", cx)
                 .expect("first fetch should start");
             prepared.complete_success("data".to_string(), cx);
 
-            // prepare_fetch_query uses QueryFetchMode::Force, so it always
-            // starts a new request even when the cache is fresh. This matches
-            // TanStack Query's fetchQuery behavior.
             let second = client.prepare_fetch_query::<String, QueryError>("cached_key", cx);
             assert!(
                 second.is_some(),
                 "prepare_fetch_query uses Force mode, always starts"
             );
 
-            // Data should still be accessible from the first fetch
             let data =
                 client.get_query_data::<String, QueryError>(&QueryKey::from("cached_key"), cx);
             assert_eq!(data, Some("data".to_string()));
         });
     });
 }
-
-// prepare_fetch_query returns Some on the initial call and on a Force-mode
-// call. Full TTL expiry lives in core_cache.rs, where timestamps are
-// controllable via apply_success(data, now_ms).
 
 #[gpui::test]
 fn test_prepare_fetch_query_refetch_after_ttl(cx: &mut TestAppContext) {
@@ -55,19 +42,14 @@ fn test_prepare_fetch_query_refetch_after_ttl(cx: &mut TestAppContext) {
     });
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // First fetch
             let prepared = client
                 .prepare_fetch_query::<String, QueryError>("ttl_key", cx)
                 .expect("first fetch should start");
             prepared.complete_success("old".to_string(), cx);
 
-            // Data should be present after first fetch
             let data = client.get_query_data::<String, QueryError>(&QueryKey::from("ttl_key"), cx);
             assert_eq!(data, Some("old".to_string()));
 
-            // prepare_fetch_query always returns Some (Force mode), even when
-            // cache is fresh. This is the core guarantee: it always initiates
-            // a fetch, unlike prepare_prefetch_query which respects freshness.
             let second = client.prepare_fetch_query::<String, QueryError>("ttl_key", cx);
             assert!(
                 second.is_some(),
@@ -77,10 +59,6 @@ fn test_prepare_fetch_query_refetch_after_ttl(cx: &mut TestAppContext) {
         });
     });
 }
-
-// prepare_prefetch_query returns None for fresh data. The 60s TTL makes
-// this deterministic: one captured `now` drives both apply_success and the
-// freshness check unless the wall clock jumps a full minute between them.
 
 #[gpui::test]
 fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
@@ -94,16 +72,9 @@ fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("prefresh_fresh");
             let entity = client.resource::<String, QueryError>(key.clone(), cx);
-            // Capture `now` once and use it for the data timestamp so the
-            // freshness check inside prepare_prefetch_query (which calls
-            // current_time_ms() again nanoseconds later) sees age ~0ms.
             let now = crate::client::current_time_ms();
             entity.update(cx, |r, _| r.apply_success("fresh_data".to_string(), now));
 
-            // Explicit precondition: verify the age is well within the 60s
-            // TTL before asserting on prepare_prefetch_query's result. This
-            // makes any wall-clock discontinuity surface as a clear
-            // precondition failure rather than a silent flake.
             let age_ms = crate::client::current_time_ms().saturating_sub(now);
             assert!(
                 age_ms < 60_000,
@@ -111,9 +82,6 @@ fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
                 age_ms,
             );
 
-            // prepare_prefetch_query uses Normal mode. Since the data was set
-            // at ~now, age is ~0ms, which is within the 60s TTL, so the cache
-            // is fresh and prefetch should return None (no fetch needed).
             let result = client.prepare_prefetch_query::<String, QueryError>(
                 key.clone(),
                 CachePolicy::Ttl { ttl_ms: 60_000 },
@@ -128,8 +96,6 @@ fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
         });
     });
 }
-
-// -- 34. PreparedFetch complete_failure stores error -------------------------
 
 #[gpui::test]
 fn test_prepared_fetch_complete_failure_stores_error(cx: &mut TestAppContext) {
@@ -152,8 +118,6 @@ fn test_prepared_fetch_complete_failure_stores_error(cx: &mut TestAppContext) {
     });
 }
 
-// -- 35. PreparedFetch signal starts uncancelled -----------------------------
-
 #[gpui::test]
 fn test_prepared_fetch_signal_properties(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -172,20 +136,16 @@ fn test_prepared_fetch_signal_properties(cx: &mut TestAppContext) {
                 "request_id should have a positive value"
             );
 
-            // Complete to clean up
             prepared.complete_success("data".to_string(), cx);
         });
     });
 }
-
-// -- 36. cancel_queries cancels resources across multiple type buckets -------
 
 #[gpui::test]
 fn test_cancel_queries_across_type_buckets(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // Create and start requests for two different types with the same string key
             let key_s = QueryKey::from("target");
             let entity_s = client.resource::<String, QueryError>(key_s.clone(), cx);
             let rid_s = client
@@ -207,7 +167,6 @@ fn test_cancel_queries_across_type_buckets(cx: &mut TestAppContext) {
             let sig_s = entity_s.read(cx).signal().unwrap().clone();
             let sig_u = entity_u.read(cx).signal().unwrap().clone();
 
-            // Cancel all queries with key "target" (Exact filter)
             client.cancel_queries(&QueryKeyFilter::Exact(&key_s), cx);
 
             assert!(sig_s.is_cancelled(), "String query should be cancelled");
@@ -216,14 +175,11 @@ fn test_cancel_queries_across_type_buckets(cx: &mut TestAppContext) {
     });
 }
 
-// -- 37. cancel_queries with All filter cancels everything -------------------
-
 #[gpui::test]
 fn test_cancel_queries_all_filter(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // Start two loading queries
             let key1 = QueryKey::from("a1");
             let key2 = QueryKey::from("a2");
             let e1 = client.resource::<String, QueryError>(key1.clone(), cx);
@@ -253,8 +209,6 @@ fn test_cancel_queries_all_filter(cx: &mut TestAppContext) {
     });
 }
 
-// -- 38. cancel_queries does not affect idle infinite queries ----------------
-
 #[gpui::test]
 fn test_cancel_queries_skips_idle_infinite_queries(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -263,7 +217,6 @@ fn test_cancel_queries_skips_idle_infinite_queries(cx: &mut TestAppContext) {
             let key = QueryKey::from("inf_idle");
             let _entity = client.infinite_resource::<String, QueryError>(key.clone(), cx);
 
-            // Should not panic or affect the idle infinite query
             client.cancel_queries(&QueryKeyFilter::Exact(&key), cx);
 
             let retrieved = client.infinite_query::<String, QueryError>(&key);

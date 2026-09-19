@@ -1,10 +1,6 @@
-//! Internal retry loops for mutations.
-//!
-//! Everything funnels into [`run_mutation_loop_inner`], which takes
-//! `Option<MutationCallbacks>` and a `Fn(&V) -> Fut` mutator so the variables
-//! are borrowed from the stored `Arc<V>` on every attempt (no `V::clone` per
-//! retry). The public `mutate` entrypoints that accept `Fn(V) -> Fut` adapt at
-//! the call site with a one-line wrapper.
+//! All entrypoints funnel into [`run_mutation_loop_inner`], whose `Fn(&V)`
+//! mutator borrows the variables from the stored `Arc<V>` (no `V::clone` per
+//! retry); the `Fn(V)` public entrypoints adapt at the call site.
 
 use std::sync::Arc;
 
@@ -14,19 +10,10 @@ use super::super::options::MutationCallbacks;
 
 use crate::hook::read_entity;
 
-/// Unified retry loop for mutations, shared by the no-callback and
-/// with-callback variants.
-///
-/// While retries remain, uses `increment_retry()` + `prepare_retry()` instead
-/// of `complete_failure()` + `retry()` so observers never see a transient
-/// Failure flash between attempts; only exhausted retries produce a terminal
-/// `complete_failure()`. Neither intermediate call notifies: the status stays
-/// Loading and the `MutationObserver` dedupes.
-///
-/// After each retry delay the loop checks whether the mutation is still in
-/// Loading state; a cancelled or reset mutation stops retrying immediately.
-/// `entity.update` results are discarded because `update` returns `Result<R>`
-/// under `AsyncApp`.
+/// Retries via `increment_retry()` + `prepare_retry()` so observers never see
+/// a transient Failure between attempts; only exhausted retries produce a
+/// terminal `complete_failure()`. Stops once the mutation leaves Loading
+/// (cancelled or reset); intermediate calls don't notify (observer dedupes).
 async fn run_mutation_loop_inner<V, T, E, F, Fut>(
     weak: &gpui::WeakEntity<MutationResource<V, T, E>>,
     variables: Arc<V>,
@@ -48,12 +35,9 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
 
         match result {
             Ok(data) => {
-                // Clone data before update only when callbacks need it.
                 let data_for_callback = callbacks.is_some().then(|| data.clone());
 
                 let Some(entity) = weak.upgrade() else {
-                    // Entity dropped mid-mutation: fire on_settled with None
-                    // for both so the caller sees the discard.
                     if let Some(ref cb) = callbacks
                         && let Some(ref f) = cb.on_settled
                     {
@@ -68,8 +52,7 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                     cx.default_global::<crate::client::CacheMutation>();
                 });
 
-                // Fire outside the entity borrow so callbacks can safely
-                // call entity.update().
+                // Fire outside the entity borrow so callbacks can call entity.update().
                 if let Some(ref cb) = callbacks {
                     if let Some(ref d) = data_for_callback
                         && let Some(ref f) = cb.on_success
@@ -108,8 +91,6 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                         return;
                     };
                     if !read_entity(&entity, cx, |r, _| r.is_loading()).unwrap_or(false) {
-                        // Cancelled or reset during the delay: still fire the
-                        // terminal callbacks.
                         fire_error_callbacks(&callbacks, &error_for_callback);
                         #[cfg(debug_assertions)]
                         eprintln!(
@@ -124,9 +105,6 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
 
                     attempt += 1;
                 } else {
-                    // Terminal failure. Capture availability before
-                    // complete_failure so callbacks fire even if the entity
-                    // drops in between.
                     if let Some(entity) = weak.upgrade() {
                         let _ = entity.update(cx, |resource, cx| {
                             resource.complete_failure(error);
@@ -145,8 +123,7 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
     }
 }
 
-/// Fire `on_error` / `on_settled` for a failed mutation, whether the entity is
-/// still alive or not.
+/// Fires `on_error` / `on_settled` whether or not the entity survived.
 fn fire_error_callbacks<T, E>(
     callbacks: &Option<MutationCallbacks<T, E>>,
     error_for_callback: &Option<E>,
@@ -163,8 +140,6 @@ fn fire_error_callbacks<T, E>(
     }
 }
 
-/// Retry loop for the `Fn(&V) -> Fut` mutator signature: borrows the variables
-/// via the stored `Arc<V>` on every attempt, no `V::clone` per retry.
 pub(super) async fn run_mutation_loop_by_ref<V, T, E, F, Fut>(
     weak: &gpui::WeakEntity<MutationResource<V, T, E>>,
     variables: Arc<V>,
@@ -181,8 +156,6 @@ pub(super) async fn run_mutation_loop_by_ref<V, T, E, F, Fut>(
     run_mutation_loop_inner(weak, variables, mutator, retry_policy, None, cx).await;
 }
 
-/// Like [`run_mutation_loop_by_ref`] but fires lifecycle callbacks on the
-/// final outcome.
 pub(super) async fn run_mutation_loop_by_ref_with_callbacks<V, T, E, F, Fut>(
     weak: &gpui::WeakEntity<MutationResource<V, T, E>>,
     variables: Arc<V>,

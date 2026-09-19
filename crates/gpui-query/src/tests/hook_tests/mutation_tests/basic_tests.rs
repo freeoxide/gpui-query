@@ -1,5 +1,3 @@
-//! Basic mutation tests: creation, mutate, failure, client registration, concurrent guard.
-
 use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -99,7 +97,6 @@ fn test_mutate_rejects_concurrent_calls(cx: &mut TestAppContext) {
     let harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>((), cx);
 
-        // Start the first mutation.
         mutate(
             &entity,
             "first".to_string(),
@@ -108,7 +105,6 @@ fn test_mutate_rejects_concurrent_calls(cx: &mut TestAppContext) {
         );
         assert!(entity.read(cx).is_loading());
 
-        // A second mutate while the first is still loading is a no-op.
         mutate(
             &entity,
             "second".to_string(),
@@ -162,7 +158,6 @@ fn test_mutate_double_while_loading_second_rejected(cx: &mut TestAppContext) {
     let harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>((), cx);
 
-        // First mutate.
         mutate(
             &entity,
             "first".to_string(),
@@ -176,7 +171,6 @@ fn test_mutate_double_while_loading_second_rejected(cx: &mut TestAppContext) {
             cx,
         );
 
-        // Second mutate while still loading: rejected.
         mutate(
             &entity,
             "second".to_string(),
