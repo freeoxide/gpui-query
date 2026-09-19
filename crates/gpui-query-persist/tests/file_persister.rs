@@ -1,6 +1,4 @@
-//! Round-trip, concurrency, and corrupt-file tests for `FilePersister`, plus
-//! the `NoopPersister` no-op. Plain `#[test]`s: the futures do no real async
-//! work, so `pollster::block_on` suffices.
+//! Plain `#[test]`s: the futures do no real async work, so `pollster::block_on` suffices.
 
 use std::collections::HashMap;
 
@@ -33,7 +31,6 @@ fn file_persister_round_trip_json() {
     let path = dir.path().join("cache.json");
     let p = FilePersister::json(&path);
 
-    // Missing file -> empty snapshot.
     let loaded = pollster::block_on(p.load()).expect("load missing");
     assert!(loaded.entries.is_empty());
     assert_eq!(loaded.version, PERSIST_VERSION);
@@ -100,8 +97,6 @@ fn file_persister_concurrent_saves_do_not_corrupt() {
     let path = dir.path().join("cache.json");
     let p = std::sync::Arc::new(FilePersister::json(&path));
 
-    // The internal Mutex serializes saves, so the final file is always one
-    // writer's complete snapshot.
     let mut handles = Vec::new();
     for i in 0..16u64 {
         let p = std::sync::Arc::clone(&p);
@@ -156,8 +151,6 @@ fn file_persister_format_choice_round_trips() {
 
 #[test]
 fn file_persister_large_snapshot_round_trips() {
-    // Distinct keys with realistic JSON values guard against truncation and
-    // size-sensitive regressions in the atomic-write and tolerant-load paths.
     const N: usize = 10_000;
 
     let mut entries = HashMap::with_capacity(N);
@@ -208,7 +201,6 @@ fn file_persister_large_snapshot_round_trips() {
         );
         assert_eq!(reloaded.version, PERSIST_VERSION);
 
-        // Even index -> active + Ttl policy, per the loop's parity rules.
         let sample_key = "users::9000";
         let entry = reloaded
             .entries
@@ -303,8 +295,6 @@ fn file_persister_cache_file_is_owner_only() {
 
 #[test]
 fn file_persister_second_instance_overwrite_stays_parseable() {
-    // Two instances share no lock; the second save simply replaces the
-    // first whole-file. Sequential only, no concurrent writer here.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cache.json");
     let a = FilePersister::json(&path);
