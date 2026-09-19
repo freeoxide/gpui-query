@@ -4,17 +4,17 @@
 
 Async state management for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui), inspired by [TanStack Query](https://tanstack.com/query).
 
-Fetch, cache, and synchronize async data in GPUI applications without manual lifecycle management. Built for the framework that powers the [Zed editor](https://zed.dev).
+Fetch, cache, and synchronize async data in GPUI applications without hand-rolling the lifecycle. GPUI is the framework behind the [Zed editor](https://zed.dev).
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## what it is
 
-GPUI renders synchronously on the main thread. That makes async data fetching awkward: you need to track loading states, handle errors, cache responses, deduplicate concurrent requests, and retry on failure. gpui-query handles all of it.
+GPUI renders synchronously on the main thread. That makes async data awkward: you have to track loading states, handle errors, cache responses, deduplicate concurrent requests, and retry on failure. gpui-query handles all of it.
 
-You write a fetcher function. The library manages caching, retry, deduplication, stale-while-revalidate, garbage collection, and cooperative cancellation. It works with GPUI's `Entity` and `ViewContext` system, not against it.
+You write a fetcher function. The library manages caching, retry, deduplication, stale-while-revalidate, garbage collection, and cooperative cancellation, on top of GPUI's `Entity` and `ViewContext` system.
 
-The API mirrors what TanStack Query popularized in the JavaScript ecosystem: `use_query`, `use_mutation`, and `use_infinite_query` hooks that return `Entity` handles you read from in your view's `render` method.
+The API mirrors TanStack Query: `use_query`, `use_mutation`, and `use_infinite_query` hooks that return `Entity` handles you read from in your view's `render` method.
 
 ## install
 
@@ -37,11 +37,11 @@ To use only the core state machine with no GPUI dependency:
 gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }
 ```
 
-The `core` layer also builds for `wasm32-unknown-unknown` — the crate handles the wasm-specific setup internally (ahash switches to compile-time RNG on wasm targets), so no consumer configuration is needed. The `client`, `hook`, and `persist` layers are native-only: they depend on `gpui`, which does not build for `wasm32-unknown-unknown`.
+The `core` layer also builds for `wasm32-unknown-unknown`. The wasm-specific setup (ahash switches to compile-time RNG on wasm targets) is handled internally, so there is nothing to configure. The `client`, `hook`, and `persist` layers are native-only: they depend on `gpui`, which does not build for `wasm32-unknown-unknown`.
 
 ## quick start
 
-Set up the `QueryClient` as a GPUI global during app initialization:
+Set up the `QueryClient` as a GPUI global when your app starts:
 
 ```rust
 use gpui::App;
@@ -219,7 +219,7 @@ let policy = RetryPolicy::new(5)          // max retries
     .with_max_delay(60_000);               // cap at 60s
 ```
 
-Retry delay is `base * 2^attempt`, capped at `max_delay`. The fetcher's `QuerySignal` is checked between attempts so cancelled queries stop retrying immediately.
+Retry delay is `base * 2^attempt`, capped at `max_delay`. The fetcher's `QuerySignal` is checked between attempts, so cancelled queries stop retrying immediately.
 
 ## persistence
 
@@ -251,7 +251,7 @@ Only `Success` entries with a registered serializer are persisted; the typed rou
 
 ## other things worth knowing
 
-`QueryObserver` and `MutationObserver` wrap entities and only call `cx.notify()` when the status changes. This avoids unnecessary re-renders.
+`QueryObserver` and `MutationObserver` wrap entities and only call `cx.notify()` when the status changes, which keeps unrelated views from re-rendering.
 
 `QueryError::sanitized()` redacts connection strings, bearer tokens, file paths, emails, and hex keys from error messages. Useful for logging without leaking secrets.
 
@@ -265,10 +265,10 @@ Garbage collection runs on idle resources older than `gc_time_ms` (default: 5 mi
 
 ## claude code skills
 
-Two installable [Claude Code](https://claude.com/claude-code) skills ship in this repo under [`skills/`](./skills) — knowledge packs that teach an AI assistant the real gpui-query API (signatures, defaults, lifecycle, gotchas) so it writes correct hooks, caching, retry, and persistence code instead of guessing.
+Two [Claude Code](https://claude.com/claude-code) skills ship in this repo under [`skills/`](./skills). They teach an AI assistant the real gpui-query API (signatures, defaults, lifecycle, gotchas) so it writes correct hooks, caching, retry, and persistence code.
 
-- **`gpui-query`** — the essentials: `use_query` / `use_mutation` / `use_infinite_query` / `use_query_select`, in-memory `CachePolicy`, `RetryPolicy`, `QueryKey` filters, `QueryClient` bulk ops, observers, GC.
-- **`gpui-query-extensions`** — the satellites: HTTP `Cache-Control` → `CachePolicy` + `HttpCache` (`gpui-query-http`), and durable disk persistence with `FilePersister` + the `persist` feature (`gpui-query-persist`).
+- `gpui-query`: the essentials. `use_query` / `use_mutation` / `use_infinite_query` / `use_query_select`, in-memory `CachePolicy`, `RetryPolicy`, `QueryKey` filters, `QueryClient` bulk ops, observers, GC.
+- `gpui-query-extensions`: the satellites. HTTP `Cache-Control` → `CachePolicy` + `HttpCache` (`gpui-query-http`), and durable disk persistence with `FilePersister` + the `persist` feature (`gpui-query-persist`).
 
 Install both globally (available in every project), from a clone of the repo:
 
@@ -284,7 +284,7 @@ curl -fsSL https://raw.githubusercontent.com/freeoxide/gpui-query/master/skills/
   -o ~/.claude/skills/gpui-query/SKILL.md
 ```
 
-Once installed, the skills activate automatically when you work on a GPUI app that depends on gpui-query — no manual invocation needed. See the [Claude Code skills guide](https://gpui-query.freeoxide.com/docs/guides/claude-skills) for details.
+Once installed, the skills activate automatically whenever you work on a GPUI app that depends on gpui-query. See the [Claude Code skills guide](https://gpui-query.freeoxide.com/docs/guides/claude-skills) for details.
 
 ## links
 

@@ -19,9 +19,9 @@ The crate pulls in [gpui-query](https://crates.io/crates/gpui-query) with the `p
 
 ## What it does
 
-- **Atomic write.** Each save serializes the snapshot to a sibling `NamedTempFile` (via [`tempfile`]), fsyncs it (`F_FULLFSYNC` on macOS, plain `fsync` elsewhere), then renames it over the target. On POSIX the parent directory is fsynced after the replace so the rename survives power loss.
-- **Tolerant load.** A missing file yields an empty snapshot. A corrupt or unparseable file is logged and treated as empty (no panic). A version mismatch returns `PersistError::VersionMismatch`, so callers can distinguish "corrupt" from "wrong format".
-- **No `tokio`.** Writes are serialized through a `std::sync::Mutex` and run on GPUI's `background_executor`; reads take the same lock briefly. The persister performs synchronous `std::fs` I/O, which is what the background executor is designed for.
+- Atomic write: each save serializes the snapshot to a sibling `NamedTempFile` (via [`tempfile`]), fsyncs it (`F_FULLFSYNC` on macOS, plain `fsync` elsewhere), then renames it over the target. On POSIX the parent directory is fsynced after the replace so the rename survives power loss.
+- Tolerant load: a missing file yields an empty snapshot. A corrupt or unparseable file is logged and treated as empty (no panic). A version mismatch returns `PersistError::VersionMismatch`, so callers can distinguish "corrupt" from "wrong format".
+- Locking: saves on one persister are serialized through a `std::sync::Mutex`; loads skip the lock entirely. The rename is atomic, so a load concurrent with a save always sees a complete file, old or new. The persister performs synchronous `std::fs` I/O, which is what GPUI's background executor is designed for.
 
 ## Quick start
 

@@ -81,6 +81,14 @@ Manual escape hatches: `just publish <tag>` (Publish Crate Manual), `just deploy
 - Search is one combined Pagefind index.
 - Directory output (`build.format: "directory"`) with `trailingSlash: "ignore"` so both `/docs` and `/docs/` serve; the `Head.astro` override normalizes canonical/OG URLs.
 
+## Hard rules
+
+Binding on every change; violations are review-blocking.
+
+- Comments: inline comments are 1-2 lines max and only for non-obvious constraints. No narration, no change-history notes ("T5:", "fixed:"), no restating what the code already says. Same for test comments. Doc comments stay at 1-3 lines plus `# Examples` blocks that carry doctests. Bloated comment blocks are review-blocking.
+- Copywriting: all prose (comments, READMEs, docs) must read human-written. Apply the humanizer and humanize-writing skills to prose changes before merging: no em-dash cadence, no rule-of-three padding, no "seamless/robust/leverage" vocabulary.
+- Trimming beats adding. Dead code, duplicated plumbing, and comments that restate their docs get deleted, not maintained.
+
 ## Conventions
 
 - Tests are inline under `crates/gpui-query/src/tests/`, feature-gated per module. Naming: `core_*` = layer, `integration_*` = cross-layer, `property_tests` = proptest.
@@ -88,6 +96,7 @@ Manual escape hatches: `just publish <tag>` (Publish Crate Manual), `just deploy
 - Author identity is `authors = ["hmziqrs"]` in every published crate (no email).
 - Commits are conventional lower-case: `chore:`, `fix:`, `feat:`, `ci:`.
 - docs.rs: `all-features = true`, `--cfg docsrs`; `lib.rs` gates `#![cfg_attr(docsrs, feature(doc_cfg))]`.
+- Two user-facing Claude Code skill packs live in `skills/`: `gpui-query` (hooks, in-memory caching, retry) and `gpui-query-extensions` (HTTP cache headers, disk persistence). They target apps that depend on gpui-query, not work on this repo. Install: `cp -R skills/gpui-query skills/gpui-query-extensions ~/.claude/skills/`.
 
 ## Gotchas
 
