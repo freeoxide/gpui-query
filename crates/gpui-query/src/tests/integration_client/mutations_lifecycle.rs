@@ -115,9 +115,8 @@ fn test_full_lifecycle_idle_to_loading_to_success_to_gc(cx: &mut TestAppContext)
                 .expect("entity should exist");
             assert!(entity.read(cx).is_loading());
 
-            // 2. Complete with success at a controlled timestamp (t=1000) so GC
-            //    age is deterministic. GC reads live entity state (audit #CL2),
-            //    so we set `last_updated_at` directly instead of faking a snapshot.
+            // 2. Complete with success at a controlled timestamp (t=1000) so
+            //    the GC age is deterministic.
             entity.update(cx, |r, _| r.apply_success("Carol".to_string(), 1_000));
             assert_eq!(entity.read(cx).status(), QueryStatus::Success);
             assert_eq!(entity.read(cx).data().unwrap(), "Carol");

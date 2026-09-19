@@ -1,4 +1,4 @@
-//! Individual gap-filling tests (GAP-03 through GAP-20).
+//! Individual gap-filling tests.
 //!
 //! Covers: begin_request_with_id + SWR + IgnoreWhileLoading, stale request ID
 //! rejection, Force mode + IgnoreWhileLoading, QueryError sanitized, QueryKey
@@ -8,10 +8,6 @@
 use crate::core::*;
 use crate::tests::test_support::*;
 use std::num::NonZero;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-03: begin_request_with_id + SWR + IgnoreWhileLoading + active request
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn begin_request_with_id_swr_ignore_while_loading_with_active_request() {
@@ -62,10 +58,6 @@ fn begin_request_with_id_swr_ignore_while_loading_with_active_request() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-04: complete_current_optional_success rejects stale request ID
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn complete_current_optional_success_rejects_stale_id() {
     let mut r = test_resource();
@@ -89,10 +81,6 @@ fn complete_current_optional_success_rejects_stale_id() {
     assert_eq!(r.data(), Some(&"fresh"));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-05: complete_current_failure_with_data rejects stale request ID
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn complete_current_failure_with_data_rejects_stale_id() {
     let mut r = test_resource();
@@ -110,10 +98,6 @@ fn complete_current_failure_with_data_rejects_stale_id() {
     // The current request is still active
     assert!(r.active_request_id().is_some());
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-06: Force mode respects IgnoreWhileLoading
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ignore_while_loading_rejects_forced_fetch_when_loading() {
@@ -133,10 +117,6 @@ fn ignore_while_loading_rejects_forced_fetch_when_loading() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-12: QueryError::sanitized() with mongodb connection string
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn query_error_sanitized_mongodb_connection() {
     let err = QueryError::transport("connect mongodb://admin:secret@host/db failed");
@@ -151,10 +131,6 @@ fn query_error_sanitized_mongodb_connection() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-13: QueryError::sanitized() with empty string message
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn query_error_sanitized_empty_message() {
     let err = QueryError::response("");
@@ -162,20 +138,12 @@ fn query_error_sanitized_empty_message() {
     assert_eq!(clean.message(), "");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-14: QueryError::new() with explicit kind
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn query_error_new_with_explicit_kind() {
     let err = QueryError::new(QueryErrorKind::Transport, "timeout");
     assert_eq!(err.kind(), QueryErrorKind::Transport);
     assert_eq!(err.message(), "timeout");
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-15: record_cache_hit does not clear Cancelled status
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn record_cache_hit_does_not_clear_cancelled_status() {
@@ -202,10 +170,6 @@ fn record_cache_hit_does_not_clear_cancelled_status() {
     assert_eq!(r.cache_hits(), 1);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-16: QueryKey::join() appends segments
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn join_appends_segment() {
     let key = QueryKey::from(["users"]);
@@ -223,20 +187,12 @@ fn join_chain_creates_multi_part_key() {
     assert_eq!(key.to_path(), "users::42::posts");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-17: QueryKey::from(Vec<String>)
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn from_vec_string() {
     let key = QueryKey::from(vec!["users".to_string(), "42".to_string()]);
     assert_eq!(key.parts().len(), 2);
     assert_eq!(key.to_path(), "users::42");
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-18: QueryKey Deref to [Arc<str>] allows indexing
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn deref_allows_indexing() {
@@ -246,10 +202,6 @@ fn deref_allows_indexing() {
     assert_eq!(key.len(), 3);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-19: QueryKey serde deserialize from single string
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn serde_deserialize_single_string() {
     let json = "\"users\"";
@@ -257,10 +209,6 @@ fn serde_deserialize_single_string() {
     assert_eq!(key.parts().len(), 1);
     assert_eq!(key.first_segment(), "users");
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-20: QueryKey Hash consistency
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn hash_consistency() {
@@ -273,10 +221,6 @@ fn hash_consistency() {
     assert!(set.contains(&k2), "equal keys must have equal hashes");
     assert!(!set.contains(&k3), "different keys should not match");
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-07: InfiniteQuery begin_fetch_previous with IgnoreWhileLoading
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ignore_while_loading_prevents_previous_page_replacement() {
@@ -299,10 +243,6 @@ fn ignore_while_loading_prevents_previous_page_replacement() {
     );
     assert_eq!(r.cancelled_count(), 0, "no cancellation on ignore");
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-08: Cross-direction IgnoreWhileLoading (next then previous)
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn ignore_while_loading_cross_direction_next_then_prev() {
@@ -333,10 +273,6 @@ fn ignore_while_loading_cross_direction_next_then_prev() {
     assert!(!r.is_fetching_next_page());
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-09: InfiniteQueryResource reset preserves retry_policy
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn infinite_query_reset_preserves_retry_policy() {
     let mut r = InfiniteQueryResource::<Vec<String>>::new(
@@ -356,10 +292,6 @@ fn infinite_query_reset_preserves_retry_policy() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-10: Bidirectional resource initial accessors
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn bidirectional_resource_initial_accessors() {
     let r = InfiniteQueryResource::<Vec<String>>::new_bidirectional(
@@ -373,10 +305,6 @@ fn bidirectional_resource_initial_accessors() {
     assert!(!r.has_next_page());
     assert!(!r.has_previous_page());
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GAP-11: prepend with has_more=true preserves has_previous_page
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn prepend_with_has_more_true_preserves_has_previous() {

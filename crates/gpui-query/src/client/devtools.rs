@@ -1,11 +1,4 @@
 //! Diagnostic types for query and mutation DevTools.
-//!
-//! **v2 improvements**:
-//! - `QueryDiagnostic.key` uses `to_path()` for full key display (not just first segment)
-//! - `MutationDiagnostic` added for mutation devtools support
-//!
-//! **Audit 3 additions**:
-//! - `DehydratedState` and `DehydratedEntry` for state serialization
 
 #[cfg(feature = "persist")]
 use std::any::TypeId;
@@ -30,8 +23,6 @@ pub struct QueryDiagnostic {
 }
 
 /// Diagnostic information about a single mutation resource.
-///
-/// **v2 new**: v1 had no mutation diagnostics.
 #[derive(Clone, Debug)]
 pub struct MutationDiagnostic {
     /// Optional key associated with this mutation.
@@ -55,48 +46,34 @@ pub struct ClientDiagnostic {
     pub mutations: Vec<MutationDiagnostic>,
 }
 
-// ── Dehydration / Hydration types (Audit 3, Finding 8) ────────────────
-//
-// Gated behind `persist`: these types back the legacy `dehydrate`/`hydrate`/
-// `persist`/`restore` methods and the `QueryPersister` trait, all of which are
-// `persist`-only. The metadata-only diagnostic types above stay ungated.
+// Dehydration types, gated behind `persist` alongside the
+// dehydrate/hydrate/persist/restore methods and the `QueryPersister` trait.
 
-/// A single entry in a dehydrated query cache snapshot.
-///
-/// Each entry represents one cached query resource, identified by its key
-/// and the `TypeId` of its `(T, E)` type pair.
-///
-/// The `kind` field distinguishes regular queries, infinite queries, and
-/// mutations, allowing consumers to deserialize appropriately.
-///
-/// **Audit fix #L14**: the `data_json: Option<String>` field was removed —
-/// `dehydrate()` always populated it with `None`, so it was 24 bytes/entry of
-/// dead weight. Typed data serialization (when it lands) will be added as a
-/// real field, not a permanently-`None` placeholder.
+/// A single entry in a dehydrated query cache snapshot, identified by its
+/// key and the `TypeId` of its `(T, E)` type pair. `kind` distinguishes
+/// queries, infinite queries, and mutations so consumers can deserialize
+/// appropriately.
 #[cfg(feature = "persist")]
 #[derive(Clone, Debug)]
 pub struct DehydratedEntry {
     /// Full key path (e.g., "users::42::posts").
     pub key: String,
-    /// `TypeId` of the `(T, E)` (query) or `(T, E)` (infinite query) type pair.
-    /// Used to match entries to concrete types during hydration.
+    /// `TypeId` of the resource's `(T, E)` type pair; used to match entries
+    /// to concrete types during hydration.
     pub type_id: TypeId,
-    /// Whether this entry is a regular query, an infinite query, or a mutation.
+    /// Whether this entry is a query, an infinite query, or a mutation.
     pub kind: &'static str,
 }
 
-/// A portable snapshot of all cached query state.
-///
-/// Produced by [`QueryClient::dehydrate`](super::QueryClient::dehydrate) and
-/// consumed by [`QueryClient::hydrate`](super::QueryClient::hydrate). Can be
-/// persisted to disk or sent over a network for state restoration.
-///
-/// # Type erasure
+/// A portable snapshot of all cached query state, produced by
+/// [`QueryClient::dehydrate`](super::QueryClient::dehydrate) and consumed by
+/// [`QueryClient::hydrate`](super::QueryClient::hydrate). Persist it to disk
+/// or send it over a network for state restoration.
 ///
 /// Because `QueryClient` uses type-erased buckets, `DehydratedState` stores
-/// `TypeId` values but cannot perform typed deserialization internally.
-/// Callers that know the concrete `T` and `E` types should iterate `entries`
-/// and use `QueryClient::set_query_data` for each matching entry.
+/// `TypeId` values but cannot deserialize typed data itself: callers that
+/// know the concrete types should iterate `entries` and use
+/// `QueryClient::set_query_data` for each matching entry.
 ///
 /// # Example
 ///

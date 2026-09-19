@@ -1,9 +1,4 @@
 //! Infinite query, mutation, and bulk operations on `QueryClient`.
-//!
-//! This module contains `impl QueryClient` methods for:
-//! - Infinite query resource management and lookups
-//! - Mutation registration and lookups
-//! - Bulk operations (invalidate/reset/remove/cancel) across all bucket types
 
 use std::any::TypeId;
 
@@ -35,8 +30,6 @@ impl QueryClient {
     }
 
     /// Get or create an infinite query resource with explicit policies.
-    ///
-    /// Audit 3 fix (findings 3, 4): Graceful downcast recovery.
     pub fn infinite_resource_with_policies<
         T: Clone + Send + Sync + 'static,
         E: Clone + Send + Sync + 'static,
@@ -53,11 +46,8 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(InfiniteQueryBucket::<T, E>::new()));
 
-        // M4: single downcast via the shared helper (redundant TypeId
-        // pre-check dropped).
         let typed = Self::infinite_bucket_or_recreate::<T, E>(bucket);
         let entity = typed.get_or_create(key.into(), cache_policy, request_policy, cx);
-        // Audit fix CL1/#105: opportunistically run GC on this op.
         self.maybe_opportunistic_gc(cx);
         entity
     }
@@ -75,13 +65,8 @@ impl QueryClient {
     }
 
     /// Use the infinite query bucket's co-located sequencer to generate a
-    /// `RequestId` for an infinite query key.
-    ///
-    /// Returns `None` if no bucket entry exists for the key. The sequencer is
-    /// advanced in-place so subsequent calls produce monotonically increasing IDs.
-    /// This is the infinite query equivalent of [`next_request_id_for_key`](Self::next_request_id_for_key).
-    ///
-    /// Audit 3 fix (findings 3, 4): Graceful downcast recovery.
+    /// `RequestId` for a key; the infinite-query counterpart of
+    /// [`next_request_id_for_key`](Self::next_request_id_for_key).
     pub fn next_request_id_for_infinite_key<
         T: Clone + Send + Sync + 'static,
         E: Clone + Send + Sync + 'static,
@@ -91,8 +76,6 @@ impl QueryClient {
     ) -> Option<crate::core::RequestId> {
         let type_id = TypeId::of::<(T, E)>();
         let bucket = self.infinite_buckets.get_mut(&type_id)?;
-        // M4: single downcast via the shared helper (redundant TypeId
-        // pre-check dropped).
         let typed = Self::infinite_bucket_or_recreate::<T, E>(bucket);
         typed.sequencer_mut(key).map(|seq| seq.next_request())
     }
@@ -115,8 +98,6 @@ impl QueryClient {
     // ── Mutation operations ─────────────────────────────────────────────
 
     /// Register a mutation entity.
-    ///
-    /// Audit 3 fix (findings 3, 4): Graceful downcast recovery.
     pub fn register_mutation<
         V: Clone + Send + Sync + 'static,
         T: Clone + Send + Sync + 'static,
@@ -132,16 +113,10 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(MutationBucket::<V, T, E>::new()));
 
-        // M6: cache now_ms once and thread it into `insert` (avoids a second
-        // `current_time_ms` syscall inside `insert`); the same value is reused
-        // by `maybe_opportunistic_gc` below.
+        // One clock read shared by insert and the opportunistic GC below.
         let now_ms = crate::client::time::current_time_ms();
-        // M4: single downcast via the shared helper (redundant TypeId
-        // pre-check dropped).
         let typed = Self::mutation_bucket_or_recreate::<V, T, E>(bucket);
         typed.insert(entity, now_ms, cx);
-        // Audit fix CL1/#105: opportunistically run GC on this op so
-        // completed mutations are eventually evicted without manual gc() calls.
         self.maybe_opportunistic_gc(cx);
     }
 
@@ -163,12 +138,6 @@ impl QueryClient {
 
     // ── Bulk operations ─────────────────────────────────────────────────
 
-    /// Apply an operation `f` to every query bucket (regular + infinite).
-    /// **L10**: extracted to kill the 4x duplicated
-    /// `for buckets … for infinite_buckets …` pair in the bulk-op methods
-    /// below. `f` is called once per regular bucket (as `Left`) and once per
-    /// infinite bucket (as `Right`); callers match on the side to invoke the
-    /// correct trait method.
     fn for_each_query_bucket_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(EitherBucket<'_>),
@@ -181,9 +150,7 @@ impl QueryClient {
         }
     }
 
-    /// Invalidate queries matching the filter.
-    ///
-    /// Uses collect-then-update pattern to avoid nested entity borrows.
+    /// Invalidate queries matching the filter (data is kept but marked stale).
     pub fn invalidate_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_query_bucket_mut(|b| match b {
             EitherBucket::Query(b) => b.invalidate_matching(filter, cx),
@@ -191,7 +158,7 @@ impl QueryClient {
         });
     }
 
-    /// Reset queries matching the filter.
+    /// Reset queries matching the filter (data and status cleared).
     pub fn reset_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_query_bucket_mut(|b| match b {
             EitherBucket::Query(b) => b.reset_matching(filter, cx),
@@ -199,7 +166,7 @@ impl QueryClient {
         });
     }
 
-    /// Remove queries matching the filter.
+    /// Remove queries matching the filter from the cache entirely.
     pub fn remove_queries(&mut self, filter: &QueryKeyFilter) {
         self.for_each_query_bucket_mut(|b| match b {
             EitherBucket::Query(b) => b.remove_matching(filter),
@@ -207,16 +174,12 @@ impl QueryClient {
         });
     }
 
-    /// Cancel in-flight requests matching the filter (Audit 3, Finding 5).
+    /// Cancel in-flight requests matching the filter, cancelling their
+    /// signals with a [`QueryError::cancelled`](crate::core::QueryError::cancelled)
+    /// error. Essential for cleanup when navigating away from a page.
     ///
-    /// Iterates all query and infinite query buckets, finds resources with active
-    /// requests, and cancels them with a [`QueryError::cancelled`] error. This is
-    /// essential for cleanup when navigating away from a page or when bulk
-    /// cancellation is needed.
-    ///
-    /// Equivalent to TanStack Query's `queryClient.cancelQueries()`. Individual
-    /// `QueryResource::cancel()` exists but this is the bulk cancellation method
-    /// on the client.
+    /// The bulk counterpart of `QueryResource::cancel()`, equivalent to
+    /// TanStack Query's `queryClient.cancelQueries()`.
     pub fn cancel_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_query_bucket_mut(|b| match b {
             EitherBucket::Query(b) => b.cancel_matching(filter, cx),
@@ -224,14 +187,11 @@ impl QueryClient {
         });
     }
 
-    // ── Erased-bucket recovery helpers (M4) ──────────────────────────────
-    //
-    // Mirrors `QueryClient::bucket_or_recreate` in `mod.rs` for the infinite
-    // and mutation maps: downcast once (the redundant TypeId pre-check is
-    // dropped — `downcast_mut` checks it internally) and recreate the bucket
-    // in place on the (impossible) mismatch. Kills the 3x duplicated recovery
-    // blocks that lived in `infinite_resource_with_policies`,
-    // `next_request_id_for_infinite_key`, and `register_mutation`.
+    // ── Erased-bucket recovery helpers ──────────────────────────────────
+
+    // Downcast counterparts of `bucket_or_recreate` for the infinite and
+    // mutation maps: recreate in place on the (unreachable) mismatch instead
+    // of panicking.
 
     fn infinite_bucket_or_recreate<
         T: Clone + Send + Sync + 'static,
@@ -283,7 +243,7 @@ impl QueryClient {
     }
 }
 
-/// One side of a query bucket iteration (L10).
+/// One side of a query bucket iteration.
 enum EitherBucket<'a> {
     Query(&'a mut dyn crate::client::erased::ErasedBucket),
     Infinite(&'a mut dyn crate::client::erased::ErasedInfiniteBucket),

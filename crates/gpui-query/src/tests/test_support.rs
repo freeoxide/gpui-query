@@ -1,16 +1,5 @@
-//! Shared test infrastructure for gpui-query.
-//!
-//! Provides:
-//! - [`TestAppContext`] setup helpers via [`setup_test`] / [`setup_query_client`]
-//! - [`QueryClient`] as a [`Global`] for tests via [`setup_query_client`]
-//! - Core resource constructors: [`test_resource`], [`test_resource_with_policies`],
-//!   [`resource_with_sequencer`]
-//! - Assertion helpers: [`assert_status`], [`begin_request_id`]
-//! - Cache/mutation option factories: [`no_retry_mutation_options`]
-//! - Async test helpers: [`Gate`], [`run_until_parked_and_read`],
-//!   [`observe_with_dummy_view`], [`DummyView`]
-//!
-//! # Usage
+//! Shared test infrastructure: `TestAppContext`/`QueryClient` setup helpers,
+//! core resource constructors, assertion helpers, and async test utilities.
 //!
 //! ```ignore
 //! use crate::tests::test_support::*;
@@ -109,29 +98,9 @@ pub fn test_sequencer() -> RequestSequencer {
     RequestSequencer::new()
 }
 
-/// Create a fresh resource paired with a new [`RequestSequencer`].
-///
-/// Returns `(QueryResource, RequestSequencer)` so tests can immediately call
-/// `begin_request(&mut r, &mut seq, now, mode)` without boilerplate. The
-/// sequencer is a fresh `RequestSequencer::new()`.
-///
-/// Uses `CachePolicy::NoCache` so every `begin_request` returns `Started`
-/// (never `CacheHit`), giving deterministic control over each fetch lifecycle
-/// step without worrying about TTL freshness windows.
-#[expect(dead_code, reason = "kept as a shared lifecycle-test helper")]
-pub fn resource_with_sequencer(
-    key: impl Into<QueryKey>,
-) -> (QueryResource<&'static str>, RequestSequencer) {
-    (
-        QueryResource::new(key, CachePolicy::NoCache, RequestPolicy::LatestWins),
-        RequestSequencer::new(),
-    )
-}
-
 // ── Assertion helpers ──────────────────────────────────────────────────
 
 /// Assert that a resource has the expected status.
-// Audit fix #123: removed `#[allow(dead_code)]` — used by request_policy/lifecycle tests.
 pub fn assert_status(resource: &QueryResource<impl Clone, impl Clone>, expected: QueryStatus) {
     let actual = resource.status();
     assert_eq!(
@@ -156,7 +125,6 @@ pub fn nocache_resource(key: impl Into<QueryKey>) -> QueryResource<&'static str>
 ///
 /// Convenience alias for [`nocache_resource`] with key `"invariant-test"`.
 /// Every `begin_request` on this resource will return `Started` (never `CacheHit`).
-// Audit fix #123: removed `#[allow(dead_code)]` — used by coverage_gaps tests.
 pub fn fresh_resource() -> QueryResource<&'static str> {
     nocache_resource("invariant-test")
 }
@@ -187,7 +155,7 @@ pub fn begin_request_id(
 /// Accept the current request by `request_id` and complete it with success.
 ///
 /// Convenience wrapper around [`QueryResource::complete_current_success`]
-/// (audit fix #85). Mirrors [`begin_request_id`] so tests that just need to
+/// Mirrors [`begin_request_id`] so tests that just need to
 /// drive a request through to `Success` can do so in one call without
 /// repeating the `(request_id, data, now_ms)` triple inline.
 ///
@@ -259,9 +227,9 @@ where
 
 /// A minimal generic test harness that owns a single entity handle.
 ///
-/// Audit fix #47: many hook-layer tests define a one-off `struct H { entity:
-/// Entity<...> }` purely to host hook calls via `cx.new(|cx| ...)` and later
-/// inspect the entity. [`HookHarness`] replaces that boilerplate for the common
+/// Many hook-layer tests define a one-off `struct H { entity: Entity<...> }`
+/// purely to host hook calls via `cx.new(|cx| ...)` and later inspect the
+/// entity. [`HookHarness`] replaces that boilerplate for the common
 /// single-entity case: tests construct `cx.new(|cx| HookHarness::new(entity))`
 /// and read back via `harness.read(cx).entity.read(cx)`.
 ///
@@ -414,12 +382,10 @@ pub struct Post;
 // ── Time helpers ───────────────────────────────────────────────────────
 
 /// A fixed "now" timestamp for deterministic cache tests (ms since UNIX epoch).
-// Audit fix #123: removed `#[allow(dead_code)]` — used by request_policy/lifecycle tests.
 pub const TEST_NOW_MS: u64 = 1_000_000;
 
 /// Assert that every value in `cases` survives a JSON serialize -> deserialize
-/// roundtrip unchanged. Shared helper for the serde-roundtrip tests (extends
-/// audit #129).
+/// roundtrip unchanged.
 pub fn assert_serde_roundtrip<T>(cases: &[T])
 where
     T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug,

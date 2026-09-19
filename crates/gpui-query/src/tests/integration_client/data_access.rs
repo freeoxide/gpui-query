@@ -163,9 +163,8 @@ fn test_with_query_data_reads_without_clone(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             client.set_query_data::<String, QueryError>("len_key", "hello".to_string(), cx);
 
-            // L12: `with_query_data` lends `&T` to the closure with NO clone of
-            // `T` (unlike `get_query_data`, which returns an owned `T`). The
-            // closure computes the length, so we never own/clone the `String`.
+            // `with_query_data` lends `&T` to the closure; no clone of the
+            // `String` ever happens (unlike `get_query_data`).
             let len = client.with_query_data::<String, QueryError, usize>(
                 &QueryKey::from("len_key"),
                 cx,

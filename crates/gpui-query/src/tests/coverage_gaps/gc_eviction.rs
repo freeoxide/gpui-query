@@ -10,7 +10,7 @@ use gpui::{BorrowAppContext as _, TestAppContext};
 
 /// Populate a `Success` resource whose `last_updated_at` is a known timestamp.
 ///
-/// GC reads live entity state directly (audit #CL2), so we drive the resource
+/// GC reads live entity state, so we drive the resource
 /// to `Success` with a controlled timestamp via `apply_success` instead of
 /// faking a cached snapshot. `Ttl` has no stale window, so GC falls through to
 /// the success-threshold age check (`success_threshold = 2 * gc_time_ms`).
@@ -109,8 +109,7 @@ fn test_gc_preserves_loading_resource_with_snapshot(cx: &mut TestAppContext) {
             let prepared = client
                 .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
                 .expect("should start");
-            // Don't complete — leave in Loading state. GC reads the live
-            // LoadingEmpty status (audit #CL2), so no snapshot is needed.
+            // Don't complete — leave in Loading state.
 
             // GC at t=1_000_000 — Loading resources are never evicted.
             client.gc_with_time(1_000_000, cx);
@@ -140,8 +139,7 @@ fn test_gc_mixed_states_precise_eviction(cx: &mut TestAppContext) {
     setup_query_client_with_gc(cx, 1_000);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // Loading => preserved (loading never evicted). GC reads the live
-            // LoadingEmpty status (audit #CL2), so no snapshot is needed.
+            // Loading => preserved (loading is never evicted).
             let prepared = client
                 .prepare_fetch_query::<String, QueryError>("loading", cx)
                 .expect("should start");

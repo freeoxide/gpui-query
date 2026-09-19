@@ -299,12 +299,8 @@ fn test_query_observer_observe_returns_subscription(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let entity = client.resource::<String, QueryError>("sub_key", cx);
 
-            // Create a dummy view to host the observer
-            struct DummyView;
-            let view = cx.new(|_| DummyView);
-
-            let observer = QueryObserver::new(&entity);
-            let subscription = view.update(cx, |_view, cx| observer.observe(cx));
+            let mut observer = QueryObserver::new(&entity);
+            let subscription = observe_with_dummy_view(cx, &mut observer);
             assert!(
                 subscription.is_some(),
                 "observe should return Some(Subscription)"

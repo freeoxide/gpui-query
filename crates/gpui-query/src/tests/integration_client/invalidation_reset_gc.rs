@@ -148,21 +148,12 @@ fn test_reset_queries_prefix_preserves_non_matching(cx: &mut TestAppContext) {
 
 // ── 6. GC evicts stale Idle/Failure/Success resources ───────────────────
 //
-// GC reads live entity state directly via `entity.read(cx)` (CL2/#106); no
-// cached snapshot is involved. For deterministic tests, we drive resources
-// to a known status / `last_updated_ms` via direct entity updates before
-// calling `gc_with_time()`, then assert the expected outcome unconditionally.
-//
-// gc_time_ms=1000 means: MIN_GC_TIME_MS=1000 (enforced floor), so
-//   - Idle/Failure: evicted when age >= gc_threshold (1000ms)
-//   - Success: evicted when age >= success_threshold (2 * 1000 = 2000ms)
-//   - Loading: never evicted (regardless of age)
-//   - No snapshot (last_updated_ms=None): age defaults to gc_threshold, evicted
-//
-// NOTE: The tests below cover the basic eviction paths (idle with no snapshot,
-// Failure/Success with snapshots, Loading preserved). For more comprehensive
-// GC coverage including snapshot-bearing resources in all statuses with varied
-// cache policies and edge-case timing, see `coverage_gaps.rs`.
+// GC reads live entity state via `entity.read(cx)`, so tests drive resources
+// to a known status / timestamp with direct entity updates, then call
+// `gc_with_time()` and assert the outcome. With gc_time_ms=1000 (the enforced
+// floor): Idle/Failure evict at age >= 1000ms, Success at age >= 2000ms,
+// Loading is never evicted, and a missing timestamp counts as fully aged.
+// More GC edge cases live in `coverage_gaps/gc_eviction.rs`.
 
 #[gpui::test]
 fn test_gc_evicts_idle_resources_with_no_snapshot(cx: &mut TestAppContext) {
@@ -195,8 +186,6 @@ fn test_gc_evicts_failure_resources_after_gc_time(cx: &mut TestAppContext) {
             let key = QueryKey::from("fail_key");
 
             // Drive the resource to Failure at a controlled timestamp (t=1000).
-            // GC reads live entity state (audit #CL2), so we set `last_updated_at`
-            // directly via `apply_failure` instead of faking a snapshot.
             let entity = client.resource::<String, QueryError>(key.clone(), cx);
             entity.update(cx, |r, _| {
                 r.apply_failure(QueryError::response("broken"), 1_000)
@@ -251,8 +240,7 @@ fn test_gc_preserves_loading_resources_regardless_of_age(cx: &mut TestAppContext
         cx.update_global::<QueryClient, _>(|client, cx| {
             let key = QueryKey::from("loading_key");
 
-            // Start a fetch via the public API but don't complete it. GC reads
-            // the live LoadingEmpty status (audit #CL2) — no snapshot needed.
+            // Start a fetch via the public API but don't complete it.
             let prepared = client
                 .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
                 .expect("should start");

@@ -274,7 +274,6 @@ fn prop_cache_policy_total_valid_ms_consistency() {
 
 #[test]
 fn prop_serde_roundtrip_all_statuses() {
-    // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[
         QueryStatus::Idle,
         QueryStatus::LoadingEmpty,
@@ -287,7 +286,6 @@ fn prop_serde_roundtrip_all_statuses() {
 
 #[test]
 fn prop_serde_roundtrip_all_cache_policies() {
-    // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[
         CachePolicy::NoCache,
         CachePolicy::Ttl { ttl_ms: 0 },
@@ -311,13 +309,11 @@ fn prop_serde_roundtrip_all_cache_policies() {
 
 #[test]
 fn prop_serde_roundtrip_all_request_policies() {
-    // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[RequestPolicy::LatestWins, RequestPolicy::IgnoreWhileLoading]);
 }
 
 #[test]
 fn prop_serde_roundtrip_retry_policies() {
-    // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[
         RetryPolicy::no_retries(),
         RetryPolicy::default(),
@@ -336,7 +332,6 @@ fn prop_serde_roundtrip_retry_policies() {
 
 #[test]
 fn prop_serde_roundtrip_query_error_all_kinds() {
-    // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[
         QueryError::cancelled("abort"),
         QueryError::response("not found"),

@@ -39,7 +39,6 @@ fn two_phase_stale_accept_then_complete_does_not_corrupt() {
     let rid2 = begin_request_id(&mut r, &mut s, 200, QueryFetchMode::Normal);
 
     // rid1 is stale. complete_current_success should return false.
-    // Audit fix #85: use the shared `complete_success_id` helper.
     assert!(!complete_success_id(&mut r, rid1, "stale_data", 300));
     assert_eq!(r.ignored_results(), 1);
 
@@ -93,7 +92,7 @@ fn ignore_while_loading_rejects_concurrent_requests() {
     );
     assert_eq!(r.cancelled_count(), 0, "no cancellation on ignore");
 
-    // Complete the first request. (Audit fix #85: shared helper.)
+    // Complete the first request.
     complete_success_id(&mut r, rid1, "data", 300);
     assert_eq!(r.status(), QueryStatus::Success);
     assert_eq!(r.data(), Some(&"data"));

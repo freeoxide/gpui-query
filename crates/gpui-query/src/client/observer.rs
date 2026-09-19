@@ -1,15 +1,8 @@
-//! Query observer for reactive state tracking.
+//! Resource observers for reactive state tracking.
 //!
-//! **v2 improvements**:
-//! - `observe()` returns `Option<Subscription>` instead of panicking on dropped entity
-//! - Status deduplication to avoid unnecessary `cx.notify()` calls
-//!
-//! **Audit L8**: the three formerly-structurally-identical observer types
-//! (`QueryObserver`, `InfiniteQueryObserver`, `MutationObserver`) are now a
-//! single generic [`Observer<R>`] plus type aliases. They differed only in
-//! their entity type and status type (`QueryStatus` vs `MutationStatus`); the
-//! observe logic (dedup `cx.notify()` via a `Cell<Option<S>>`, fall back to
-//! unconditional notify) is shared by the one generic impl.
+//! The three observer kinds (`QueryObserver`, `InfiniteQueryObserver`,
+//! `MutationObserver`) are aliases over one generic [`Observer<R>`]; they
+//! differ only in entity and status type.
 
 use std::cell::Cell;
 
@@ -21,10 +14,10 @@ use crate::core::{
 
 /// Bridges a resource type to its status for the generic [`Observer`].
 ///
-/// Each resource exposes its status via an *inherent* `status()` method, which
-/// cannot be called generically without a trait; this trait (pub(crate), not
-/// part of the public API) surfaces it with an associated `Status` type so
-/// [`Observer<R>`] can dedup notifications for any resource kind.
+/// Each resource exposes its status via an inherent `status()` method, which
+/// cannot be called generically without a trait; this pub(crate) trait
+/// surfaces it with an associated `Status` type so [`Observer<R>`] can dedup
+/// notifications for any resource kind.
 pub trait ObservableResource {
     type Status: PartialEq + Copy + 'static;
 
@@ -72,20 +65,11 @@ impl Default for ObserverConfig {
 
 /// Observes a resource and triggers re-renders only on status changes.
 ///
-/// In v2, the observer only calls `cx.notify()` when the status actually
-/// changes, preventing excessive re-renders from intermediate state updates
-/// like retry count increments.
-///
-/// This is a single generic implementation shared by every resource kind
-/// (audit L8). Use the [`QueryObserver`] / [`InfiniteQueryObserver`] /
-/// [`MutationObserver`] type aliases for the concrete kinds.
-///
-/// This is also the fix for audit findings #1/#11: the raw `cx.observe` in
-/// `use_mutation` unconditionally called `cx.notify()` on every entity
-/// mutation, causing 2-3 re-renders per retry attempt. By tracking the last
-/// status and only notifying on change, `increment_retry()` / `prepare_retry()`
-/// calls (which don't change status — it stays Loading) no longer trigger
-/// re-renders.
+/// With the default config, `cx.notify()` fires only when the status
+/// actually changes, so intermediate updates that keep the status (retry
+/// count increments, `prepare_retry`) do not re-render. Use the
+/// [`QueryObserver`] / [`InfiniteQueryObserver`] / [`MutationObserver`]
+/// aliases for the concrete kinds.
 pub struct Observer<R> {
     entity: gpui::WeakEntity<R>,
     config: ObserverConfig,
@@ -106,13 +90,9 @@ impl<R: ObservableResource + 'static> Observer<R> {
         self
     }
 
-    /// Start observing the entity. Returns `None` if the entity was already dropped.
-    ///
-    /// **v2 fix**: Returns `Option<Subscription>` instead of panicking.
-    ///
-    /// **Audit #71**: takes `&self` (was `&mut self`) — the body only reads the
-    /// weak entity handle and the `Copy` config flag, so no interior mutation
-    /// is required. `&mut` callers coerce to `&` with no ripple.
+    /// Start observing the entity. Returns `None` if the entity was already
+    /// dropped. Takes `&self`: the body only reads the weak handle and the
+    /// `Copy` config flag.
     pub fn observe<W: 'static>(&self, cx: &mut Context<W>) -> Option<Subscription> {
         let upgraded = self.entity.upgrade()?;
         let notify_on_change = self.config.notify_on_status_change_only;
