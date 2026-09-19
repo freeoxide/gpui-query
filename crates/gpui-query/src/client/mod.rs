@@ -134,7 +134,7 @@ impl QueryClient {
     }
 
     /// Runs GC every `GC_INTERVAL` operations, at most once per
-    /// `MIN_GC_TIME_MS`; `gc_time_ms` of 0 disables GC entirely.
+    /// `MIN_GC_TIME_MS`; `gc_time_ms` of 0 skips the opportunistic sweep.
     fn maybe_opportunistic_gc(&mut self, cx: &App) {
         if self.gc_time_ms == 0 {
             return;
