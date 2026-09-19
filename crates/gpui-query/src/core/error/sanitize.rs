@@ -1,23 +1,15 @@
 //! Redaction of sensitive patterns from error messages, without a `regex`
-//! dependency. Covers connection strings, bearer tokens, file paths,
-//! emails, and long hex runs.
+//! dependency.
 
-/// Maximum length for sanitized error messages.
 pub const SANITIZE_MAX_LEN: usize = 512;
 
-/// Lowercase needles for recognized connection-string schemes.
 const SCHEME_NEEDLES: [&str; 4] = ["postgres://", "mysql://", "mongodb://", "redis://"];
 
-/// Lowercase needles for filesystem path prefixes, including macOS home dirs.
 const PATH_NEEDLES: [&str; 4] = ["/home/", "/users/", "/etc/", "/var/"];
 
-/// Redact known sensitive patterns from a message string and truncate to
-/// [`SANITIZE_MAX_LEN`].
 pub(crate) fn sanitize_message(msg: &str) -> String {
     use std::borrow::Cow;
 
-    // Cow pipeline: a clean message stays borrowed through every rule and
-    // never allocates until the final `into_owned`.
     let mut out: Cow<str> = Cow::Borrowed(msg);
 
     out = replace_regex(
@@ -55,18 +47,15 @@ pub(crate) fn sanitize_message(msg: &str) -> String {
     s
 }
 
-/// Apply one redaction rule. The `pattern` string only selects which rule
-/// runs; each rule starts with a cheap `contains` guard so clean messages
-/// skip the full scan, and returns the input unchanged (still borrowed)
-/// when nothing can match.
+/// The `pattern` string selects which rule runs; each rule guards with a cheap
+/// `contains` and returns the input still-borrowed when nothing can match.
 fn replace_regex<'a>(
     input: std::borrow::Cow<'a, str>,
     pattern: &str,
     replacement: &str,
 ) -> std::borrow::Cow<'a, str> {
     let text: &str = &input;
-    // ASCII lowercasing preserves byte offsets, so positions found in a
-    // lowercased copy are valid slice indices into `text`.
+    // ASCII lowercasing preserves byte offsets, so lowercased positions are valid indices into `text`.
     let owned = match pattern {
         p if p.contains("postgres") => {
             let lower = text.to_ascii_lowercase();
@@ -109,7 +98,6 @@ fn replace_regex<'a>(
     std::borrow::Cow::Owned(owned)
 }
 
-/// Whether `text` contains a run of 16+ hex digits.
 fn has_long_hex_run(text: &str) -> bool {
     let mut run = 0usize;
     for c in text.chars() {
@@ -125,8 +113,6 @@ fn has_long_hex_run(text: &str) -> bool {
     false
 }
 
-/// Redact every occurrence of any `needle` (located via its lowercase copy
-/// `lower`) from the match start through the next whitespace character.
 fn redact_until_whitespace(
     text: &str,
     lower: &str,
@@ -161,8 +147,6 @@ fn redact_until_whitespace(
     result
 }
 
-/// Redact bearer/token patterns. ASCII whitespace after the keyword (or
-/// after the `=`/`:` separator) is tolerated, per `bearer\s+|token[=:]\s*`.
 fn redact_tokens(text: &str, replacement: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
@@ -175,8 +159,6 @@ fn redact_tokens(text: &str, replacement: &str) -> String {
             && i + 6 < len
             && chars[i + 6].is_ascii_whitespace()
         {
-            // Keep "bearer" plus its first whitespace char, then swallow any
-            // extra whitespace so "bearer<TAB>x" redacts like "bearer x".
             for c in &chars[i..i + 7] {
                 result.push(*c);
             }
@@ -200,8 +182,6 @@ fn redact_tokens(text: &str, replacement: &str) -> String {
     result
 }
 
-/// Copy the ASCII-whitespace run into `result`, then skip past the
-/// non-whitespace token that follows (dropped from the output).
 fn skip_whitespace_and_token(chars: &[char], i: &mut usize, result: &mut String) {
     let len = chars.len();
     while *i < len && chars[*i].is_ascii_whitespace() {
@@ -213,7 +193,6 @@ fn skip_whitespace_and_token(chars: &[char], i: &mut usize, result: &mut String)
     }
 }
 
-/// Check whether `lower` contains the ASCII `pat` (already-lowercased) at index `i`.
 fn lower_matches_at(lower: &[char], i: usize, pat: &str) -> bool {
     let pb = pat.as_bytes();
     if i + pb.len() > lower.len() {
@@ -227,7 +206,6 @@ fn lower_matches_at(lower: &[char], i: usize, pat: &str) -> bool {
     true
 }
 
-/// Redact email addresses (simple heuristic: word@word.tld).
 fn redact_emails(text: &str, replacement: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
@@ -246,14 +224,12 @@ fn redact_emails(text: &str, replacement: &str) -> String {
     result
 }
 
-/// Try to match an email at position `start` in `chars`. Returns end index if matched.
 fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
     let len = chars.len();
     if start >= len {
         return None;
     }
 
-    // Local part: alphanumeric + ._%+-
     let mut i = start;
     if !chars[i].is_alphanumeric() {
         return None;
@@ -264,9 +240,8 @@ fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
     if i >= len || chars[i] != '@' {
         return None;
     }
-    i += 1; // skip '@'
+    i += 1;
 
-    // Domain: alphanumeric + .-
     if i >= len || !chars[i].is_alphanumeric() {
         return None;
     }
@@ -274,7 +249,6 @@ fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
         i += 1;
     }
 
-    // Must end with a dot followed by 2+ alpha chars (TLD).
     let domain_end = i;
     if domain_end <= start + 2 {
         return None;
@@ -288,7 +262,6 @@ fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
     }
 }
 
-/// Redact long hex sequences (16+ hex chars).
 fn redact_hex(text: &str, replacement: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();

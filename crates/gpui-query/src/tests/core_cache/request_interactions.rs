@@ -1,13 +1,7 @@
-//! Cache interactions with request policies and policy accessor tests.
-
 use crate::core::*;
 use crate::tests::core_cache::*;
 use crate::tests::test_support::*;
 use std::num::NonZero;
-
-// ══════════════════════════════════════════════════════════════════════════
-// CACHE INTERACTIONS WITH REQUEST POLICIES
-// ══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn begin_request_short_circuits_fresh_ttl_cache() {

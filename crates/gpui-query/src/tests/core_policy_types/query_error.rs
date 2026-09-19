@@ -1,11 +1,5 @@
-//! Tests for QueryError and QueryErrorKind edge cases.
-
 use crate::core::*;
 use crate::tests::test_support::assert_serde_roundtrip;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// QueryError
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn query_error_kinds() {
@@ -68,8 +62,6 @@ fn query_error_from_string_ref() {
 #[test]
 fn query_error_as_ref_str() {
     let err = QueryError::response("detail");
-    // Disambiguate: QueryError impls both AsRef<str> and AsRef<Arc<str>>,
-    // so a bare `err.as_ref()` is ambiguous (E0283).
     let s: &str = err.as_ref();
     assert_eq!(s, "detail");
 }
@@ -142,8 +134,6 @@ fn query_error_sanitized_home_path() {
 
 #[test]
 fn query_error_sanitized_users_path_uppercase() {
-    // Path matching is case-insensitive, so the macOS "/Users/" prefix must
-    // be redacted just like "/home/".
     let err = QueryError::unknown("error in /Users/admin/.env leaked");
     let clean = err.sanitized();
     assert!(!clean.message().contains("/Users/admin/.env"));
@@ -161,7 +151,6 @@ fn query_error_sanitized_multiple_email_addresses() {
 
 #[test]
 fn query_error_sanitized_hex_key_16_chars() {
-    // Exactly 16 hex chars => redacted
     let err = QueryError::response("key a1b2c3d4e5f6a1b2 is invalid");
     let clean = err.sanitized();
     assert!(clean.message().contains("[REDACTED_HEX]"));
@@ -170,7 +159,6 @@ fn query_error_sanitized_hex_key_16_chars() {
 
 #[test]
 fn query_error_sanitized_hex_key_15_chars_not_redacted() {
-    // 15 hex chars => NOT redacted (< 16 threshold)
     let err = QueryError::response("key a1b2c3d4e5f6a1b is short");
     let clean = err.sanitized();
     assert!(clean.message().contains("a1b2c3d4e5f6a1b"));

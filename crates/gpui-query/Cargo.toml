@@ -24,10 +24,8 @@ serde_json = { workspace = true, optional = true }
 thiserror = { version = "2", optional = true }
 gpui = { workspace = true, optional = true }
 
-# ahash's default `runtime-rng` feature pulls getrandom, which hard-errors on
-# wasm32-unknown-unknown. The two declarations are mutually exclusive so the
-# native build keeps the default feature set (runtime-rng) while wasm uses
-# compile-time RNG.
+# ahash's runtime-rng pulls getrandom, which hard-errors on wasm32-unknown-unknown;
+# wasm builds use compile-time RNG instead.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ahash = { version = "0.8" }
 

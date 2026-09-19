@@ -1,12 +1,6 @@
-//! Cache invalidation and reset tests.
-
 use crate::core::*;
 use crate::tests::core_cache::*;
 use crate::tests::test_support::*;
-
-// ══════════════════════════════════════════════════════════════════════════
-// CACHE INVALIDATION
-// ══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn invalidate_clears_last_updated_but_retains_data() {
@@ -65,10 +59,6 @@ fn invalidate_then_refetch_refreshes_cache() {
     assert_eq!(r.last_updated_at_ms(), Some(completed_at));
     assert!(r.is_cache_fresh(completed_at + 200));
 }
-
-// ══════════════════════════════════════════════════════════════════════════
-// CACHE RESET
-// ══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn reset_clears_data_and_error() {

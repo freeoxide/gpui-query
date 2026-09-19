@@ -1,13 +1,6 @@
-//! Tests for QueryStatus, QueryTimestamp, RequestId, MutationStatus,
-//! CachePolicy, RequestPolicy, and QueryFetchMode.
-
 use crate::core::*;
 use crate::tests::test_support::assert_serde_roundtrip;
 use std::num::NonZero;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// QueryStatus
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn query_status_default_is_idle() {
@@ -56,10 +49,6 @@ fn query_status_serde_roundtrip() {
     ]);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// QueryTimestamp
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn query_timestamp_from_millis() {
     let ts = QueryTimestamp::from_millis(1_000);
@@ -103,10 +92,6 @@ fn query_timestamp_equality() {
     assert_ne!(a, c);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// RequestId
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn request_id_hash_consistency() {
     use std::collections::HashSet;
@@ -122,7 +107,7 @@ fn request_id_hash_consistency() {
 #[test]
 fn request_id_copy_semantics() {
     let a = RequestId::scoped(NonZero::new(5).unwrap(), 10);
-    let b = a; // Copy
+    let b = a;
     assert_eq!(a, b);
 }
 
@@ -133,10 +118,6 @@ fn request_id_serde_roundtrip() {
     let back: RequestId = serde_json::from_str(&json).unwrap();
     assert_eq!(back, id);
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// MutationStatus
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn mutation_status_default_is_idle() {
@@ -160,10 +141,6 @@ fn mutation_status_serde_roundtrip() {
         MutationStatus::Failure,
     ]);
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CachePolicy edge cases
-// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn cache_policy_is_fresh_at_zero_age() {
@@ -198,13 +175,10 @@ fn cache_policy_swr_is_stale_between_ttl_and_total() {
         ttl_ms: 100,
         stale_ms: 200,
     };
-    // Within TTL: not stale
     assert!(!policy.is_stale_but_serveable(50));
     assert!(!policy.is_stale_but_serveable(100));
-    // Between TTL and total (100 < age <= 300): stale
     assert!(policy.is_stale_but_serveable(101));
     assert!(policy.is_stale_but_serveable(300));
-    // Past total: not stale (expired)
     assert!(!policy.is_stale_but_serveable(301));
 }
 

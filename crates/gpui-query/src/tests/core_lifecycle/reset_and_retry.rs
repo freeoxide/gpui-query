@@ -1,14 +1,6 @@
-//! Reset, retry counter, and stale request rejection tests (sections 11-13).
-//!
-//! Covers: stale request rejection, reset from every state, retry counter.
-
 use crate::core::*;
 use crate::tests::core_lifecycle::transitions::*;
 use crate::tests::test_support::test_resource_with_policies;
-
-// ═══════════════════════════════════════════════════════════════════════
-// 11. Stale request rejection: old results don't overwrite new
-// ═══════════════════════════════════════════════════════════════════════
 
 #[test]
 fn accept_rejects_stale_request_id() {
@@ -18,7 +10,6 @@ fn accept_rejects_stale_request_id() {
     let (rid1, _) = begin(&mut r, &mut s, 100);
     let (rid2, _) = begin(&mut r, &mut s, 200);
 
-    // rid1 is stale -- rid2 replaced it
     assert!(r.accept_current_request(rid1).is_none());
     assert_eq!(r.ignored_results(), 1);
     assert_eq!(r.active_request_id(), Some(rid2));
@@ -32,7 +23,6 @@ fn stale_success_does_not_overwrite_newer_request() {
     let (rid1, _) = begin(&mut r, &mut s, 100);
     let (rid2, _) = begin(&mut r, &mut s, 200);
 
-    // Stale completion for rid1 should be rejected
     assert!(!r.complete_current_success(rid1, "stale", 300));
 
     assert_eq!(r.status(), QueryStatus::LoadingEmpty);
@@ -55,10 +45,6 @@ fn stale_failure_does_not_overwrite_newer_request() {
     assert_eq!(r.active_request_id(), Some(rid2));
     assert!(r.error().is_none());
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// 12. Reset from every state
-// ═══════════════════════════════════════════════════════════════════════
 
 #[test]
 fn reset_from_idle() {
@@ -183,7 +169,6 @@ fn reset_clears_diagnostic_counters() {
     r.increment_retry();
     r.increment_retry();
 
-    // Replace request to bump cancelled_count
     let _ = begin(&mut r, &mut s, 1_500);
 
     r.reset();
@@ -193,10 +178,6 @@ fn reset_clears_diagnostic_counters() {
     assert_eq!(r.ignored_results(), 0);
     assert_eq!(r.retry_count(), 0);
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// 13. Retry counter increment and reset
-// ═══════════════════════════════════════════════════════════════════════
 
 #[test]
 fn retry_counter_increments_and_resets() {
