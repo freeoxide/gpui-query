@@ -137,7 +137,7 @@ impl<T, U> SelectTransform<T, U> {
 ///
 /// # Storage
 ///
-/// Source data is held as `Option<Arc<T>` so cloning a `MappedQueryResource`
+/// Source data is held as `Option<Arc<T>>` so cloning a `MappedQueryResource`
 /// (e.g. for derived views) is a cheap `Arc::clone` rather than a full copy
 /// of `T`. `Arc<T>` is `Send + Sync` exactly when `T` is, so the existing
 /// bounds are preserved.

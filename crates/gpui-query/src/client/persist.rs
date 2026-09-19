@@ -475,7 +475,9 @@ impl Persister for NoopPersister {
 /// each one that decodes primes the value via `set_query_data`. Entries no
 /// deserializer accepts are skipped. Stored keys are `to_path()` strings;
 /// they are split back into segments so `Exact`/`Prefix` filters match the
-/// live multi-segment key shapes.
+/// live multi-segment key shapes. The split is lossy: a single-segment key
+/// containing `"::"` hydrates as multiple segments (escaping the separator
+/// needs a `PERSIST_VERSION` bump).
 ///
 /// Returns the loaded snapshot (post-filter) so callers can inspect entries
 /// or prime types with no registered deserializer themselves. Errors from

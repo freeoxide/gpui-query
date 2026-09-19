@@ -273,6 +273,93 @@ fn test_hydrate_primes_via_deserializer_registry(cx: &mut TestAppContext) {
     let _ = harness;
 }
 
+// A stored multi-segment path must hydrate under the live segmented key:
+// before the split fix the path string primed as one segment, so Exact and
+// Prefix filters never matched it.
+
+#[gpui::test]
+fn test_hydrate_rebuilds_multi_segment_keys(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+
+    let mut snap = PersistSnapshot {
+        entries: Default::default(),
+        version: crate::client::PERSIST_VERSION,
+    };
+    snap.entries.insert(
+        "users::42::posts".to_string(),
+        PersistedEntry {
+            value: serde_json::json!("post-data"),
+            cached_at: crate::client::current_time_ms(),
+            cache_policy: crate::core::CachePolicy::default(),
+            meta: None,
+        },
+    );
+    *persister.load_value.lock().unwrap() = Some(snap);
+
+    // Retain the multi-segment entity so hydrate's set_query_data reuses it
+    // instead of creating one that dies immediately (WeakEntity).
+    struct H {
+        _entity: Entity<QueryResource<String, QueryError>>,
+    }
+    let harness = cx.new(|cx| {
+        cx.update_global::<QueryClient, _>(|client, _cx| {
+            client
+                .register_deserializer::<String, QueryError>(|v| v.as_str().map(|s| s.to_string()));
+        });
+        let entity = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.resource::<String, QueryError>(QueryKey::from(["users", "42", "posts"]), cx)
+        });
+        H { _entity: entity }
+    });
+
+    let key = QueryKey::from(["users", "42", "posts"]);
+    let prefix = PersistFilter::Prefix(QueryKey::from(["users"]));
+    let outcome = cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            block_on_ready(hydrate(client, &persister, &prefix, DAY, cx))
+        })
+    });
+    assert!(outcome.is_ok(), "hydrate should succeed: {:?}", outcome.err());
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let data = client.get_query_data::<String, QueryError>(&key, cx);
+            assert_eq!(
+                data,
+                Some("post-data".to_string()),
+                "Prefix must match the reconstructed segments"
+            );
+        });
+    });
+
+    // Overwrite with a sentinel so the Exact pass has to re-prime to pass.
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(key.clone(), "sentinel".to_string(), cx);
+        });
+    });
+    let exact = PersistFilter::Exact(key.clone());
+    let outcome = cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            block_on_ready(hydrate(client, &persister, &exact, DAY, cx))
+        })
+    });
+    assert!(outcome.is_ok(), "hydrate should succeed: {:?}", outcome.err());
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let data = client.get_query_data::<String, QueryError>(&key, cx);
+            assert_eq!(
+                data,
+                Some("post-data".to_string()),
+                "Exact must match the reconstructed segments"
+            );
+        });
+    });
+    let _ = harness;
+}
+
 #[gpui::test]
 fn test_hydrate_rejects_version_mismatch(cx: &mut TestAppContext) {
     setup_query_client(cx);

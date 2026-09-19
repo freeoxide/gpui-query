@@ -127,9 +127,6 @@ impl FilePersister {
 
         let bytes: Vec<u8> = match self.format {
             PersistFormat::Json => serde_json::to_vec(snapshot)?,
-            // bincode's format is not self-describing, so it cannot drive
-            // serde_json::Value's deserialize_any; the adapter carries each
-            // value as a JSON String instead.
             PersistFormat::Bincode => {
                 let adapter = BincodeSnapshot::from_snapshot(snapshot)?;
                 bincode::serialize(&adapter).map_err(|e| {
@@ -155,9 +152,6 @@ impl FilePersister {
         tmp.as_file().sync_all()?;
         #[cfg(target_os = "macos")]
         try_fullfsync(tmp.as_file());
-        // A Windows AV scanner or concurrent reader holding the destination
-        // makes the replace fail with ERROR_ACCESS_DENIED; that case is
-        // retryable, so it maps to Permission instead of Io.
         tmp.persist(&self.path).map_err(|persist_err| {
             let io_err = persist_err.error;
             let denied = io_err.kind() == std::io::ErrorKind::PermissionDenied

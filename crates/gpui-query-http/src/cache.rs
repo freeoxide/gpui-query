@@ -5,9 +5,9 @@
 //! revalidate with `If-None-Match` / `If-Modified-Since`, and a `304`
 //! re-serves the cached body.
 //!
-//! Concurrency: two [`std::sync::Mutex`]es (meta, bodies), always locked in
-//! that order, never held across an `.await`. The cache is `Send + Sync` and
-//! runtime-agnostic.
+//! Concurrency: two [`std::sync::Mutex`]es (meta, bodies), each taken in a
+//! short scoped block, never held across an `.await`. The cache is
+//! `Send + Sync` and runtime-agnostic.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -161,7 +161,7 @@ impl<B: HttpBackend> HttpCache<B> {
             stale_for: stale_for_from_policy(policy),
         };
 
-        // Lock order is meta -> bodies everywhere.
+        // Scoped blocks: neither guard is held while taking the other.
         {
             let mut guard = self.meta.lock().map_err(|_| HttpError::Poisoned)?;
             guard.insert(url.to_string(), meta.clone());
