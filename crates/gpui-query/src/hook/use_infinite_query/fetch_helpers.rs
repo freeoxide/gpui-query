@@ -54,10 +54,8 @@ pub fn fetch_previous_page_infinite<T, E, C, FPrev, Fut>(
     spawn_page_fetch(entity, fetcher, PageDirection::Previous, cx);
 }
 
-/// Mints the `RequestId` from the bucket's sequencer (so ids from
-/// `QueryClient` and the resource's own fallback never collide), begins the
-/// fetch, and stores the spawned task so a replacement fetch or entity drop
-/// aborts the prior one.
+/// Mints the `RequestId` from the bucket sequencer, begins the fetch, and
+/// stores the task so a replacement fetch or entity drop aborts it.
 pub(super) fn spawn_page_fetch<T, E, C, F, Fut>(
     entity: &Entity<InfiniteQueryResource<T, E>>,
     fetcher: F,

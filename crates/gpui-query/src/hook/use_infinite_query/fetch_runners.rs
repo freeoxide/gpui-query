@@ -32,11 +32,11 @@ impl PageDirection {
     }
 }
 
-/// The `request_id` comes from `begin_fetch_*` (never re-read after the fetcher),
-/// and completion is two-phase so a superseded request can never write; a
-/// cancelled or superseded fetch stops retrying after the delay. The cursor is
-/// read once: pages cannot change while this request stays current, and once it
-/// is superseded the completion is discarded anyway.
+/// Two-phase completion so a superseded request never writes; a cancelled or
+/// superseded fetch stops retrying after the delay; the cursor is read once,
+/// which stays accurate across retries because hook-driven page changes end
+/// this request, though a manual `append_page`/`prepend_page` between
+/// attempts is not covered and the next retry fetches on the old cursor.
 pub(super) async fn run_fetch_page_with_id<T, E, F, Fut>(
     entity: &gpui::WeakEntity<InfiniteQueryResource<T, E>>,
     fetcher: &F,
