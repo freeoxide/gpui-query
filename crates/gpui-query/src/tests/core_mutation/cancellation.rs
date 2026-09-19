@@ -1,8 +1,4 @@
-//! Cancellation, signal propagation, and cancelled_count tests.
-
 use crate::core::*;
-
-// -- Cancellation cancels signal and sets Failure --
 
 #[test]
 fn cancel_during_loading_sets_failure() {
@@ -25,8 +21,6 @@ fn cancel_during_loading_sets_failure() {
     assert!(m.signal().is_none(), "signal cleared after cancel");
     assert_eq!(m.cancelled_count(), 1);
 }
-
-// -- Cancel is a no-op on Idle, Success, Failure --
 
 #[test]
 fn cancel_on_idle_is_noop() {
@@ -62,8 +56,6 @@ fn cancel_on_failure_is_noop() {
     assert_eq!(m.retry_count(), retry_count_before);
     assert_eq!(m.cancelled_count(), 0);
 }
-
-// -- cancelled_count increments across multiple cancellations --
 
 #[test]
 fn cancelled_count_increments_across_mutations() {

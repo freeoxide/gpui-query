@@ -27,7 +27,7 @@ If you only want the core state machine without pulling in GPUI:
 gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }
 ```
 
-The `core` layer also builds for `wasm32-unknown-unknown`: the crate swaps ahash to compile-time RNG on wasm targets internally, so no extra configuration is needed. The `client`, `hook`, and `persist` layers are native-only — they depend on `gpui`, which does not build for `wasm32-unknown-unknown`.
+The `core` layer also builds for `wasm32-unknown-unknown`: the crate swaps ahash to compile-time RNG on wasm targets internally, so no extra configuration is needed. The `client`, `hook`, and `persist` layers are native-only because they depend on `gpui`, which does not build for `wasm32-unknown-unknown`.
 
 ## Quick start
 
@@ -97,7 +97,7 @@ The crate is split into four layers, each behind a feature flag:
 - Mutation callbacks for success, error, and settled states.
 - Infinite queries for paginated data.
 - Error sanitization that strips connection strings, tokens, paths, emails, and hex keys from messages.
-- Async persistence through the `Persister` trait (`persist` feature); a disk adapter ships in the [`gpui-query-persist`](https://crates.io/crates/gpui-query-persist) crate, and HTTP cache-header support in [`gpui-query-http`](https://crates.io/crates/gpui-query-http).
+- Async persistence through the `Persister` trait (`persist` feature). A disk adapter ships in the [`gpui-query-persist`](https://crates.io/crates/gpui-query-persist) crate, and HTTP cache-header support in [`gpui-query-http`](https://crates.io/crates/gpui-query-http).
 
 ## Links
 
@@ -118,4 +118,3 @@ The crate is split into four layers, each behind a feature flag:
 ## License
 
 MIT. See the [LICENSE](../../LICENSE) file for details.
-

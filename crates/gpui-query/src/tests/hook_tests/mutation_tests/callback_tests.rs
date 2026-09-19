@@ -1,5 +1,3 @@
-//! Tests for `mutate_with_callbacks` success, failure, and settled callback behavior.
-
 use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -237,7 +235,6 @@ fn test_mutate_callbacks_settled_always_fires_on_success(cx: &mut TestAppContext
 
     let _harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>((), cx);
-        // Only set on_settled, not on_success or on_error.
         mutate_with_callbacks(
             &entity,
             "settled-only".to_string(),

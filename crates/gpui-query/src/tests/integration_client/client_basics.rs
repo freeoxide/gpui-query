@@ -1,13 +1,8 @@
-//! Tests for basic QueryClient operations: creation, resource CRUD,
-//! type partitioning, diagnostics, and observer creation.
-
 use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
 
 use crate::client::{MutationObserver, ObserverConfig, QueryClient, QueryObserver};
 use crate::core::*;
 use crate::tests::test_support::*;
-
-// ── 1. QueryClient creation and Global registration ────────────────────
 
 #[gpui::test]
 fn test_client_creation_and_global_registration(cx: &mut TestAppContext) {
@@ -48,7 +43,6 @@ fn test_client_with_gc_time(cx: &mut TestAppContext) {
             entity.update(cx, |r, _| {
                 r.apply_success("hello".to_string(), 100);
             });
-            // GC at t=3000: success, age=2900 > success_threshold(2*1000=2000) -> evicted
             client.gc_with_time(3_000, cx);
             let remaining = client.all_queries::<String, QueryError>();
             assert!(
@@ -58,8 +52,6 @@ fn test_client_with_gc_time(cx: &mut TestAppContext) {
         });
     });
 }
-
-// ── 2. resource() creates and retrieves typed entities ──────────────────
 
 #[gpui::test]
 fn test_resource_creates_and_deduplicates(cx: &mut TestAppContext) {
@@ -71,7 +63,6 @@ fn test_resource_creates_and_deduplicates(cx: &mut TestAppContext) {
             let e1 = client.resource::<String, QueryError>(key.clone(), cx);
             assert_eq!(e1.read(cx).status(), QueryStatus::Idle);
 
-            // Same key returns same entity (deduplication)
             let e2 = client.resource::<String, QueryError>(key.clone(), cx);
             assert_eq!(
                 e1.entity_id(),
@@ -79,7 +70,6 @@ fn test_resource_creates_and_deduplicates(cx: &mut TestAppContext) {
                 "same key should return same entity"
             );
 
-            // Different key creates new entity
             let e3 = client.resource::<String, QueryError>("user:2", cx);
             assert_ne!(
                 e1.entity_id(),
@@ -127,26 +117,21 @@ fn test_query_retrieves_existing_entity(cx: &mut TestAppContext) {
 
             let created = client.resource::<String, QueryError>(key.clone(), cx);
 
-            // query() returns Some for existing key
             let retrieved = client.query::<String, QueryError>(&key);
             assert!(retrieved.is_some(), "should find existing key");
             assert_eq!(created.entity_id(), retrieved.unwrap().entity_id());
 
-            // query() returns None for missing key
             let missing = client.query::<String, QueryError>(&QueryKey::from("nope"));
             assert!(missing.is_none(), "should not find nonexistent key");
         });
     });
 }
 
-// ── 3. Type-partitioned buckets: different (T,E) types don't conflict ──
-
 #[gpui::test]
 fn test_type_partitioned_buckets_no_conflict(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // Same key "data" but different types — must not conflict
             let string_entity = client.resource::<String, QueryError>("data", cx);
             let u32_entity = client.resource::<u32, QueryError>("data", cx);
             let user_entity = client.resource::<User, QueryError>("data", cx);
@@ -167,12 +152,10 @@ fn test_type_partitioned_buckets_no_conflict(cx: &mut TestAppContext) {
                 "u32 and User must be separate"
             );
 
-            // all_queries::<String, _> returns only String entities
             let strings = client.all_queries::<String, QueryError>();
             assert_eq!(strings.len(), 1);
             assert_eq!(strings[0].entity_id(), string_entity.entity_id());
 
-            // all_queries::<User, _> returns only User entities
             let users = client.all_queries::<User, QueryError>();
             assert_eq!(users.len(), 1);
             assert_eq!(users[0].entity_id(), user_entity.entity_id());
@@ -185,7 +168,6 @@ fn test_same_type_different_error_types_no_conflict(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            // Same T but different E — these should be in separate buckets
             let e1 = client.resource::<String, QueryError>("key", cx);
             let e2 = client.resource::<String, String>("key", cx);
 
@@ -197,8 +179,6 @@ fn test_same_type_different_error_types_no_conflict(cx: &mut TestAppContext) {
         });
     });
 }
-
-// ── 8. Diagnostics output ──────────────────────────────────────────────
 
 #[gpui::test]
 fn test_diagnostics_empty_client(cx: &mut TestAppContext) {
@@ -219,7 +199,6 @@ fn test_diagnostics_with_resources(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let _e1 = client.resource::<String, QueryError>(QueryKey::from(["users", "1"]), cx);
 
-            // Use prepare_fetch_query + complete_success for a proper lifecycle
             let prepared = client
                 .prepare_fetch_query::<String, QueryError>(QueryKey::from(["users", "2"]), cx)
                 .expect("should start");
@@ -239,9 +218,6 @@ fn test_diagnostics_with_resources(cx: &mut TestAppContext) {
                 "diagnostics should have two query records"
             );
 
-            // Verify that the completed query shows up in diagnostics.
-            // Note: diagnostics reads live entity state via collect_diagnostics,
-            // which upgrades weak refs and reads entity state.
             let users_diags: Vec<_> = diag
                 .queries
                 .iter()
@@ -249,7 +225,6 @@ fn test_diagnostics_with_resources(cx: &mut TestAppContext) {
                 .collect();
             assert_eq!(users_diags.len(), 2, "should have two user queries");
 
-            // The entity that was completed via PreparedFetch should show Success
             let success_diag = users_diags
                 .iter()
                 .find(|q| q.status == QueryStatus::Success);
@@ -276,8 +251,6 @@ fn test_diagnostics_across_type_buckets(cx: &mut TestAppContext) {
     });
 }
 
-// ── 11. Observer creation and notification ─────────────────────────────
-
 #[gpui::test]
 fn test_query_observer_creation(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -285,7 +258,6 @@ fn test_query_observer_creation(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let entity = client.resource::<String, QueryError>("obs_key", cx);
             let _observer = QueryObserver::new(&entity);
-            // Observer created successfully — entity is still alive
             let weak = entity.downgrade();
             assert!(weak.upgrade().is_some(), "entity should still be alive");
         });
@@ -299,12 +271,8 @@ fn test_query_observer_observe_returns_subscription(cx: &mut TestAppContext) {
         cx.update_global::<QueryClient, _>(|client, cx| {
             let entity = client.resource::<String, QueryError>("sub_key", cx);
 
-            // Create a dummy view to host the observer
-            struct DummyView;
-            let view = cx.new(|_| DummyView);
-
-            let observer = QueryObserver::new(&entity);
-            let subscription = view.update(cx, |_view, cx| observer.observe(cx));
+            let mut observer = QueryObserver::new(&entity);
+            let subscription = observe_with_dummy_view(cx, &mut observer);
             assert!(
                 subscription.is_some(),
                 "observe should return Some(Subscription)"
@@ -322,7 +290,6 @@ fn test_mutation_observer_creation(cx: &mut TestAppContext) {
         let entity = cx
             .new(|_| MutationResource::<String, User, QueryError>::new(RetryPolicy::no_retries()));
         let _observer = MutationObserver::<String, User, QueryError>::new(&entity);
-        // No panic — observer created
     });
 }
 
@@ -336,7 +303,6 @@ fn test_observer_config_custom_settings(cx: &mut TestAppContext) {
                 notify_on_status_change_only: false,
             };
             let _observer = QueryObserver::new(&entity).with_config(config);
-            // Observer created with custom config — no panic
         });
     });
 }

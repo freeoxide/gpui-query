@@ -10,17 +10,9 @@ mod cache;
 mod completion;
 mod lifecycle;
 
-/// Core state machine for a single query resource.
-///
-/// `QueryResource` owns the cache/request state for one resource. It tracks
-/// data, error, loading status, retry count, and a cooperative cancellation
-/// signal. Callers interact with it through lifecycle methods:
-///
-/// 1. [`begin_request`](QueryResource::begin_request) — start a fetch
-/// 2. [`accept_current_request`](QueryResource::accept_current_request) — validate the request is still active
-/// 3. [`complete_success`](QueryResource::complete_success) / [`complete_failure`](QueryResource::complete_failure) — complete the request
-///
-/// This type is framework-free — it depends only on `serde`.
+/// Framework-free state machine for one query: data, error, status, retries,
+/// and a cooperative cancellation signal. Lifecycle: `begin_request` →
+/// `accept_current_request` → `complete_*`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueryResource<T, E = QueryError> {
     key: QueryKey,
@@ -38,11 +30,8 @@ pub struct QueryResource<T, E = QueryError> {
     retry_count: u32,
     retry_policy: RetryPolicy,
     previous_data: Option<T>,
-    /// Per-resource sequencer used by [`begin_request_with_id`](Self::begin_request_with_id)
-    /// when no external id is supplied, so transient callers without a
-    /// `QueryClient` still get monotonic, collision-free ids instead of every
-    /// call colliding at `RequestId(1,1)` (N3). `#[serde(skip)]` — runtime
-    /// state, not persisted.
+    /// Runtime state, not persisted; supplies monotonic ids when no external
+    /// sequencer is provided.
     #[serde(skip)]
     transient_sequencer: RequestSequencer,
     #[serde(skip)]
@@ -50,7 +39,6 @@ pub struct QueryResource<T, E = QueryError> {
 }
 
 impl<T, E> QueryResource<T, E> {
-    /// Create a new query resource with the given key and policies.
     pub fn new(
         key: impl Into<QueryKey>,
         cache_policy: CachePolicy,

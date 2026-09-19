@@ -1,6 +1,3 @@
-//! Basic tests for `use_query`, `use_query_manual`, `fetch_query`,
-//! `use_query_unsignalled`, subscriptions, key changes, and retry policy.
-
 use std::sync::{Arc, Mutex};
 
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -10,8 +7,6 @@ use crate::core::{
 };
 use crate::hook::*;
 use crate::tests::test_support::*;
-
-// ── use_query ──────────────────────────────────────────────────────────────
 
 #[gpui::test]
 fn test_use_query_auto_fetches(cx: &mut TestAppContext) {
@@ -28,7 +23,6 @@ fn test_use_query_auto_fetches(cx: &mut TestAppContext) {
             |_signal| async move { Ok::<_, QueryError>("data") },
             cx,
         );
-        // Immediately after use_query, the resource should be loading.
         let status = entity.read(cx).status();
         assert!(
             status.is_loading(),
@@ -122,8 +116,6 @@ fn test_use_query_completes_with_failure(cx: &mut TestAppContext) {
     });
 }
 
-// ── use_query_with_signal ──────────────────────────────────────────────────
-
 #[gpui::test]
 fn test_use_query_signal_not_cancelled_on_normal_fetch(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -164,8 +156,6 @@ fn test_use_query_signal_not_cancelled_on_normal_fetch(cx: &mut TestAppContext) 
     );
 }
 
-// ── use_query_manual ───────────────────────────────────────────────────────
-
 #[gpui::test]
 fn test_use_query_manual_creates_entity_without_fetch(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -192,8 +182,6 @@ fn test_use_query_manual_creates_entity_without_fetch(cx: &mut TestAppContext) {
         assert_eq!(harness.read(cx).entity.read(cx).status(), QueryStatus::Idle);
     });
 }
-
-// ── fetch_query ────────────────────────────────────────────────────────────
 
 #[gpui::test]
 fn test_fetch_query_triggers_refetch_on_existing_entity(cx: &mut TestAppContext) {
@@ -251,7 +239,6 @@ fn test_fetch_query_can_refetch_after_success(cx: &mut TestAppContext) {
         assert_eq!(harness.read(cx).entity.read(cx).data(), Some(&"first"));
     });
 
-    // Refetch with different data. NoCache ensures begin_request won't short-circuit.
     harness.update(cx, |this, cx| {
         fetch_query(&this.entity, || async { Ok::<_, QueryError>("second") }, cx);
     });
@@ -262,8 +249,6 @@ fn test_fetch_query_can_refetch_after_success(cx: &mut TestAppContext) {
         assert_eq!(harness.read(cx).entity.read(cx).data(), Some(&"second"));
     });
 }
-
-// ── Subscription lifecycle ─────────────────────────────────────────────────
 
 #[gpui::test]
 fn test_subscription_drops_gracefully(cx: &mut TestAppContext) {
@@ -281,7 +266,6 @@ fn test_subscription_drops_gracefully(cx: &mut TestAppContext) {
             cx,
         );
         assert_eq!(entity.read(cx).status(), QueryStatus::Idle);
-        // Drop the subscription inside the context. Entity should remain valid.
         drop(sub);
         assert_eq!(entity.read(cx).status(), QueryStatus::Idle);
         H { entity }
@@ -314,10 +298,8 @@ fn test_multiple_subscriptions_same_key(cx: &mut TestAppContext) {
             cx,
         );
 
-        // Same key = same entity from QueryClient.
         assert_eq!(entity1.entity_id(), entity2.entity_id());
 
-        // Both subscriptions should be droppable without issues.
         drop(sub1);
         drop(sub2);
 
@@ -331,8 +313,6 @@ fn test_multiple_subscriptions_same_key(cx: &mut TestAppContext) {
         );
     });
 }
-
-// ── Key change triggers new fetch ──────────────────────────────────────────
 
 #[gpui::test]
 fn test_different_keys_create_distinct_entities(cx: &mut TestAppContext) {
@@ -367,8 +347,6 @@ fn test_different_keys_create_distinct_entities(cx: &mut TestAppContext) {
     });
 }
 
-// ── Retry policy propagation ───────────────────────────────────────────────
-
 #[gpui::test]
 fn test_use_query_propagates_retry_policy_to_entity(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -393,8 +371,6 @@ fn test_use_query_propagates_retry_policy_to_entity(cx: &mut TestAppContext) {
 
     let _ = harness;
 }
-
-// ── use_query_unsignalled ──────────────────────────────────────────────────
 
 #[gpui::test]
 fn test_use_query_unsignalled_auto_fetches(cx: &mut TestAppContext) {
@@ -424,8 +400,6 @@ fn test_use_query_unsignalled_auto_fetches(cx: &mut TestAppContext) {
     });
 }
 
-// ── use_query force_fetch ──────────────────────────────────────────────────
-
 #[gpui::test]
 fn test_fetch_query_refetch_after_success(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -449,7 +423,6 @@ fn test_fetch_query_refetch_after_success(cx: &mut TestAppContext) {
         assert_eq!(harness.read(cx).entity.read(cx).data(), Some(&1));
     });
 
-    // Refetch with different data.
     harness.update(cx, |this, cx| {
         fetch_query(&this.entity, || async { Ok::<_, QueryError>(2_i32) }, cx);
     });
