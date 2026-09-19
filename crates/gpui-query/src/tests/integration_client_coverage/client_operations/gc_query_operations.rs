@@ -7,13 +7,9 @@ use crate::client::{InfiniteQueryObserver, QueryClient};
 use crate::core::*;
 use crate::tests::test_support::*;
 
-// -- 39. GC clamps gc_time=0 to 1000ms; Idle resources with no snapshot
-//         timestamp are evicted at any gc_with_time value since their
-//         age defaults to gc_threshold. ──────────────────────────────────────
-//
-// Finding 1 fix: Assert concrete eviction outcomes. An Idle resource with
-// no snapshot timestamp (never fetched) is treated as "age == gc_threshold"
-// by the GC, so it is always evicted regardless of gc_time clamping.
+// GC clamps gc_time=0 to 1000ms. An Idle resource with no snapshot timestamp
+// (never fetched) counts as "age == gc_threshold", so it is evicted at any
+// gc_with_time value.
 
 #[gpui::test]
 fn test_gc_with_zero_time_clamped_evicts_idle(cx: &mut TestAppContext) {
@@ -37,14 +33,9 @@ fn test_gc_with_zero_time_clamped_evicts_idle(cx: &mut TestAppContext) {
     });
 }
 
-// -- 40. GC uses gc_with_time with deterministic time control ----------------
-//
-// Finding 2 fix: Assert concrete GC outcomes using the documented eviction
-// rules. GC reads live entity state directly via `entity.read(cx)` (CL2/#106;
-// no cached snapshot), so resources created via client.resource() always
-// appear as Idle with last_updated_ms=None to GC. Idle resources with no
-// timestamp are evicted at any gc_with_time value (age defaults to
-// gc_threshold).
+// gc_with_time reads live entity state directly (no cached snapshot), so
+// resources created via client.resource() appear Idle with last_updated_ms
+// None and are evicted at any gc_with_time value.
 
 #[gpui::test]
 fn test_gc_with_time_explicit_time_value(cx: &mut TestAppContext) {
@@ -259,7 +250,7 @@ fn test_infinite_query_observer_weak_entity_pattern(cx: &mut TestAppContext) {
 fn test_current_time_ms_is_reasonable(_cx: &mut TestAppContext) {
     let now = crate::client::current_time_ms();
     // Should be > 1_700_000_000_000 (after 2023). Upper bound widened to
-    // 4_000_000_000_000 (pre-2128) per audit #128 so the test doesn't fail
+    // 4_000_000_000_000 (pre-year-2128) so the test doesn't fail
     // once wall-clock crosses the old 2_000_000_000_000 (2033) threshold.
     assert!(
         now > 1_700_000_000_000,

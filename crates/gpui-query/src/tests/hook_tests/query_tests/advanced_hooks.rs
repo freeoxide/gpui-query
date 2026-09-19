@@ -204,10 +204,9 @@ fn test_use_query_force_fetch_option_set(cx: &mut TestAppContext) {
 fn test_use_query_signal_cancelled_on_replacement(cx: &mut TestAppContext) {
     setup_test(cx);
 
-    // Verify that when a second fetch replaces an in-flight fetch, the first
-    // fetcher's signal is cancelled. We use use_query_manual + fetch_query
-    // because use_query only auto-fetches when Idle — a second use_query with
-    // the same key while LoadingEmpty would not trigger begin_request.
+    // When a second fetch replaces an in-flight fetch, the first fetcher's
+    // signal is cancelled. use_query_manual + fetch_query because use_query
+    // only auto-fetches when Idle.
     let gate = Gate::new();
     let gate_clone = gate.clone();
     let executor = cx.background_executor.clone();

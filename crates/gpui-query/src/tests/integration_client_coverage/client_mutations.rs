@@ -10,7 +10,6 @@ use crate::tests::test_support::*;
 
 #[gpui::test]
 fn test_mutation_with_key_registration(cx: &mut TestAppContext) {
-    // Audit fix #46: prefer the shorter `setup_test` alias.
     setup_test(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
@@ -30,7 +29,6 @@ fn test_mutation_with_key_registration(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_all_mutations_empty_for_unregistered_type(cx: &mut TestAppContext) {
-    // Audit fix #46: prefer the shorter `setup_test` alias.
     setup_test(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
@@ -51,7 +49,6 @@ fn test_all_mutations_empty_for_unregistered_type(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_multiple_mutations_same_type(cx: &mut TestAppContext) {
-    // Audit fix #46: prefer the shorter `setup_test` alias.
     setup_test(cx);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
@@ -229,7 +226,6 @@ fn test_query_observer_observe_succeeds_for_live_entity(cx: &mut TestAppContext)
             let entity = client.resource::<String, QueryError>("live_obs", cx);
             let mut observer = QueryObserver::new(&entity);
 
-            // Audit fix #52: adopt the shared `observe_with_dummy_view` helper
             // instead of a local `struct DummyView;` + manual view dance.
             let result = observe_with_dummy_view::<String, QueryError>(cx, &mut observer);
             assert!(

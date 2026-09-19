@@ -1,24 +1,11 @@
-//! Query hook functions — `use_query`, `use_query_unsignalled`, `use_query_manual`,
+//! Query hook functions: `use_query`, `use_query_unsignalled`, `use_query_manual`,
 //! `fetch_query`, and `fetch_query_with_signal`.
 //!
-//! # Task lifecycle: deliberate detach-by-design (Audit Finding #6)
-//!
-//! Audit fix #6 (storing the spawned fetch task so a replacement fetch or
-//! entity drop aborts it) is applied to **mutations and infinite queries**.
-//! The **plain-query** spawn sites in this module — inside `use_query`,
-//! `use_query_unsignalled`, `fetch_query`, and `fetch_query_with_signal` —
-//! intentionally call `task.detach()` instead. This is not an unfinished fix:
-//!
-//! - Query fetches already prevent stale writes through the cooperative
-//!   `QuerySignal` plus the `is_current_request` / `accept_current_request`
-//!   two-phase guard in the retry loop. A superseded fetcher still observes
-//!   its cancelled signal, which tests enforce.
-//! - Hard-aborting a query task on replacement would break that cooperative
-//!   contract. The detached task self-terminates once the owning entity is
-//!   dropped (the `weak.upgrade()` checks return `None`), so it cannot leak
-//!   writes after unmount.
-//!
-//! Each site repeats a short form of this rationale next to its `detach()`.
+//! Plain-query fetch tasks are deliberately detached. Stale writes are already
+//! prevented by the cooperative `QuerySignal` plus the two-phase
+//! `is_current_request` / `accept_current_request` guard in the retry loop, and
+//! hard-aborting on replacement would break that contract. Each task holds only
+//! a `WeakEntity`, so it self-terminates once the owning entity is dropped.
 
 use gpui::{BorrowAppContext as _, Context, Entity, Subscription};
 
@@ -26,33 +13,19 @@ use crate::client::{QueryClient, QueryObserver};
 use crate::core::{Fetched, QueryFetchMode, QueryKey, QueryResource, QuerySignal, QueryStatus};
 
 use super::current_time_ms;
-use super::fetch_retry::{begin_request_on_entity, fetch_signal_with_retry, fetch_with_retry};
+use super::fetch_retry::{
+    FetchedLike, begin_request_on_entity, fetch_signal_with_retry, fetch_with_retry,
+};
 
-/// Subscribe to a query resource and automatically re-render when it changes.
+/// Subscribe to a query resource and re-render when it changes.
 ///
-/// This is the **primary** `use_query` hook following the v2 "Signal-always"
-/// design: the fetcher receives a [`QuerySignal`] for cooperative cancellation.
+/// The primary hook: creates or reuses the resource in the global
+/// [`QueryClient`], sets up a [`QueryObserver`], propagates the retry policy
+/// from `options`, and spawns a signal-accepting fetch if the resource is
+/// idle. Call it in a component constructor, not in `render`.
 ///
-/// Call this in your component's constructor (not in `render`). It:
-///
-/// 1. Gets or creates a [`QueryResource`] entity from the global [`QueryClient`]
-/// 2. Sets up a [`QueryObserver`] so your component re-renders on state changes
-/// 3. Propagates the user's retry policy to the resource entity (audit fix #16)
-/// 4. Calls `begin_request` to set status to Loading and obtain a `RequestId`
-/// 5. Spawns an async fetch with retry logic, using the stored `RequestId`
-///
-/// # Returns
-///
-/// A tuple of `(Entity<QueryResource<T, E>>, Subscription)`:
-/// - Store the entity to read state during render
-/// - Store the subscription to keep the observation alive
-///
-/// # Unmount Behavior (Audit Finding #6)
-///
-/// If the component unmounts while a fetch is in-flight, the fetch result is
-/// silently discarded. No callback fires. This is intentional for cache-layer
-/// correctness. Callers who need completion guarantees should use
-/// `fetch_query_with_signal` directly with their own completion handling.
+/// If the component unmounts mid-fetch the result is silently discarded; use
+/// [`fetch_query_with_signal`] directly when you need completion guarantees.
 pub fn use_query<T, E, C, F, Fut>(
     options: impl Into<crate::hook::QueryOptions>,
     fetcher: F,
@@ -65,88 +38,20 @@ where
     F: Fn(QuerySignal) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    // Audit H7: destructure opts so retry_policy can be moved (not cloned)
-    // into the entity store; it has no later use. key is still cloned once for
-    // use_query_manual (audit #61 moves the original into begin_request below).
-    let crate::hook::QueryOptions {
-        key,
-        cache_policy,
-        request_policy,
-        retry_policy,
-        force_fetch,
-        ..
-    } = options.into();
-    let (entity, subscription) = use_query_manual(key.clone(), cache_policy, request_policy, cx);
-
-    // Audit fix #16: Propagate the user's retry policy to the resource entity.
-    // Without this, the resource defaults to RetryPolicy::no_retries() and
-    // the user's QueryOptions::retry_policy() builder is a dead API.
-    entity.update(cx, |r, _| r.set_retry_policy(retry_policy));
-
-    // Start fetch if resource is idle
-    let should_fetch = entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle);
-    if should_fetch {
-        let fetch_mode = if force_fetch {
-            QueryFetchMode::Force
-        } else {
-            QueryFetchMode::Normal
-        };
-        // Audit fix #3: begin_request_on_entity returns Option<RequestId>.
-        // If CacheHit or IgnoredWhileLoading, skip spawning the fetch task.
-        // Audit fix #2: Thread the key through to avoid re-reading from entity.
-        // Audit fix #61: opts.key was cloned once above for use_query_manual
-        // and is no longer needed after this call, so move it instead of
-        // cloning again (removes a redundant second clone of the key).
-        if let (Some(request_id), signal) =
-            begin_request_on_entity(&entity, cx, fetch_mode, Some(key))
-        {
-            // Audit H3: `signal` comes straight from begin_request_on_entity
-            // (read in the same entity.update as the begin) instead of via a
-            // separate entity.read_with pass. unwrap_or_else covers the
-            // pathological case where begin created no signal.
-            let signal = signal.unwrap_or_else(QuerySignal::new);
-            let weak = entity.downgrade();
-            let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-            // Audit fix #6: store the spawned task on the resource so a
-            // replacement fetch (or entity drop on unmount) aborts the prior
-            // in-flight task instead of leaving it detached and running.
-            let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-                fetch_signal_with_retry(fetcher, signal, request_id, &retry_policy, &weak, cx)
-                    .await;
-            });
-            // Audit #6 NOT applied to queries: query fetches already prevent
-            // stale writes via the signal + `is_current_request` cooperative
-            // check in run_query_retry_loop, and tests enforce that a
-            // superseded fetcher still observes its cancelled signal. Hard-
-            // aborting on replacement would break that contract, so the task
-            // is detached (it self-terminates when the entity is dropped).
-            task.detach();
-        }
-    }
-
-    (entity, subscription)
+    use_query_impl(options.into(), fetcher, cx)
 }
 
-/// Like [`use_query`], but the fetcher returns [`Fetched<T>`] so a server-derived
-/// [`CachePolicy`] can override the caller's per-query policy on success
-/// ("server wins").
+/// Like [`use_query`], but the fetcher returns
+/// [`Fetched<T>`](crate::core::Fetched) so a server-derived
+/// [`CachePolicy`](crate::core::CachePolicy) can override the caller's
+/// per-query policy on success ("server wins").
 ///
-/// Mirrors [`use_query`] exactly — same options-first signature, same
-/// [`QuerySignal`]-accepting fetcher, same
-/// `(Entity<QueryResource<T, E>>, Subscription)` return — except the fetcher
-/// returns `Result<Fetched<T>, E>`. [`Fetched::new`] keeps the caller's policy;
-/// [`Fetched::with_policy`] overrides it with the server's (e.g. parsed from
-/// `Cache-Control`) once the fetch resolves. The existing `Result<T, E>`
-/// [`use_query`] is unchanged.
-///
-/// # Server wins
-///
-/// The resource's `CachePolicy` is established at `begin_request` time from
-/// [`QueryOptions`] (the caller's policy). When a fetcher returns
-/// [`Fetched::with_policy`], that server policy replaces the resource's stored
-/// policy immediately after `complete_success`, so subsequent freshness / SWR
-/// checks use the server's TTL. `None` (via [`Fetched::new`]) leaves the caller's
-/// policy in place.
+/// The resource's policy is established at `begin_request` time from
+/// [`QueryOptions`](crate::hook::QueryOptions). A fetcher returning
+/// [`Fetched::with_policy`](crate::core::Fetched::with_policy) replaces that
+/// stored policy right after `complete_success`, so later freshness checks use
+/// the server's TTL; [`Fetched::new`](crate::core::Fetched::new) keeps the
+/// caller's policy.
 pub fn use_query_with_policy<T, E, C, F, Fut>(
     options: impl Into<crate::hook::QueryOptions>,
     fetcher: F,
@@ -159,6 +64,24 @@ where
     F: Fn(QuerySignal) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<Fetched<T>, E>> + Send + 'static,
 {
+    use_query_impl(options.into(), fetcher, cx)
+}
+
+/// Shared body of [`use_query`] and [`use_query_with_policy`], generic over
+/// the fetcher output via [`FetchedLike`].
+fn use_query_impl<T, E, C, F, Fut, Out>(
+    options: crate::hook::QueryOptions,
+    fetcher: F,
+    cx: &mut Context<C>,
+) -> (Entity<QueryResource<T, E>>, Subscription)
+where
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    C: 'static,
+    Out: FetchedLike<T> + Send + 'static,
+    F: Fn(QuerySignal) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
+{
     let crate::hook::QueryOptions {
         key,
         cache_policy,
@@ -166,15 +89,15 @@ where
         retry_policy,
         force_fetch,
         ..
-    } = options.into();
+    } = options;
     let (entity, subscription) = use_query_manual(key.clone(), cache_policy, request_policy, cx);
 
-    // Audit fix #16 (mirrors `use_query`): propagate the user's retry policy.
-    entity.update(cx, |r, _| r.set_retry_policy(retry_policy));
+    // Propagate the user's retry policy; the resource would otherwise keep
+    // its no-retries default.
+    entity.update(cx, |r, _| r.set_retry_policy(retry_policy.clone()));
 
     // Start fetch if resource is idle
-    let should_fetch = entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle);
-    if should_fetch {
+    if entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle) {
         let fetch_mode = if force_fetch {
             QueryFetchMode::Force
         } else {
@@ -185,10 +108,6 @@ where
         {
             let signal = signal.unwrap_or_else(QuerySignal::new);
             let weak = entity.downgrade();
-            let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-            // Same deliberate detach as `use_query` (audit #6 NOT applied to
-            // queries): cooperative signal cancellation + `accept_current_request`
-            // prevent stale writes, and the task self-terminates on entity drop.
             let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
                 fetch_signal_with_retry(fetcher, signal, request_id, &retry_policy, &weak, cx)
                     .await;
@@ -200,10 +119,8 @@ where
     (entity, subscription)
 }
 
-/// Like [`use_query`] but the fetcher receives no signal argument.
-///
-/// This exists for backward compatibility. Prefer [`use_query`] (the
-/// signal-accepting version) which aligns with the v2 "Signal-always" design.
+/// Like [`use_query`], but the fetcher receives no signal argument. Exists for
+/// backward compatibility; prefer the signal-accepting [`use_query`].
 pub fn use_query_unsignalled<T, E, C, F, Fut>(
     key: QueryKey,
     cache_policy: crate::core::CachePolicy,
@@ -221,44 +138,25 @@ where
     let (entity, subscription) = use_query_manual(key.clone(), cache_policy, request_policy, cx);
 
     // Start fetch if resource is idle
-    let should_fetch = entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle);
-    if should_fetch {
-        // Audit fix #3: Only spawn fetch if begin_request returns a real RequestId.
-        // Audit fix #2: Thread the key through to avoid re-reading from entity.
-        if let (Some(request_id), _signal) =
+    if entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle)
+        && let (Some(request_id), _signal) =
             begin_request_on_entity(&entity, cx, QueryFetchMode::Normal, Some(key))
-        {
-            let weak = entity.downgrade();
-            let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-            // Audit fix #6: store the task so replacement/unmount aborts it.
-            let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-                fetch_with_retry(fetcher, request_id, &retry_policy, &weak, cx).await;
-            });
-            // Audit #6 NOT applied to queries: query fetches already prevent
-            // stale writes via the signal + `is_current_request` cooperative
-            // check in run_query_retry_loop, and tests enforce that a
-            // superseded fetcher still observes its cancelled signal. Hard-
-            // aborting on replacement would break that contract, so the task
-            // is detached (it self-terminates when the entity is dropped).
-            task.detach();
-        }
+    {
+        let weak = entity.downgrade();
+        let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
+        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+            fetch_with_retry(fetcher, request_id, &retry_policy, &weak, cx).await;
+        });
+        task.detach();
     }
 
     (entity, subscription)
 }
 
-/// Convenience wrapper around [`use_query_manual`] that builds the entity and
-/// observation from a [`QueryOptions`] value instead of raw policy parameters.
-///
-/// Audit fix #79: `use_query_manual` historically required a raw
-/// `(key, cache_policy, request_policy)` triple. This overload accepts anything
-/// convertible into [`QueryOptions`] (a string, a [`QueryKey`], a full
-/// `QueryOptions` builder, or the legacy `(QueryKey, CachePolicy, RequestPolicy)`
-/// tuple) so callers do not have to spell out the policies by hand. Only the
-/// `key`, `cache_policy`, and `request_policy` fields are consumed; the
-/// remaining options (retry policy, `force_fetch`, etc.) are ignored at this
-/// layer — use [`use_query`] to honor them. The existing
-/// [`use_query_manual`] signature is unchanged.
+/// Build the entity and observation from a
+/// [`QueryOptions`](crate::hook::QueryOptions) value. Only `key`,
+/// `cache_policy`, and `request_policy` are consumed here; use [`use_query`]
+/// to honor the rest.
 pub fn use_query_manual_opts<T, E, C>(
     options: impl Into<crate::hook::QueryOptions>,
     cx: &mut Context<C>,
@@ -273,13 +171,7 @@ where
 }
 
 /// Convenience wrapper around [`use_query_unsignalled`] that accepts an
-/// `impl Into<QueryOptions>` instead of the raw `(key, cache_policy,
-/// request_policy)` triple.
-///
-/// Audit fix #79: mirrors [`use_query_manual_opts`]. Only the `key`,
-/// `cache_policy`, and `request_policy` fields of [`QueryOptions`] are read;
-/// the remaining options are not consumed at this layer. The existing
-/// [`use_query_unsignalled`] signature is unchanged.
+/// `impl Into<QueryOptions>` instead of the raw policy triple.
 pub fn use_query_unsignalled_opts<T, E, C, F, Fut>(
     options: impl Into<crate::hook::QueryOptions>,
     fetcher: F,
@@ -302,19 +194,15 @@ where
     )
 }
 
-/// Lower-level hook that sets up the entity and observation without starting a fetch.
-///
-/// Use this when you need full control over when and how fetching happens.
-///
-/// Uses v2's [`QueryObserver`] which returns `Option<Subscription>` instead of
-/// panicking when the entity has been dropped.
+/// Lower-level hook that sets up the entity and observation without starting
+/// a fetch. Use this when you need full control over when and how fetching
+/// happens.
 ///
 /// # Panics (debug builds only)
 ///
 /// In debug builds, panics if no [`QueryClient`] has been set via
-/// `cx.set_global::<QueryClient>()`. In release builds, falls back to a
-/// standalone entity (no shared caching, no GC) so that tests and demos
-/// continue to work.
+/// `cx.set_global::<QueryClient>()`. Release builds fall back to a standalone
+/// entity (no shared caching, no GC).
 pub fn use_query_manual<T, E, C>(
     key: QueryKey,
     cache_policy: crate::core::CachePolicy,
@@ -331,8 +219,6 @@ where
             client.resource_with_policies::<T, E>(key, cache_policy, request_policy, cx)
         })
     } else {
-        // Panic in debug builds when QueryClient is not initialized.
-        // The silent fallback is appropriate for tests but dangerous for production.
         #[cfg(debug_assertions)]
         {
             eprintln!(
@@ -347,16 +233,10 @@ where
         }
         #[cfg(not(debug_assertions))]
         {
-            // Audit fix #5: Warning eprintln removed from release builds.
-            // In release builds, silently fall back without leaking to stderr.
             cx.new(|_| QueryResource::new(key, cache_policy, request_policy))
         }
     };
 
-    // Audit fix #12: Use match instead of expect() to avoid production panics.
-    // In debug builds, the entity was just created so observe() should succeed.
-    // In release builds, if GPUI internals change unexpectedly, fall back
-    // gracefully rather than panicking.
     let observer = QueryObserver::new(&entity);
     let Some(subscription) = observer.observe(cx) else {
         #[cfg(debug_assertions)]
@@ -366,9 +246,6 @@ where
         );
         #[cfg(not(debug_assertions))]
         {
-            // Audit fix #5: Warning eprintln removed from release builds.
-            // Return a no-op subscription so the caller can continue.
-            // This prevents a production panic from a GPUI internal issue.
             return (entity, Subscription::new(|| {}));
         }
     };
@@ -376,16 +253,9 @@ where
     (entity, subscription)
 }
 
-/// Initiate a fetch on an existing query entity.
-///
-/// Call this when you want to refetch (e.g., on button click or timer).
-/// Respects the resource's retry policy on failure.
-///
-/// Calls `begin_request` to obtain a fresh `RequestId` and transition the
-/// resource to Loading before spawning the fetch task.
-///
-/// Audit fix #3: If `begin_request` returns `None` (cache hit or ignored),
-/// no async fetch task is spawned, avoiding wasted resources.
+/// Initiate a fetch on an existing query entity (e.g. on button click or
+/// timer). Respects the resource's retry policy on failure. If the cache is
+/// fresh or a fetch is already loading, no task is spawned.
 pub fn fetch_query<T, E, C, F, Fut>(
     entity: &Entity<QueryResource<T, E>>,
     fetcher: F,
@@ -397,29 +267,14 @@ pub fn fetch_query<T, E, C, F, Fut>(
     F: Fn() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    // Audit fix #3: Only spawn fetch if begin_request returns a real RequestId.
-    let (Some(request_id), _signal) =
-        begin_request_on_entity(entity, cx, QueryFetchMode::Normal, None)
-    else {
-        return;
-    };
-    let weak = entity.downgrade();
-    let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-    // Audit fix #6 (deliberate detach): plain-query fetches are NOT stored on
-    // the resource. Cooperative signal cancellation + `accept_current_request`
-    // already prevent stale writes (see the module-level docs), so the task is
-    // detached and self-terminates once the entity is dropped.
-    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-        fetch_with_retry(fetcher, request_id, &retry_policy, &weak, cx).await;
-    });
-    task.detach();
+    fetch_query_impl(entity, fetcher, cx);
 }
 
-/// Like [`fetch_query`], but the fetcher returns [`Fetched<T>`] so a server-derived
-/// [`CachePolicy`] can override the resource's policy on success ("server wins").
-///
-/// See [`use_query_with_policy`] for the server-wins semantics. Respects the
-/// resource's retry policy on failure.
+/// Like [`fetch_query`], but the fetcher returns
+/// [`Fetched<T>`](crate::core::Fetched) so a server-derived
+/// [`CachePolicy`](crate::core::CachePolicy) can override the resource's
+/// policy on success. See [`use_query_with_policy`] for the server-wins
+/// semantics.
 pub fn fetch_query_with_policy<T, E, C, F, Fut>(
     entity: &Entity<QueryResource<T, E>>,
     fetcher: F,
@@ -431,7 +286,22 @@ pub fn fetch_query_with_policy<T, E, C, F, Fut>(
     F: Fn() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<Fetched<T>, E>> + Send + 'static,
 {
-    // Audit fix #3: Only spawn fetch if begin_request returns a real RequestId.
+    fetch_query_impl(entity, fetcher, cx);
+}
+
+/// Shared body of [`fetch_query`] and [`fetch_query_with_policy`].
+fn fetch_query_impl<T, E, C, F, Fut, Out>(
+    entity: &Entity<QueryResource<T, E>>,
+    fetcher: F,
+    cx: &mut Context<C>,
+) where
+    T: Clone + Send + Sync + 'static,
+    E: Clone + Send + Sync + std::fmt::Debug + 'static,
+    C: 'static,
+    Out: FetchedLike<T> + Send + 'static,
+    F: Fn() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
+{
     let (Some(request_id), _signal) =
         begin_request_on_entity(entity, cx, QueryFetchMode::Normal, None)
     else {
@@ -439,31 +309,18 @@ pub fn fetch_query_with_policy<T, E, C, F, Fut>(
     };
     let weak = entity.downgrade();
     let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-    // Same deliberate detach as `fetch_query` (audit #6 NOT applied to queries).
     let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
         fetch_with_retry(fetcher, request_id, &retry_policy, &weak, cx).await;
     });
     task.detach();
 }
 
-/// Like [`fetch_query`], but the fetcher receives a [`QuerySignal`] that it can
-/// check periodically for cooperative cancellation.
+/// Like [`fetch_query`], but the fetcher receives a [`QuerySignal`] it can
+/// check for cooperative cancellation.
 ///
-/// The fetcher signature is `FnOnce(QuerySignal) -> Fut`. Since `FnOnce` closures
-/// are consumed on the first call, retries are not possible.
-///
-/// Calls `begin_request` to obtain a fresh `RequestId` and reads the signal
-/// *after* `begin_request` creates it (v2 fix for stale signal).
-///
-/// Audit fix #3: If `begin_request` returns `None`, no async fetch task is spawned.
-///
-/// # Signal Cancellation (Audit Finding #8)
-///
-/// The `accept_current_request` guard is the authoritative protection against
-/// stale writes. A previous `signal.is_cancelled()` check after the fetcher
-/// returned was removed -- it was a best-effort optimization with a TOCTOU
-/// window that provided no guarantees. The two-phase protocol (accept + complete)
-/// correctly handles all cases where a newer request supersedes the current one.
+/// The fetcher is `FnOnce`, so no retries are possible. Stale writes are
+/// prevented by the `accept_current_request` guard, not by a
+/// `signal.is_cancelled()` check after the fetch (that would be racy).
 pub fn fetch_query_with_signal<T, E, C, F, Fut>(
     entity: &Entity<QueryResource<T, E>>,
     fetcher: F,
@@ -475,35 +332,20 @@ pub fn fetch_query_with_signal<T, E, C, F, Fut>(
     F: FnOnce(QuerySignal) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    // Audit fix #3: Only spawn fetch if begin_request returns a real RequestId.
     let (Some(request_id), signal) =
         begin_request_on_entity(entity, cx, QueryFetchMode::Normal, None)
     else {
         return;
     };
-    // Audit H3: `signal` is the one begin_request just created, read in the
-    // same entity.update as the begin (no separate read pass).
     let signal = signal.unwrap_or_else(QuerySignal::new);
     let weak = entity.downgrade();
 
-    // FnOnce fetchers can only be called once, so retries are not possible.
-    // Audit fix #6 (deliberate detach): plain-query fetches are NOT stored on
-    // the resource. The `accept_current_request` guard below is the
-    // authoritative protection against stale writes (see the module-level
-    // docs), so the task is detached and self-terminates once the entity is
-    // dropped.
     let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
         let result = fetcher(signal).await;
 
         let now_ms = current_time_ms();
         let Some(entity) = weak.upgrade() else { return };
 
-        // Audit fix #7/#13: Only call cx.notify() when the result is actually
-        // accepted. When accept_current_request returns None, no state change
-        // occurred and no re-render is needed.
-        //
-        // Audit fix #8: Removed the signal.is_cancelled() check. The
-        // accept_current_request guard is the authoritative protection.
         let _ = entity.update(cx, |resource, cx| {
             if let Some(guard) = resource.accept_current_request(request_id) {
                 match result {

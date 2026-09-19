@@ -1,7 +1,7 @@
 //! Query and mutation options with builder pattern and sensible defaults.
 //!
-//! **v2**: All options use `Default` and `From<&str>` so users can pass just
-//! a string key for the simplest case.
+//! All options implement `Default` and `From<&str>` so callers can pass just a
+//! string key for the simplest case.
 
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use crate::core::{CachePolicy, RefetchTrigger, RequestPolicy, RetryPolicy};
 
 /// Options for `use_query` and `fetch_query`.
 ///
-/// # Quick Start
+/// # Quick start
 ///
 /// ```no_run
 /// use gpui_query::QueryOptions;
@@ -50,64 +50,31 @@ pub struct QueryOptions {
     pub retry_policy: RetryPolicy,
     /// GC time in milliseconds. Default: 300_000 (5 minutes).
     ///
-    /// **Reserved / forward-compat** (audit fix #80): settable via the
-    /// `.gc_time(ms)` builder, but **not yet consumed** by `use_query`,
-    /// `fetch_query`, or the bucket layer. Garbage collection currently runs
-    /// off the global GC time set via [`QueryClient::with_gc_time`]; this
-    /// per-query value is stored only so a future release can honor it without
-    /// a breaking API change. Setting it has no effect today.
+    /// Reserved: stored but not yet consumed. GC currently runs off the global
+    /// time set via `QueryClient::with_gc_time`; setting this has no effect
+    /// today.
     pub gc_time_ms: u64,
-    /// Whether to keep previous data when the key changes.
+    /// Keep previous data when the key changes.
     ///
-    /// **Reserved / forward-compat** (audit fix #80): settable via the
-    /// `.keep_previous()` builder, but **not yet consumed** by `use_query` or
-    /// `use_query_manual`. The `placeholderData`/`keepPreviousData` behavior is
-    /// not yet implemented; the field is stored so a future release can honor
-    /// it without a breaking API change. Setting it has no effect today.
+    /// Reserved: stored but not yet consumed; setting it has no effect today.
     pub keep_previous_data: bool,
-    /// Whether to force a fetch (ignore cache).
-    ///
-    /// When `true`, `use_query` passes `QueryFetchMode::Force` to
-    /// `begin_request`, bypassing cache freshness checks and always starting
-    /// a new fetch.
+    /// Whether to force a fetch (ignore cache). When `true`, `use_query`
+    /// passes `QueryFetchMode::Force` to `begin_request`, bypassing freshness
+    /// checks.
     pub force_fetch: bool,
-    /// Refetch on mount trigger.
-    ///
-    /// **Reserved / forward-compat** (audit fix #80): settable on the struct,
-    /// but **not yet consumed**. The GPUI event-system integration for
-    /// automatic refetching on component mount is not yet implemented; the
-    /// field is stored so a future release can honor it without a breaking API
-    /// change. Setting it has no effect today.
+    /// Refetch on mount trigger. Reserved: stored but not yet consumed.
     pub refetch_on_mount: RefetchTrigger,
-    /// Refetch on window focus trigger.
-    ///
-    /// **Reserved / forward-compat** (audit fix #80): settable on the struct,
-    /// but **not yet consumed**. The GPUI event-system integration for
-    /// automatic refetching on window focus is not yet implemented; the field
-    /// is stored so a future release can honor it without a breaking API
-    /// change. Setting it has no effect today.
+    /// Refetch on window focus trigger. Reserved: stored but not yet consumed.
     pub refetch_on_window_focus: RefetchTrigger,
-    /// Refetch on reconnect trigger.
-    ///
-    /// **Reserved / forward-compat** (audit fix #80): settable on the struct,
-    /// but **not yet consumed**. The GPUI event-system integration for
-    /// automatic refetching on reconnect is not yet implemented; the field is
-    /// stored so a future release can honor it without a breaking API change.
-    /// Setting it has no effect today.
+    /// Refetch on reconnect trigger. Reserved: stored but not yet consumed.
     pub refetch_on_reconnect: RefetchTrigger,
 }
 
 impl Default for QueryOptions {
     fn default() -> Self {
         Self {
-            // #77: The default key cannot be a `const` because `QueryKey`
-            // wraps an `Arc<[Arc<str>]>` and `Arc::from` is not const-stable,
-            // so `QueryKey` itself is not const-constructable. This is a
-            // single allocation per `QueryOptions::default()` call and is not
-            // on a hot path (`Default` is only invoked when a caller opts out
-            // of supplying a key, e.g. `use_mutation((), cx)`), so the runtime
-            // cost is acceptable. The `Arc` also means cloning the resulting
-            // default key is a single refcount bump.
+            // Not const-constructable: QueryKey wraps an Arc, so `from`
+            // allocates. Only reached when a caller omits the key.
             key: crate::core::QueryKey::from("default"),
             cache_policy: CachePolicy::default(),
             request_policy: RequestPolicy::default(),
@@ -122,12 +89,8 @@ impl Default for QueryOptions {
     }
 }
 
-/// Declarative macro that generates the byte-for-byte equivalent builder
-/// methods shared by [`QueryOptions`] and [`InfiniteQueryOptions`]
-/// (`cache_policy`, `request_policy`, `retry_policy`, `gc_time`).
-///
-/// Audit fix #44: collapses the duplicated builders into a single source of
-/// truth so the two option types cannot drift.
+/// Generates the builder methods shared by [`QueryOptions`] and
+/// [`InfiniteQueryOptions`] so the two cannot drift.
 macro_rules! impl_query_options_builders {
     ($t:ident) => {
         impl $t {
@@ -161,8 +124,6 @@ macro_rules! impl_query_options_builders {
 impl QueryOptions {
     /// Create options with just a key.
     pub fn new(key: impl Into<crate::core::QueryKey>) -> Self {
-        // Construct directly to avoid Default::default() allocating a default
-        // key that is immediately overwritten (audit H4).
         Self {
             key: key.into(),
             cache_policy: CachePolicy::default(),
@@ -177,10 +138,7 @@ impl QueryOptions {
         }
     }
 
-    /// Force a fetch, ignoring cache.
-    ///
-    /// When set, `use_query` passes `QueryFetchMode::Force` to `begin_request`,
-    /// which bypasses cache freshness checks and always starts a new fetch.
+    /// Force a fetch, ignoring cache freshness checks.
     pub fn force(mut self) -> Self {
         self.force_fetch = true;
         self
@@ -188,13 +146,8 @@ impl QueryOptions {
 
     /// Keep previous data when the key changes.
     ///
-    /// **Reserved / forward-compat** (audit fix #80): sets the
-    /// `keep_previous_data` field, which is **not yet consumed** by `use_query`
-    /// or `use_query_manual`. The `keepPreviousData` behavior is intended for a
-    /// future release (preserve the prior `data`/`previous_data` slot across a
-    /// key change so the component keeps rendering the last successful result
-    /// while the new fetch is in flight). The builder is provided now so callers
-    /// can opt in without a future API change; calling it has no effect today.
+    /// Reserved: sets the field, which is not yet consumed by `use_query`.
+    /// Calling it has no effect today.
     pub fn keep_previous(mut self) -> Self {
         self.keep_previous_data = true;
         self
@@ -221,13 +174,6 @@ impl From<crate::core::QueryKey> for QueryOptions {
     }
 }
 
-/// Build [`QueryOptions`] from a raw `(key, cache_policy, request_policy)`
-/// triple.
-///
-/// Audit fix #79: this lets `use_query_manual_opts` /
-/// `use_query_unsignalled_opts` accept callers that already hold the legacy
-/// raw-parameter triple without forcing them to spell out `QueryOptions::new`.
-/// Non-breaking: the existing constructors and `From` impls are untouched.
 impl From<(crate::core::QueryKey, CachePolicy, RequestPolicy)> for QueryOptions {
     fn from(
         (key, cache_policy, request_policy): (crate::core::QueryKey, CachePolicy, RequestPolicy),
@@ -261,53 +207,36 @@ impl Default for MutationOptions {
 
 impl MutationOptions {
     /// Set the retry policy.
-    ///
-    /// Audit fix #43: Mirrors the `.retry_policy(p)` builder on
-    /// [`QueryOptions`] so mutation callers can configure retries without
-    /// constructing `MutationOptions` via struct literal.
     pub fn retry_policy(mut self, policy: RetryPolicy) -> Self {
         self.retry_policy = policy;
         self
     }
 
     /// Set the GC time in milliseconds.
-    ///
-    /// Audit fix #43: Mirrors the `.gc_time(ms)` builder on [`QueryOptions`].
     pub fn gc_time(mut self, ms: u64) -> Self {
         self.gc_time_ms = ms;
         self
     }
 }
 
-/// Type alias for the `on_success` callback field on [`MutationCallbacks`].
-///
-/// Audit fix #96: collapses the `Option<Arc<dyn Fn(&T) + Send + Sync>>`
-/// field type so `clippy::type_complexity` does not fire on the struct
-/// definition.
 pub type MutationSuccessCallback<T> = Option<Arc<dyn Fn(&T) + Send + Sync>>;
 
-/// Type alias for the `on_error` callback field on [`MutationCallbacks`].
 pub type MutationErrorCallback<E> = Option<Arc<dyn Fn(&E) + Send + Sync>>;
 
-/// Type alias for the `on_settled` callback field on [`MutationCallbacks`].
 pub type MutationSettledCallback<T, E> = Option<Arc<dyn Fn(Option<&T>, Option<&E>) + Send + Sync>>;
 
 /// Lifecycle callbacks for mutations.
 ///
-/// `Clone` is implemented manually (no `T: Clone` / `E: Clone` bound needed)
-/// because every field is an `Option<Arc<...>>` — cloning bumps the refcount,
-/// it does not clone `T`/`E`. Construct with `MutationCallbacks::new()` and
-/// the builder methods.
-///
-/// Callbacks are wrapped in `Arc` so they can be shared across concurrent
-/// mutation invocations. `E` should implement `std::fmt::Debug` so that
+/// `Clone` is manual (every field is an `Option<Arc<...>>`, so cloning bumps
+/// refcounts without requiring `T: Clone` / `E: Clone`). Callbacks are shared
+/// across concurrent mutation invocations. `E` should implement `Debug` so
 /// callbacks can log or display error details.
 pub struct MutationCallbacks<T, E> {
-    /// Fired on terminal success (after all retries skipped or succeeded).
+    /// Fired on terminal success.
     pub on_success: MutationSuccessCallback<T>,
-    /// Fired on terminal failure (after retries exhausted or cancelled).
+    /// Fired on terminal failure (retries exhausted or cancelled).
     pub on_error: MutationErrorCallback<E>,
-    /// Fired on every terminal outcome (success, failure, or discard).
+    /// Fired on every terminal outcome.
     pub on_settled: MutationSettledCallback<T, E>,
 }
 
@@ -392,8 +321,6 @@ impl Default for InfiniteQueryOptions {
 impl InfiniteQueryOptions {
     /// Create with just a key.
     pub fn new(key: impl Into<crate::core::QueryKey>) -> Self {
-        // Construct directly to avoid Default::default() allocating a default
-        // key that is immediately overwritten (audit H4).
         Self {
             key: key.into(),
             cache_policy: CachePolicy::default(),
@@ -404,20 +331,15 @@ impl InfiniteQueryOptions {
         }
     }
 
-    /// Set max pages. Pass a concrete number to cap retained pages.
-    ///
-    /// To allow unbounded pages, use [`InfiniteQueryOptions::unbounded_pages`]
-    /// instead.
+    /// Set max pages: the number of retained pages before old ones are
+    /// evicted. Use [`InfiniteQueryOptions::unbounded_pages`] for no limit.
     pub fn max_pages(mut self, max: usize) -> Self {
         self.max_pages = Some(max);
         self
     }
 
-    /// Allow unbounded page accumulation (no limit).
-    ///
-    /// Sets `max_pages` to `None`, meaning the infinite query will never
-    /// evict old pages. Use with caution — unbounded page storage can grow
-    /// without limit if the user scrolls far enough.
+    /// Allow unbounded page accumulation (no limit). Use with caution: page
+    /// storage grows without bound if the user scrolls far enough.
     pub fn unbounded_pages(mut self) -> Self {
         self.max_pages = None;
         self

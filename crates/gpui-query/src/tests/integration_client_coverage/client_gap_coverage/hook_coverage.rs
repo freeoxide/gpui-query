@@ -16,11 +16,8 @@ use crate::hook::{
 };
 use crate::tests::test_support::*;
 
-// -- Gap 9: use_mutation with MutationOptions still works --------------------
-//
-// use_mutation now accepts MutationOptions via Into (the deprecated
-// use_mutation_with_options just delegated to it). Verify the default-options
-// path still registers and produces an Idle mutation.
+// use_mutation accepts MutationOptions via Into; the default-options path
+// must still register and produce an Idle mutation.
 
 #[gpui::test]
 fn test_deprecated_use_mutation_with_options_still_works(cx: &mut TestAppContext) {
@@ -60,15 +57,9 @@ fn test_mutation_callbacks_fire_on_entity_drop_during_retry_delay(cx: &mut TestA
     let ec = error_called.clone();
     let sc = settled_called.clone();
 
-    // We use a mutation with retries. The first attempt fails, and during the
-    // retry delay, the entity is "dropped" (weak ref cannot upgrade). The
-    // retry-delay-check path in run_mutation_loop_with_callbacks fires
-    // on_error and on_settled when weak.upgrade() returns None.
-    //
-    // Since we can't truly drop a GPUI entity while a spawned task holds a
-    // weak ref (the test harness keeps it alive), we verify the callback path
-    // works correctly for the SUCCESS case instead, confirming the callback
-    // mechanism itself is sound.
+    // A GPUI entity can't be truly dropped while a spawned task holds a weak
+    // ref (the harness keeps it alive), so the drop-during-retry callback path
+    // is untestable here; the success case confirms the callback mechanism.
 
     #[allow(dead_code)]
     struct H {

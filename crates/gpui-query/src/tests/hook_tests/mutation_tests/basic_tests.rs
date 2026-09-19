@@ -12,7 +12,6 @@ use crate::tests::test_support::*;
 fn test_use_mutation_creates_idle_entity(cx: &mut TestAppContext) {
     setup_query_client(cx);
 
-    // Audit fix #47: use the shared `HookHarness` instead of a one-off `struct H`.
     let harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>((), cx);
         let resource = entity.read(cx);
@@ -33,7 +32,6 @@ fn test_use_mutation_creates_idle_entity(cx: &mut TestAppContext) {
 fn test_mutate_triggers_execution_and_completes(cx: &mut TestAppContext) {
     setup_query_client(cx);
 
-    // Audit fix #47: use the shared `HookHarness` instead of a one-off `struct H`.
     let harness = cx.new(|cx| {
         let (entity, _sub) = use_mutation::<String, String, QueryError, _>((), cx);
         mutate(
@@ -51,8 +49,6 @@ fn test_mutate_triggers_execution_and_completes(cx: &mut TestAppContext) {
 
     cx.run_until_parked();
 
-    // Audit fix #48: adopt the shared `run_until_parked_and_read` helper instead
-    // of `cx.run_until_parked()` + a manual `cx.update` read.
     let data = run_until_parked_and_read(cx, &harness, |h, cx| {
         let resource = h.entity.read(cx);
         (resource.is_success(), resource.data().cloned())
@@ -112,8 +108,7 @@ fn test_mutate_rejects_concurrent_calls(cx: &mut TestAppContext) {
         );
         assert!(entity.read(cx).is_loading());
 
-        // Attempt a second mutate while the first is still loading.
-        // The second call should be rejected (no-op) per audit fix #8.
+        // A second mutate while the first is still loading is a no-op.
         mutate(
             &entity,
             "second".to_string(),
@@ -181,7 +176,7 @@ fn test_mutate_double_while_loading_second_rejected(cx: &mut TestAppContext) {
             cx,
         );
 
-        // Second mutate while still loading — should be rejected.
+        // Second mutate while still loading: rejected.
         mutate(
             &entity,
             "second".to_string(),

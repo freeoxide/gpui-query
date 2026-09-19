@@ -36,10 +36,9 @@ pub fn arb_key_special() -> impl Strategy<Value = Vec<String>> {
         // RTL overrides, surrogates-replacement, and other tricky codepoints
         // that regex classes like \p{L} do not cover.
         prop::collection::vec(arb_unicode_edge_case_string(), 1..5),
-        // Very long single segment (100-256 chars) to stress allocation paths.
-        // Bound reduced from 2000→256 per audit #126 so the default proptest
-        // suite stays fast; the 2000-char case is covered by the
-        // `#[ignore]`-gated `key_very_long_single_segment` deterministic test.
+        // Very long single segment (100-256 chars) to stress allocation
+        // paths. The 2000-char case is covered by the `#[ignore]`-gated
+        // deterministic test.
         ".{100,256}".prop_map(|s| vec![s]),
     ]
 }

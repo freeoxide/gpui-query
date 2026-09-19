@@ -9,11 +9,8 @@ use crate::core::*;
 
 use super::strategies::*;
 
-// Audit fix #126: cap the default proptest case count at 64 (down from the
-// default 256). The strategies still exercise unicode, separators, and deep
-// nesting, so the property coverage stays meaningful while keeping the
-// default `cargo test` run cheap. The heavyweight long-key / very-long-string
-// invariants are also covered by the deterministic_tests module.
+// 64 cases (down from the default 256) keeps the default `cargo test` run
+// cheap; the heavyweight long-key invariants live in deterministic_tests.
 fn test_config() -> ProptestConfig {
     ProptestConfig {
         cases: 64,
@@ -257,10 +254,8 @@ proptest! {
         prop_assert_eq!(key.to_path(), segments.join("::"));
     }
 
-    /// Longer keys still satisfy all invariants.
-    // Audit fix #126: reduced segment bound from 50..100 to 20..40 so the
-    // heavy multi-segment case stays within the default `cargo test` budget.
-    // Deep-nesting correctness is also exercised by the deterministic suite.
+    /// Longer keys still satisfy all invariants. Segment bound kept modest
+    /// so the multi-segment case stays within the default test budget.
     #[test]
     fn key_long_key_correctness(
         segments in prop::collection::vec(any::<String>(), 20..40),

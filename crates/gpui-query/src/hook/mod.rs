@@ -1,19 +1,11 @@
-//! The `use_query` and `use_mutation` hooks — ergonomic query and mutation
-//! subscriptions for GPUI components.
+//! `use_query` and `use_mutation` hooks: query and mutation subscriptions for
+//! GPUI components.
 //!
-//! # v2 Improvements
+//! The primary API is options-first. The fetcher always receives a
+//! [`QuerySignal`](crate::core::QuerySignal) for cooperative cancellation.
+//! `use_query_unsignalled` remains for callers that want a signal-free fetcher.
 //!
-//! - Uses `QueryObserver` which returns `Option<Subscription>` instead of panicking
-//! - Signals are properly cancelled on `LatestWins` replacement and `reset()`
-//! - `AHashMap` in `QueryClient` for faster lookups
-//! - `MutationDiagnostic` is a real type in devtools
-//! - `max_pages` defaults to `Some(50)`
-//! - `QueryError` has full `Display` + `Error` impls
-//!
-//! # Query Usage (options-first)
-//!
-//! The primary API is **options-first** with sensible defaults. The fetcher
-//! always receives a [`QuerySignal`] for cooperative cancellation:
+//! # Query usage
 //!
 //! ```no_run
 //! use gpui_query::hook::use_query;
@@ -45,11 +37,7 @@
 //! }
 //! ```
 //!
-//! For backward compatibility, [`use_query_unsignalled`] is available with a
-//! `Fn() -> Fut` fetcher that receives no signal. However, the signal-accepting
-//! `use_query` is the recommended default per the v2 "Signal-always" design goal.
-//!
-//! # Mutation Usage
+//! # Mutation usage
 //!
 //! ```no_run
 //! use gpui_query::hook::{use_mutation, mutate};
@@ -79,22 +67,14 @@
 //! }
 //! ```
 //!
-//! # WeakEntity Discard Behavior
+//! # Discard behavior
 //!
-//! Throughout this module, [`gpui::WeakEntity::upgrade()`] is used inside async
-//! tasks to access the owning entity. If the owning component is unmounted while
-//! a fetch is in-flight, `upgrade()` returns `None` and the fetch result is
-//! **silently discarded**. This is intentional for cache-layer correctness (avoids
-//! writing to a dead entity), but callers who rely on side effects from fetch
-//! completion should be aware that no callback or notification fires in this case.
-//!
-//! # Signal Cancellation (Audit Finding #8)
-//!
-//! The `accept_current_request` guard is the authoritative protection against stale
-//! writes. A previous `signal.is_cancelled()` check after the fetcher returned was
-//! removed -- it was a best-effort optimization with a TOCTOU window that provided
-//! no guarantees. The two-phase protocol (accept + complete) correctly handles all
-//! cases where a newer request supersedes the current one.
+//! Async tasks here access the owning entity through
+//! [`gpui::WeakEntity::upgrade()`]. If the component unmounts while a fetch is
+//! in-flight, `upgrade()` returns `None` and the result is silently discarded:
+//! no callback or notification fires. Stale writes are prevented by the
+//! two-phase `accept_current_request` + complete protocol rather than by
+//! aborting tasks.
 
 mod fetch_retry;
 mod gpui_compat;
@@ -108,11 +88,7 @@ mod use_query_select;
 // `R` (older gpui / git) or `Result<R>` (gpui 0.2.2 / crates.io).
 pub(crate) use gpui_compat::read_entity;
 
-// ── Re-exports from options ─────────────────────────────────────────────
-
 pub use options::{InfiniteQueryOptions, MutationCallbacks, MutationOptions, QueryOptions};
-
-// ── Re-exports from query_hooks ─────────────────────────────────────────
 
 pub use query_hooks::{
     fetch_query, fetch_query_with_policy, fetch_query_with_signal, use_query, use_query_manual,
@@ -120,48 +96,22 @@ pub use query_hooks::{
     use_query_with_policy,
 };
 
-// ── Re-exports from use_infinite_query ───────────────────────────────────
-
 pub use use_infinite_query::{
     fetch_next_page_infinite, fetch_previous_page_infinite, use_infinite_query,
 };
 
-// ── Re-exports from use_query_select ─────────────────────────────────────
-
 pub use use_query_select::use_query_select;
 
-// ── Re-exports from mutation_hooks ───────────────────────────────────────
-//
-// Audit fix #22: `use_mutation_with_options` is intentionally NOT re-exported
-// here. The deprecated function itself remains defined (and delegates to
-// `use_mutation`), but removing it from the `pub use` list stops the
-// `deprecated` lint from firing on the re-export. Existing callers that
-// import it via the full path still see the deprecation warning at the call
-// site.
-
+// `use_mutation_with_options` is deprecated and deliberately not re-exported;
+// callers that reach it via the full path still get the deprecation warning.
 pub use mutation_hooks::{
     mutate, mutate_arc, mutate_by_ref, mutate_with_callbacks, use_mutation, use_mutation_state,
 };
 
-// ── Utility ─────────────────────────────────────────────────────────────
-
-/// Returns current time as milliseconds since UNIX epoch.
+/// Current time as milliseconds since the UNIX epoch.
 ///
-/// Audit fix #20: This is the canonical implementation used across the hook
-/// layer. The private duplicate in `mutation_bucket.rs` (`now_ms`) should
-/// ideally be consolidated here or into a shared utility module.
-///
-/// # Clock-before-epoch fallback
-///
-/// `duration_since(UNIX_EPOCH)` errors if the system clock reports a time
-/// *before* the Unix epoch (e.g. a misconfigured RTC or a clock skewed
-/// backwards on cold boot). The `.unwrap_or_default()` silently clamps that
-/// case to a `Duration::ZERO`, so this function returns `0`. Callers treat
-/// `0` as "ancient", which makes the only observable effect under a broken
-/// clock be that stale entries become immediately eligible for garbage
-/// collection; no panic or error is propagated. This mirrors the silent-clamp
-/// behavior of the `current_time_ms` in `client::erased` so both clock
-/// sources stay consistent.
+/// A clock that reports a time before the epoch clamps to `0`, which callers
+/// treat as "ancient" (stale). No panic is propagated.
 #[inline]
 pub fn current_time_ms() -> u64 {
     std::time::SystemTime::now()
@@ -170,9 +120,7 @@ pub fn current_time_ms() -> u64 {
         .as_millis() as u64
 }
 
-// ── Impl for MutationOptions integration ────────────────────────────────
-
-/// Allow `use_mutation((), cx)` to work with default options.
+/// Lets `use_mutation((), cx)` use the default options.
 impl From<()> for MutationOptions {
     fn from((): ()) -> Self {
         Self::default()

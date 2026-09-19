@@ -41,13 +41,9 @@ fn test_prepare_fetch_query_uses_force_mode_always_starts(cx: &mut TestAppContex
     });
 }
 
-// -- 32. prepare_fetch_query refetch after TTL --------------------------------
-//
-// NOTE: This test verifies that prepare_fetch_query returns Some both on the
-// initial call and on a subsequent call with Force mode. Full TTL expiry
-// behavior (data becoming stale and triggering automatic refetch) is tested
-// at the resource level in core_cache.rs, where timestamps can be controlled
-// deterministically via apply_success(data, now_ms).
+// prepare_fetch_query returns Some on the initial call and on a Force-mode
+// call. Full TTL expiry lives in core_cache.rs, where timestamps are
+// controllable via apply_success(data, now_ms).
 
 #[gpui::test]
 fn test_prepare_fetch_query_refetch_after_ttl(cx: &mut TestAppContext) {
@@ -82,18 +78,9 @@ fn test_prepare_fetch_query_refetch_after_ttl(cx: &mut TestAppContext) {
     });
 }
 
-// -- 33. prepare_prefetch_query returns None for fresh data ------------------
-//
-// Finding 4/7 fix: Asserts the actual return value of prepare_prefetch_query.
-//
-// Determinism: captures a single `now` via `current_time_ms()` ONCE and uses
-// it for both `apply_success(now)` AND an explicit age precondition check
-// before calling `prepare_prefetch_query`. The 60s TTL gives a huge margin,
-// so the test is deterministic as long as the wall clock doesn't jump >60s
-// between the captured `now` and the internal `current_time_ms()` call
-// inside `prepare_prefetch_query` (nanoseconds apart in practice). If a
-// future production change adds a time-injection API, this test should be
-// updated to pass `now` directly to `prepare_prefetch_query` instead.
+// prepare_prefetch_query returns None for fresh data. The 60s TTL makes
+// this deterministic: one captured `now` drives both apply_success and the
+// freshness check unless the wall clock jumps a full minute between them.
 
 #[gpui::test]
 fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
