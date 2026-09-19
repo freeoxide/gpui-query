@@ -303,8 +303,8 @@ fn file_persister_cache_file_is_owner_only() {
 
 #[test]
 fn file_persister_second_instance_overwrite_stays_parseable() {
-    // Separate instances share no lock; the atomic rename still guarantees
-    // the file is always one writer's complete snapshot.
+    // Two instances share no lock; the second save simply replaces the
+    // first whole-file. Sequential only, no concurrent writer here.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cache.json");
     let a = FilePersister::json(&path);

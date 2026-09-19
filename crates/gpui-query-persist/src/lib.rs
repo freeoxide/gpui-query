@@ -361,3 +361,43 @@ fn fsync_parent(parent: &Path) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Valid bincode frame, garbage inside value_json. The frame round-trips
+    // through bincode, so the failure must come from into_snapshot's JSON
+    // step, not the bincode deserialize step.
+    #[test]
+    fn bincode_corrupt_inner_json_is_tolerated() {
+        let adapter = BincodeSnapshot {
+            entries: HashMap::from([(
+                "users::42".to_string(),
+                BincodeEntry {
+                    value_json: "{ this is not valid json".to_string(),
+                    cached_at: 1_700_000_000_000,
+                    cache_policy: CachePolicy::NoCache,
+                    meta_json: None,
+                },
+            )]),
+            version: PERSIST_VERSION,
+        };
+        let bytes = bincode::serialize(&adapter).expect("serialize adapter frame");
+        assert!(
+            bincode_load(&bytes).is_err(),
+            "corrupt inner JSON must surface as a load error"
+        );
+
+        // Same bytes on disk go through the tolerant path: logged, empty.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("cache.bin");
+        std::fs::write(&path, &bytes).expect("write framed payload");
+        let p = FilePersister::bincode(&path);
+        let loaded = pollster::block_on(p.load()).expect("tolerant load");
+        assert!(
+            loaded.entries.is_empty(),
+            "corrupt inner JSON -> empty snapshot"
+        );
+    }
+}

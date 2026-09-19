@@ -23,10 +23,8 @@ tempfile = "3"
 bincode = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = "2"
 
 [dev-dependencies]
-gpui = { workspace = true, features = ["test-support"] }
 pollster = "0.4"
 
 [package.metadata.docs.rs]
