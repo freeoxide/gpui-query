@@ -1,5 +1,3 @@
-//! `ErasedBucket` trait implementation for `QueryBucket`.
-
 use gpui::App;
 
 use crate::client::devtools::QueryDiagnostic;
@@ -29,8 +27,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
 
     fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.inner.for_each_matching_entry(filter, cx, |entity, cx| {
-            // invalidate() only clears last_updated_at; skip the update (which
-            // notifies observers even on a no-op) when it is already None.
+            // invalidate() only clears last_updated_at; skip the no-op update, which still notifies observers.
             let needs_invalidate =
                 entity.read_with(cx, |r, _| r.last_updated_at_ms().is_some());
             if needs_invalidate {
@@ -79,8 +76,8 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
         self.inner.entries.contains_key(key)
     }
 
-    /// For each `Success` entry whose `T` has a registered serializer, push
-    /// `(key, PersistedEntry)` into `out`; everything else is skipped.
+    /// Only `Success` entries whose `T` has a registered serializer are
+    /// pushed; everything else is skipped.
     #[cfg(feature = "persist")]
     fn collect_persistable_into(
         &self,
@@ -110,8 +107,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
             let Some(data) = resource.data() else {
                 continue;
             };
-            // Downcast failure is unreachable by construction (see
-            // `SerializerRegistry::register`); skip rather than persist junk.
+            // Downcast failure is unreachable by construction; skip rather than persist junk.
             let Some(value) = serialize_fn(data as &dyn std::any::Any) else {
                 continue;
             };

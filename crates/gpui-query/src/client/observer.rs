@@ -1,5 +1,3 @@
-//! Resource observers for reactive state tracking.
-//!
 //! The three observer kinds (`QueryObserver`, `InfiniteQueryObserver`,
 //! `MutationObserver`) are aliases over one generic [`Observer<R>`]; they
 //! differ only in entity and status type.
@@ -12,12 +10,8 @@ use crate::core::{
     InfiniteQueryResource, MutationResource, MutationStatus, QueryResource, QueryStatus,
 };
 
-/// Bridges a resource type to its status for the generic [`Observer`].
-///
-/// Each resource exposes its status via an inherent `status()` method, which
-/// cannot be called generically without a trait; this pub(crate) trait
-/// surfaces it with an associated `Status` type so [`Observer<R>`] can dedup
-/// notifications for any resource kind.
+/// Surfaces each resource's inherent `status()` generically (with a `Status`
+/// assoc type) so [`Observer<R>`] can dedup notifications for any kind.
 pub trait ObservableResource {
     type Status: PartialEq + Copy + 'static;
 
@@ -48,10 +42,8 @@ impl<V: 'static, T: 'static, E: 'static> ObservableResource for MutationResource
     }
 }
 
-/// Configuration for a query observer.
 #[derive(Clone, Debug)]
 pub struct ObserverConfig {
-    /// Only notify when status changes (dedup re-renders).
     pub notify_on_status_change_only: bool,
 }
 
@@ -63,20 +55,15 @@ impl Default for ObserverConfig {
     }
 }
 
-/// Observes a resource and triggers re-renders only on status changes.
-///
 /// With the default config, `cx.notify()` fires only when the status
-/// actually changes, so intermediate updates that keep the status (retry
-/// count increments, `prepare_retry`) do not re-render. Use the
-/// [`QueryObserver`] / [`InfiniteQueryObserver`] / [`MutationObserver`]
-/// aliases for the concrete kinds.
+/// actually changes, so same-status updates (retry count increments,
+/// `prepare_retry`) do not re-render.
 pub struct Observer<R> {
     entity: gpui::WeakEntity<R>,
     config: ObserverConfig,
 }
 
 impl<R: ObservableResource + 'static> Observer<R> {
-    /// Create a new observer for the given entity.
     pub fn new(entity: &Entity<R>) -> Self {
         Self {
             entity: entity.downgrade(),
@@ -84,15 +71,13 @@ impl<R: ObservableResource + 'static> Observer<R> {
         }
     }
 
-    /// Set the observer configuration.
     pub fn with_config(mut self, config: ObserverConfig) -> Self {
         self.config = config;
         self
     }
 
-    /// Start observing the entity. Returns `None` if the entity was already
-    /// dropped. Takes `&self`: the body only reads the weak handle and the
-    /// `Copy` config flag.
+    /// Returns `None` if the entity was already dropped; takes `&self` since
+    /// the body only reads the weak handle and the `Copy` config flag.
     pub fn observe<W: 'static>(&self, cx: &mut Context<W>) -> Option<Subscription> {
         let upgraded = self.entity.upgrade()?;
         let notify_on_change = self.config.notify_on_status_change_only;
@@ -115,11 +100,8 @@ impl<R: ObservableResource + 'static> Observer<R> {
     }
 }
 
-/// Observer for a [`QueryResource`] (status type [`QueryStatus`]).
 pub type QueryObserver<T, E> = Observer<QueryResource<T, E>>;
 
-/// Observer for an [`InfiniteQueryResource`] (status type [`QueryStatus`]).
 pub type InfiniteQueryObserver<T, E> = Observer<InfiniteQueryResource<T, E>>;
 
-/// Observer for a [`MutationResource`] (status type [`MutationStatus`]).
 pub type MutationObserver<V, T, E> = Observer<MutationResource<V, T, E>>;

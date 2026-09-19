@@ -1,8 +1,6 @@
-//! Type-partitioned bucket for mutation resources.
-//!
-//! Mutations are keyed by a generated numeric id (they have no query key),
-//! and GC measures recency from the resource's completion time, falling back
-//! to the insertion timestamp for mutations that never completed.
+//! Mutations have no query key: entries are keyed by a generated numeric id,
+//! and GC measures recency from the completion time (insertion time for
+//! mutations that never completed).
 
 use ahash::AHashMap;
 use gpui::{App, WeakEntity};
@@ -13,10 +11,9 @@ use super::ErasedMutationBucket;
 use super::bucket::types::{DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
 use super::devtools::MutationDiagnostic;
 
-/// Weak entity handle plus the eviction mirror. `updated_at` is the insertion
-/// time; `last_updated_ms` / `loading` mirror the entity and are refreshed
-/// wherever the bucket already reads it, so `evict_oldest` scans cheap fields
-/// and confirms its winner with a single entity read.
+/// `last_updated_ms` / `loading` mirror the entity, refreshed wherever the
+/// bucket already reads it, so `evict_oldest` scans cheap fields and
+/// confirms its winner with a single entity read.
 struct MutationEntry<V, T, E> {
     entity: WeakEntity<MutationResource<V, T, E>>,
     updated_at: u64,
@@ -24,7 +21,6 @@ struct MutationEntry<V, T, E> {
     loading: bool,
 }
 
-/// Type-partitioned storage for mutation resources.
 pub struct MutationBucket<V, T, E> {
     resources: AHashMap<u64, MutationEntry<V, T, E>>,
     next_id: u64,
@@ -46,11 +42,9 @@ impl<
         }
     }
 
-    /// Evict the least-recently-updated entry to make room. Recency prefers
-    /// the completion-time mirror, falling back to the insertion time for
-    /// mutations that never completed. The winner gets one confirming entity
-    /// read (the mirror can be stale if a fetch began after the last
-    /// refresh); each retry marks the stale mirror and re-picks.
+    /// Skips loading entries; the winner gets one confirming entity read
+    /// (the mirror can be stale if a fetch began after the last refresh),
+    /// and each stale re-check marks the mirror and re-picks.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
             let target = self
@@ -66,7 +60,7 @@ impl<
                 .min_by_key(|&(_, age)| age);
 
             let Some((id, _)) = target else {
-                return; // every live entry is loading: nothing safe to evict
+                return;
             };
 
             let still_loading = self
@@ -89,12 +83,8 @@ impl<
         }
     }
 
-    /// Insert a mutation entity, recording `now_ms` as `updated_at`, and
-    /// return the generated id. Evicts the oldest non-loading entry first
-    /// when at capacity.
-    ///
-    /// `next_id` saturates at `u64::MAX`: staying monotonic matters more than
-    /// uniqueness after ~1.8e19 insertions, which GC has long outlived.
+    /// `next_id` saturates at `u64::MAX`: staying monotonic matters more
+    /// than uniqueness after ~1.8e19 insertions, which GC has long outlived.
     pub(crate) fn insert(
         &mut self,
         entity: &gpui::Entity<MutationResource<V, T, E>>,
@@ -141,11 +131,10 @@ impl<
         self
     }
 
-    /// Evict dead references and terminal mutations past their age window:
-    /// loading always survives; `Success` survives
-    /// `SUCCESS_GC_MULTIPLIER * gc_time_ms`; `Idle`/`Failure` survive
-    /// `gc_time_ms`. The entry `loading` mirror is checked first so a
-    /// mid-flight mutation whose weak ref cannot upgrade survives one cycle.
+    /// Loading always survives; `Success` survives
+    /// `SUCCESS_GC_MULTIPLIER * gc_time_ms`, `Idle`/`Failure` survive
+    /// `gc_time_ms`. The `loading` mirror is checked first so a mid-flight
+    /// mutation whose weak ref cannot upgrade survives one cycle.
     fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_threshold = gc_time_ms.max(MIN_GC_TIME_MS);
         let success_threshold = gc_threshold.saturating_mul(SUCCESS_GC_MULTIPLIER as u64);
@@ -173,8 +162,6 @@ impl<
                 MutationStatus::Loading => return true,
             };
 
-            // Recency from the completion time when available; insertion
-            // time for mutations that never completed.
             let base = resource.last_updated_at_ms().unwrap_or(entry.updated_at);
             now_ms.saturating_sub(base) < threshold
         });
@@ -198,8 +185,6 @@ impl<
         }
     }
 
-    /// `key` is `None` for keyless mutations, mirroring
-    /// [`MutationDiagnostic::key`].
     #[cfg(feature = "persist")]
     fn collect_key_status_into(&self, cx: &App, out: &mut Vec<(Option<String>, MutationStatus)>) {
         for entry in self.resources.values() {

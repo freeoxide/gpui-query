@@ -1,8 +1,3 @@
-//! Concurrency / two-phase completion protocol tests.
-//!
-//! Verify that the two-phase completion protocol maintains invariants even when
-//! requests are interleaved. Also covers signal and is_data_stale tests.
-
 use crate::core::*;
 use crate::tests::test_support::*;
 
@@ -13,7 +8,6 @@ fn two_phase_protocol_accept_then_complete_is_consistent() {
 
     let rid = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
 
-    // Phase 1: accept
     let guard = r
         .accept_current_request(rid)
         .expect("should accept current request");
@@ -22,7 +16,6 @@ fn two_phase_protocol_accept_then_complete_is_consistent() {
         "accept clears active_request_id"
     );
 
-    // Phase 2: complete with success
     r.complete_success(guard, "result", 200);
     assert_eq!(r.status(), QueryStatus::Success);
     assert_eq!(r.data(), Some(&"result"));
@@ -30,19 +23,15 @@ fn two_phase_protocol_accept_then_complete_is_consistent() {
 
 #[test]
 fn two_phase_stale_accept_then_complete_does_not_corrupt() {
-    // Begin two requests, try to complete the first (stale) — it should be
-    // rejected, and the second should complete successfully.
     let mut r = fresh_resource();
     let mut s = test_sequencer();
 
     let rid1 = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
     let rid2 = begin_request_id(&mut r, &mut s, 200, QueryFetchMode::Normal);
 
-    // rid1 is stale. complete_current_success should return false.
     assert!(!complete_success_id(&mut r, rid1, "stale_data", 300));
     assert_eq!(r.ignored_results(), 1);
 
-    // rid2 is current. complete_current_success should return true.
     assert!(complete_success_id(&mut r, rid2, "fresh_data", 400));
     assert_eq!(r.status(), QueryStatus::Success);
     assert_eq!(r.data(), Some(&"fresh_data"));
@@ -53,7 +42,6 @@ fn concurrent_replacements_increment_cancelled_count() {
     let mut r = fresh_resource();
     let mut s = test_sequencer();
 
-    // Each replacement increments cancelled_count.
     let _ = r.begin_request(&mut s, 100, QueryFetchMode::Normal);
     assert_eq!(r.cancelled_count(), 0);
     let _ = r.begin_request(&mut s, 200, QueryFetchMode::Normal);
@@ -73,11 +61,9 @@ fn ignore_while_loading_rejects_concurrent_requests() {
     );
     let mut s = test_sequencer();
 
-    // First request starts.
     let rid1 = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
     assert_eq!(r.active_request_id(), Some(rid1));
 
-    // Second request is ignored.
     let result = r.begin_request(&mut s, 200, QueryFetchMode::Normal);
     match result {
         QueryBeginResult::IgnoredWhileLoading { active_request_id } => {
@@ -92,7 +78,6 @@ fn ignore_while_loading_rejects_concurrent_requests() {
     );
     assert_eq!(r.cancelled_count(), 0, "no cancellation on ignore");
 
-    // Complete the first request.
     complete_success_id(&mut r, rid1, "data", 300);
     assert_eq!(r.status(), QueryStatus::Success);
     assert_eq!(r.data(), Some(&"data"));
@@ -107,7 +92,6 @@ fn signal_cancelled_on_replacement() {
     let signal1 = r.signal().unwrap().clone();
     assert!(!signal1.is_cancelled());
 
-    // Replace the request — the old signal should be cancelled.
     let _ = r.begin_request(&mut s, 200, QueryFetchMode::Normal);
     assert!(
         signal1.is_cancelled(),
@@ -161,12 +145,10 @@ fn is_data_stale_heuristic() {
     r.complete_current_success(rid, "data", 200);
     assert!(!r.is_data_stale(), "Success with data => not stale");
 
-    // Start a refetch — data is stale (LoadingWithData).
     let _ = r.begin_request(&mut s, 300, QueryFetchMode::Normal);
     assert_eq!(r.status(), QueryStatus::LoadingWithData);
     assert!(r.is_data_stale(), "LoadingWithData with data => stale");
 
-    // Complete with failure — data still stale.
     let rid2 = begin_request_id(&mut r, &mut s, 400, QueryFetchMode::Normal);
     r.complete_current_failure_with_data(rid2, "fallback", QueryError::response("err"), 500);
     assert_eq!(r.status(), QueryStatus::Failure);

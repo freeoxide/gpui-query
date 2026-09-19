@@ -8,7 +8,6 @@ use crate::core::{
 
 use super::shared::ResourceBucket;
 
-/// Type-partitioned storage for query resources of a specific `(T, E)` type pair.
 pub struct QueryBucket<T, E> {
     pub(crate) inner: ResourceBucket<QueryResource<T, E>>,
 }
@@ -30,8 +29,6 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         self.inner.get_or_create(key, cache_policy, request_policy, cx)
     }
 
-    /// Get-or-create that also mints the next `RequestId` from the entry's
-    /// sequencer in the same lookup.
     pub(crate) fn get_or_create_with_request_id(
         &mut self,
         key: QueryKey,

@@ -13,9 +13,6 @@ use crate::core::{
 use super::QueryClient;
 
 impl QueryClient {
-    // ── Infinite query operations ───────────────────────────────────────
-
-    /// Get or create an infinite query resource for the given key and type pair.
     pub fn infinite_resource<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
         &mut self,
         key: impl Into<QueryKey>,
@@ -29,7 +26,6 @@ impl QueryClient {
         )
     }
 
-    /// Get or create an infinite query resource with explicit policies.
     pub fn infinite_resource_with_policies<
         T: Clone + Send + Sync + 'static,
         E: Clone + Send + Sync + 'static,
@@ -52,7 +48,6 @@ impl QueryClient {
         entity
     }
 
-    /// Get a specific infinite query entity by key.
     pub fn infinite_query<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static>(
         &self,
         key: &QueryKey,
@@ -64,9 +59,6 @@ impl QueryClient {
             .and_then(|b| b.get(key))
     }
 
-    /// Use the infinite query bucket's co-located sequencer to generate a
-    /// `RequestId` for a key; the infinite-query counterpart of
-    /// [`next_request_id_for_key`](Self::next_request_id_for_key).
     pub fn next_request_id_for_infinite_key<
         T: Clone + Send + Sync + 'static,
         E: Clone + Send + Sync + 'static,
@@ -80,7 +72,6 @@ impl QueryClient {
         typed.sequencer_mut(key).map(|seq| seq.next_request())
     }
 
-    /// Get all infinite query entities of a given type pair.
     pub fn all_infinite_queries<
         T: Clone + Send + Sync + 'static,
         E: Clone + Send + Sync + 'static,
@@ -95,9 +86,6 @@ impl QueryClient {
             .unwrap_or_default()
     }
 
-    // ── Mutation operations ─────────────────────────────────────────────
-
-    /// Register a mutation entity.
     pub fn register_mutation<
         V: Clone + Send + Sync + 'static,
         T: Clone + Send + Sync + 'static,
@@ -113,14 +101,12 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(MutationBucket::<V, T, E>::new()));
 
-        // One clock read shared by insert and the opportunistic GC below.
         let now_ms = crate::client::time::current_time_ms();
         let typed = Self::mutation_bucket_or_recreate::<V, T, E>(bucket);
         typed.insert(entity, now_ms, cx);
         self.maybe_opportunistic_gc(cx);
     }
 
-    /// Get all mutation entities of a given type triple.
     pub fn all_mutations<
         V: Clone + Send + Sync + 'static,
         T: Clone + Send + Sync + 'static,
@@ -136,8 +122,6 @@ impl QueryClient {
             .unwrap_or_default()
     }
 
-    // ── Bulk operations ─────────────────────────────────────────────────
-
     fn for_each_query_bucket_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(EitherBucket<'_>),
@@ -150,7 +134,7 @@ impl QueryClient {
         }
     }
 
-    /// Invalidate queries matching the filter (data is kept but marked stale).
+    /// Data is kept but marked stale.
     pub fn invalidate_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_query_bucket_mut(|b| match b {
             EitherBucket::Query(b) => b.invalidate_matching(filter, cx),
@@ -158,7 +142,7 @@ impl QueryClient {
         });
     }
 
-    /// Reset queries matching the filter (data and status cleared).
+    /// Data and status are cleared.
     pub fn reset_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_query_bucket_mut(|b| match b {
             EitherBucket::Query(b) => b.reset_matching(filter, cx),
@@ -166,7 +150,7 @@ impl QueryClient {
         });
     }
 
-    /// Remove queries matching the filter from the cache entirely.
+    /// Entries are removed from the cache entirely.
     pub fn remove_queries(&mut self, filter: &QueryKeyFilter) {
         self.for_each_query_bucket_mut(|b| match b {
             EitherBucket::Query(b) => b.remove_matching(filter),
@@ -174,24 +158,15 @@ impl QueryClient {
         });
     }
 
-    /// Cancel in-flight requests matching the filter, cancelling their
-    /// signals with a [`QueryError::cancelled`](crate::core::QueryError::cancelled)
-    /// error. Essential for cleanup when navigating away from a page.
-    ///
-    /// The bulk counterpart of `QueryResource::cancel()`, equivalent to
-    /// TanStack Query's `queryClient.cancelQueries()`.
+    /// Cancels matching in-flight requests with a
+    /// [`QueryError::cancelled`](crate::core::QueryError::cancelled) error;
+    /// TanStack `queryClient.cancelQueries()`.
     pub fn cancel_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_query_bucket_mut(|b| match b {
             EitherBucket::Query(b) => b.cancel_matching(filter, cx),
             EitherBucket::Infinite(b) => b.cancel_matching(filter, cx),
         });
     }
-
-    // ── Erased-bucket recovery helpers ──────────────────────────────────
-
-    // Downcast counterparts of `bucket_or_recreate` for the infinite and
-    // mutation maps: recreate in place on the (unreachable) mismatch instead
-    // of panicking.
 
     fn infinite_bucket_or_recreate<
         T: Clone + Send + Sync + 'static,
@@ -243,7 +218,6 @@ impl QueryClient {
     }
 }
 
-/// One side of a query bucket iteration.
 enum EitherBucket<'a> {
     Query(&'a mut dyn crate::client::erased::ErasedBucket),
     Infinite(&'a mut dyn crate::client::erased::ErasedInfiniteBucket),

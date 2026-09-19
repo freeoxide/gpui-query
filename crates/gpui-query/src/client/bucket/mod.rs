@@ -1,9 +1,7 @@
-//! Type-partitioned buckets for query resources.
-//!
 //! `ResourceBucket` in `shared` holds the machinery shared by
 //! [`QueryBucket`] and [`InfiniteQueryBucket`](crate::client::InfiniteQueryBucket):
-//! weak-entity entries with co-located request sequencers, capacity-bounded
-//! eviction, GC, bulk key-filter operations, and diagnostics.
+//! weak-entity entries with co-located sequencers, capacity-bounded eviction,
+//! GC, bulk key-filter operations, and diagnostics.
 
 mod erased_ops;
 mod ops;

@@ -1,9 +1,6 @@
-//! Type-partitioned bucket for infinite query resources.
-//!
 //! Shares its machinery with [`QueryBucket`] through
 //! [`ResourceBucket`](super::bucket::shared::ResourceBucket); only the erased
-//! trait impl and the first-page persistence path are specific to infinite
-//! queries.
+//! trait impl and the first-page persistence path are infinite-specific.
 
 use gpui::{App, Entity};
 
@@ -16,7 +13,6 @@ use super::bucket::shared::ResourceBucket;
 use super::devtools::QueryDiagnostic;
 use super::ErasedInfiniteBucket;
 
-/// Type-partitioned storage for infinite query resources of a specific `(T, E)` type pair.
 pub struct InfiniteQueryBucket<T, E> {
     entries: ResourceBucket<InfiniteQueryResource<T, E>>,
 }
@@ -72,8 +68,6 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
 
     fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.entries.for_each_matching_entry(filter, cx, |entity, cx| {
-            // Skip the notify when last_updated_at is already None (invalidate
-            // only clears that one field).
             let needs_invalidate =
                 entity.read_with(cx, |r, _| r.last_updated_at_ms().is_some());
             if needs_invalidate {
@@ -92,9 +86,8 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
         self.entries.entries.retain(|k, _| !filter.matches(k));
     }
 
-    /// Gate on the authoritative `is_loading()` read; see
-    /// `QueryBucket::cancel_matching`. Also bumps `ignored_results` so
-    /// cancelled infinite fetches match the regular query path.
+    /// Bumps `ignored_results` so cancelled infinite fetches match the
+    /// regular query path. See `QueryBucket::cancel_matching`.
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.entries.for_each_matching_entry(filter, cx, |entity, cx| {
             if entity.read_with(cx, |r, _| r.is_loading()) {
@@ -123,8 +116,6 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
     }
 
     /// Persists the first page only; the full page vector is opaque here.
-    /// Entries without a registered serializer, or not in `Success`, are
-    /// skipped.
     #[cfg(feature = "persist")]
     fn collect_persistable_into(
         &self,
@@ -138,7 +129,6 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedI
     ) {
         use crate::core::QueryStatus;
 
-        // Serializers are registered by `T` alone, not the `(T, E)` pair.
         let type_id = std::any::TypeId::of::<T>();
         let Some(serialize_fn) = serializers.get(type_id) else {
             return;

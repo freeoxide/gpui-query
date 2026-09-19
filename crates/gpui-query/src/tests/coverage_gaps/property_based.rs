@@ -1,18 +1,11 @@
-//! Property-based tests for RetryPolicy, CachePolicy, serde roundtrip, and
-//! RequestSequencer.
-
 use crate::core::*;
 use crate::tests::test_support::*;
 use std::num::NonZero;
 
-// --- RetryPolicy: delay_for_attempt never exceeds ABSOLUTE_MAX_DELAY_MS --------
-
 #[test]
 fn prop_retry_delay_never_exceeds_absolute_max_for_all_attempts() {
-    // ABSOLUTE_MAX_DELAY_MS = 3_600_000 (1 hour).
     const ABSOLUTE_MAX: u64 = 3_600_000;
 
-    // Test with various base delays and exponential backoff enabled.
     let base_delays: &[u64] = &[
         0,
         1,
@@ -35,7 +28,6 @@ fn prop_retry_delay_never_exceeds_absolute_max_for_all_attempts() {
                 exponential_backoff: true,
                 max_retry_delay_ms: max_delay,
             };
-            // Check attempts 0 through 100, plus some very large ones.
             for attempt in 0..=100u32 {
                 let delay = policy.delay_for_attempt(attempt);
                 assert!(
@@ -49,7 +41,6 @@ fn prop_retry_delay_never_exceeds_absolute_max_for_all_attempts() {
                     max_delay
                 );
             }
-            // Extreme attempt numbers.
             for attempt in [u32::MAX, 200, 500, 1000] {
                 let delay = policy.delay_for_attempt(attempt);
                 assert!(
@@ -69,8 +60,6 @@ fn prop_retry_delay_never_exceeds_absolute_max_for_all_attempts() {
 
 #[test]
 fn prop_retry_delay_without_backoff_is_constant() {
-    // Without exponential backoff, delay_for_attempt should return retry_delay_ms
-    // regardless of attempt number.
     let delays: &[u64] = &[0, 1, 100, 1_000, 30_000, u64::MAX];
     for &base in delays {
         let policy = RetryPolicy {
@@ -92,8 +81,6 @@ fn prop_retry_delay_without_backoff_is_constant() {
 
 #[test]
 fn prop_retry_delay_monotonically_increases_or_capped() {
-    // With exponential backoff and a reasonable base, delays should be
-    // monotonically non-decreasing (they can plateau at the cap).
     let policy = RetryPolicy::new(100)
         .with_delay(100)
         .with_exponential_backoff()
@@ -112,12 +99,8 @@ fn prop_retry_delay_monotonically_increases_or_capped() {
     }
 }
 
-// --- CachePolicy: is_fresh / is_expired / total_valid_ms relationships ------
-
 #[test]
 fn prop_cache_policy_fresh_and_expired_are_complementary_for_ttl() {
-    // For Ttl, every non-negative age is either fresh or expired (no gap).
-    // Boundary: age == ttl_ms is fresh (inclusive), age == ttl_ms + 1 is expired.
     let ttl_values: &[u64] = &[1, 10, 100, 1_000, 60_000, u64::MAX];
     for &ttl in ttl_values {
         let policy = CachePolicy::Ttl { ttl_ms: ttl };
@@ -126,8 +109,6 @@ fn prop_cache_policy_fresh_and_expired_are_complementary_for_ttl() {
             .expect("Ttl should have total_valid_ms");
         assert_eq!(total, ttl);
 
-        // Sample ages: 0, boundary-1, boundary, boundary+1, and large values.
-        // Use saturating_add for boundary+1 so u64::MAX does not overflow.
         let ages: &[u64] = &[
             0,
             ttl / 2,
@@ -152,8 +133,6 @@ fn prop_cache_policy_fresh_and_expired_are_complementary_for_ttl() {
 
 #[test]
 fn prop_cache_policy_swr_three_way_partition() {
-    // For StaleWhileRevalidate, every non-negative age falls into exactly one of:
-    // fresh, stale-but-serveable, or expired. No gaps, no overlaps.
     let cases: &[(u64, u64)] = &[
         (1, 1),
         (10, 10),
@@ -171,19 +150,18 @@ fn prop_cache_policy_swr_three_way_partition() {
         let ages: &[u64] = &[
             0,
             ttl / 2,
-            ttl,                     // boundary: still fresh
-            ttl + 1,                 // just past TTL: stale
-            total / 2 + ttl / 2,     // mid-stale window
-            total,                   // boundary: still stale-but-serveable
-            total + 1,               // expired
-            total.saturating_mul(2), // way expired
+            ttl,
+            ttl + 1,
+            total / 2 + ttl / 2,
+            total,
+            total + 1,
+            total.saturating_mul(2),
         ];
         for &age in ages {
             let is_fresh = policy.is_fresh(age);
             let is_stale = policy.is_stale_but_serveable(age);
             let is_expired = policy.is_expired(age);
 
-            // Exactly one must be true.
             let count = is_fresh as u8 + is_stale as u8 + is_expired as u8;
             assert_eq!(
                 count, 1,
@@ -233,7 +211,6 @@ fn prop_cache_policy_nocache_always_expired_never_fresh() {
 
 #[test]
 fn prop_cache_policy_total_valid_ms_consistency() {
-    // total_valid_ms must equal ttl_ms for Ttl, and ttl_ms + stale_ms for SWR.
     let cases: &[CachePolicy] = &[
         CachePolicy::NoCache,
         CachePolicy::Ttl { ttl_ms: 1 },
@@ -269,8 +246,6 @@ fn prop_cache_policy_total_valid_ms_consistency() {
         }
     }
 }
-
-// --- Serde roundtrip: decode(encode(x)) == x -----------------------------
 
 #[test]
 fn prop_serde_roundtrip_all_statuses() {
@@ -344,7 +319,6 @@ fn prop_serde_roundtrip_query_error_all_kinds() {
 
 #[test]
 fn prop_serde_roundtrip_query_resource_multiple_states() {
-    // Use NoCache so begin_request always returns Started (no CacheHit).
     let mut r: QueryResource<String, QueryError> = QueryResource::new(
         "serde-test",
         CachePolicy::NoCache,
@@ -352,7 +326,6 @@ fn prop_serde_roundtrip_query_resource_multiple_states() {
     );
     let mut s = test_sequencer();
 
-    // Test roundtrip in Success state.
     let rid = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
 
     r.complete_current_success(rid, "hello".to_string(), 200);
@@ -365,7 +338,6 @@ fn prop_serde_roundtrip_query_resource_multiple_states() {
     assert_eq!(back.request_policy(), RequestPolicy::LatestWins);
     assert!(back.signal().is_none(), "signal is #[serde(skip)]");
 
-    // Test roundtrip in Failure state.
     let rid2 = begin_request_id(&mut r, &mut s, 300, QueryFetchMode::Normal);
     r.complete_current_failure(rid2, QueryError::transport("fail"), 400);
     let json2 = serde_json::to_string(&r).unwrap();
@@ -374,8 +346,6 @@ fn prop_serde_roundtrip_query_resource_multiple_states() {
     assert!(back2.error().is_some());
     assert!(back2.signal().is_none());
 }
-
-// --- RequestSequencer: IDs always monotonically increasing ----------------
 
 #[test]
 fn prop_request_sequencer_monotonic_within_scope() {
@@ -395,8 +365,6 @@ fn prop_request_sequencer_monotonic_within_scope() {
 
 #[test]
 fn prop_request_sequencer_scope_advance_preserves_monotonicity() {
-    // Force the sequencer to the edge of overflow and verify monotonicity
-    // across the scope transition.
     let mut seq = RequestSequencer {
         scope_id: NonZero::new(1).unwrap(),
         next_request_id: u64::MAX - 5,
@@ -413,7 +381,6 @@ fn prop_request_sequencer_scope_advance_preserves_monotonicity() {
         );
         prev = curr;
     }
-    // After wrapping through u64::MAX, the scope should have advanced.
     assert!(
         seq.scope_id.get() >= 2,
         "scope should have advanced past overflow"
@@ -435,53 +402,39 @@ fn prop_request_sequencer_uniqueness_across_many_ids() {
 fn prop_request_sequencer_two_sequencers_no_collision() {
     let mut seq1 = RequestSequencer::new();
     let mut seq2 = RequestSequencer::new();
-    // Different sequencers should produce different scope IDs or sequences,
-    // so their first IDs should differ.
-    // Both start at scope 1, seq 1, so they WILL produce the same first ID.
-    // But advancing one should make them diverge.
-    let id1_first = seq1.next_request(); // 1:1
-    let id2_first = seq2.next_request(); // 1:1 (same scope/seq)
+    let id1_first = seq1.next_request();
+    let id2_first = seq2.next_request();
     assert_eq!(id1_first, id2_first, "both start at 1:1");
 
-    // Now advance seq1 more.
-    let id1_second = seq1.next_request(); // 1:2
+    let id1_second = seq1.next_request();
     assert_ne!(
         id1_second, id2_first,
         "advanced id should differ from initial"
     );
 
-    // If we create a sequencer that's been advanced, it should produce
-    // distinct ids from a fresh one.
     let mut seq3 = RequestSequencer {
         scope_id: NonZero::new(2).unwrap(),
         next_request_id: 1,
     };
-    let id3 = seq3.next_request(); // 2:1
+    let id3 = seq3.next_request();
     assert_ne!(id3.scope_id(), id1_first.scope_id(), "different scopes");
 }
 
 #[test]
 fn prop_request_sequencer_double_overflow_wraps_correctly() {
-    // Force scope_id to u64::MAX and next_request_id to u64::MAX
-    // to trigger double overflow.
     let mut seq = RequestSequencer {
         scope_id: NonZero::new(u64::MAX).unwrap(),
         next_request_id: u64::MAX,
     };
-    let id_before = seq.next_request(); // u64::MAX:u64::MAX
+    let id_before = seq.next_request();
     assert_eq!(id_before.scope_id(), NonZero::new(u64::MAX).unwrap());
     assert_eq!(id_before.value(), u64::MAX);
 
-    // The sequencer should have advanced scope. After u64::MAX scope,
-    // checked_add overflows, so scope wraps to 1.
-    // Verify the next id is from the new scope.
     let id_after = seq.next_request();
-    // Scope should have wrapped to 1 or been advanced.
     assert!(
         id_after.scope_id() <= NonZero::new(2).unwrap(),
         "scope should wrap after u64::MAX: got {}",
         id_after.scope_id()
     );
-    // The ids should still be unique (different scope or sequence).
     assert_ne!(id_before, id_after, "ids must differ across scope wrap");
 }

@@ -1,9 +1,7 @@
-//! Shared bucket machinery.
-//!
 //! `ResourceBucket<R>` holds everything `QueryBucket` and
 //! `InfiniteQueryBucket` do identically (get-or-create, eviction, GC, bulk
-//! matching, diagnostics); the two public bucket types are thin facades that
-//! only add their erased-trait impls and persistence specifics.
+//! matching, diagnostics); the public bucket types only add erased-trait
+//! impls and persistence specifics.
 
 use ahash::AHashMap;
 use gpui::{App, AppContext as _, Entity};
@@ -16,12 +14,12 @@ use crate::core::{
 
 use super::types::{BucketEntry, DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
 
-/// Run GC every this many resource operations so it fires in production
+/// Runs GC every this many resource operations, so it fires in production
 /// without anyone calling `gc()` by hand.
 pub(crate) const GC_INTERVAL: usize = 64;
 
-/// The resource surface `ResourceBucket` needs; implemented for both query
-/// resource kinds. Prefixed names keep the delegating impls unambiguous.
+/// The resource surface `ResourceBucket` needs for both query kinds;
+/// prefixed names keep the delegating impls unambiguous.
 pub(crate) trait BucketResource {
     fn new_resource(key: QueryKey, cache_policy: CachePolicy, request_policy: RequestPolicy)
     -> Self;
@@ -117,8 +115,6 @@ impl<T: 'static, E: 'static> BucketResource for InfiniteQueryResource<T, E> {
     }
 }
 
-/// Key-partitioned storage for one resource type, shared by the query and
-/// infinite-query buckets.
 pub(crate) struct ResourceBucket<R> {
     pub(crate) entries: AHashMap<QueryKey, BucketEntry<R>>,
     pub(crate) max_entries: usize,
@@ -132,7 +128,6 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         }
     }
 
-    /// Get an existing entity or create a new one.
     pub(crate) fn get_or_create(
         &mut self,
         key: QueryKey,
@@ -144,8 +139,8 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             .0
     }
 
-    /// Get-or-create that also mints the next `RequestId` from the entry's
-    /// sequencer in the same lookup.
+    /// Mints the next `RequestId` from the entry's sequencer in the same
+    /// lookup.
     pub(crate) fn get_or_create_with_request_id(
         &mut self,
         key: QueryKey,
@@ -158,9 +153,9 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         (entity, request_id.expect("impl inserts the entry before returning"))
     }
 
-    /// Live entries get their policies refreshed in place when they differ.
-    /// A dead weak reference is overwritten in place (length unchanged, no
-    /// eviction); a vacant insert at capacity evicts the oldest entry first.
+    /// Live entries refresh differing policies in place; a dead weak
+    /// reference is overwritten in place (length unchanged, no eviction),
+    /// while a vacant insert at capacity evicts the oldest entry first.
     fn get_or_create_impl(
         &mut self,
         key: QueryKey,
@@ -211,9 +206,7 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         (entity, request_id)
     }
 
-    /// Evict the least-recently-updated entry to make room for a new one.
-    ///
-    /// The scan reads only the mirrors plus weak-ref liveness, then confirms
+    /// Scans only the mirrors plus weak-ref liveness, then confirms
     /// `!is_loading()` on the winner with one entity read (the mirror can be
     /// stale if a fetch began after the last refresh). Each retry marks the
     /// stale mirror and re-picks, so the candidate set strictly shrinks.
@@ -271,8 +264,8 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             .collect()
     }
 
-    /// Collect matching entities up front (one pass), then run `action` on
-    /// each outside the map borrow. GPUI defers observer effects to the
+    /// Collects matching entities up front, then runs `action` on each
+    /// outside the map borrow. GPUI defers observer effects to the
     /// outermost update, so no action can re-enter this bucket mid-loop.
     pub(crate) fn for_each_matching_entry(
         &mut self,
@@ -292,12 +285,10 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         }
     }
 
-    /// Evict dead weak references plus terminal entries past their age
-    /// window. Loading resources always survive; `Success` survives while its
-    /// cache policy can still serve it and until
-    /// `SUCCESS_GC_MULTIPLIER * gc_time_ms`; `Idle`/`Failure`/`Cancelled`
-    /// survive `gc_time_ms`. Entries without a completion timestamp count as
-    /// fully aged.
+    /// Loading always survives; `Success` survives while its cache policy
+    /// can still serve it and until `SUCCESS_GC_MULTIPLIER * gc_time_ms`;
+    /// `Idle`/`Failure`/`Cancelled` survive `gc_time_ms`. Entries without a
+    /// completion timestamp count as fully aged.
     pub(crate) fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_threshold = gc_time_ms.max(MIN_GC_TIME_MS);
         let success_threshold = gc_threshold.saturating_mul(SUCCESS_GC_MULTIPLIER as u64);
@@ -308,7 +299,6 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             };
             let resource = entity.read(cx);
 
-            // GC walks every entry, so it is the canonical mirror refresh point.
             entry.last_updated_ms = resource.resource_last_updated();
             entry.loading = resource.resource_is_loading();
 
