@@ -10,21 +10,21 @@ You write a fetcher. The library manages the lifecycle.
 
 ```toml
 [dependencies]
-gpui-query = "0.2.0"
+gpui-query = "0.2.1"
 ```
 
 The default feature set includes the `client` layer. To use the declarative view hooks, enable the `hook` feature:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.2.0", features = ["hook"] }
+gpui-query = { version = "0.2.1", features = ["hook"] }
 ```
 
 If you only want the core state machine without pulling in GPUI:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.2.0", default-features = false, features = ["core"] }
+gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }
 ```
 
 The `core` layer also builds for `wasm32-unknown-unknown`: the crate swaps ahash to compile-time RNG on wasm targets internally, so no extra configuration is needed. The `client`, `hook`, and `persist` layers are native-only — they depend on `gpui`, which does not build for `wasm32-unknown-unknown`.

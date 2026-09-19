@@ -20,21 +20,21 @@ The API mirrors what TanStack Query popularized in the JavaScript ecosystem: `us
 
 ```toml
 [dependencies]
-gpui-query = "0.2.0"
+gpui-query = "0.2.1"
 ```
 
 This pulls in the `client` layer (which includes `core`). To use the declarative hooks:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.2.0", features = ["hook"] }
+gpui-query = { version = "0.2.1", features = ["hook"] }
 ```
 
 To use only the core state machine with no GPUI dependency:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.2.0", default-features = false, features = ["core"] }
+gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }
 ```
 
 The `core` layer also builds for `wasm32-unknown-unknown` — the crate handles the wasm-specific setup internally (ahash switches to compile-time RNG on wasm targets), so no consumer configuration is needed. The `client`, `hook`, and `persist` layers are native-only: they depend on `gpui`, which does not build for `wasm32-unknown-unknown`.
