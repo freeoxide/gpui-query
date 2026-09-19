@@ -39,9 +39,8 @@ pub struct QueryResource<T, E = QueryError> {
     retry_policy: RetryPolicy,
     previous_data: Option<T>,
     /// Per-resource sequencer used by [`begin_request_with_id`](Self::begin_request_with_id)
-    /// when no external id is supplied, so transient callers without a
-    /// `QueryClient` still get monotonic, collision-free ids instead of every
-    /// call colliding at `RequestId(1,1)` (N3). `#[serde(skip)]` — runtime
+    /// when no external id is supplied, so callers without a `QueryClient`
+    /// still get monotonic, collision-free ids. `#[serde(skip)]` — runtime
     /// state, not persisted.
     #[serde(skip)]
     transient_sequencer: RequestSequencer,

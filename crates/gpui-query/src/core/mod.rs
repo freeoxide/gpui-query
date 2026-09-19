@@ -63,17 +63,11 @@ pub use select::{MappedQueryResource, SelectTransform};
 pub use signal::QuerySignal;
 pub use status::QueryStatus;
 
-// ── Task storage helper (client feature) ────────────────────────────────
-//
-// `gpui::Task<T>` is `Debug` but not `Clone`, `PartialEq`, or `Eq`. Several
-// resource structs derive `Clone`/`PartialEq`/`Eq`, so storing a raw
-// `Option<Task<()>>` would break those derives when the `client` feature is
-// enabled. `CurrentTask` is a thin newtype that implements `Clone` (producing
-// an empty handle — the original task keeps running), `PartialEq`/`Eq`
-// (treating all instances as equal — task identity does not affect resource
-// equality), and `Default` (no task). Dropping the inner `Task` cancels it
-// immediately (gpui semantics), so `set` and `abort` simply replace the
-// inner value, dropping the previous task.
+// `gpui::Task<T>` is `Debug` but not `Clone`/`PartialEq`/`Eq`, and several
+// resource structs derive those. `CurrentTask` is a newtype that restores the
+// derives: `Clone` yields an empty handle (the original task keeps running),
+// all instances compare equal, and dropping the inner `Task` cancels it
+// (gpui semantics), so `set` replaces and aborts the previous task.
 #[cfg(feature = "client")]
 mod current_task {
     use gpui::Task;

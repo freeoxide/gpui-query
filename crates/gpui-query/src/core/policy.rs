@@ -16,27 +16,22 @@ pub enum CachePolicy {
     NoCache,
     /// Cache with a time-to-live. Data is considered fresh within the TTL.
     ///
-    /// **Note:** `ttl_ms` should be greater than zero. A `ttl_ms` of `0` is
-    /// equivalent to [`NoCache`](Self::NoCache) for all practical purposes —
-    /// data is only "fresh" at the exact instant it is stored, so every
-    /// `begin_request` call triggers a new fetch. This is not validated at
-    /// runtime in release builds, but a `debug_assert` will fire in debug
-    /// builds if `ttl_ms` is zero.
+    /// `ttl_ms` should be greater than zero; a value of 0 behaves like
+    /// [`NoCache`](Self::NoCache) because data is only "fresh" at the instant
+    /// it is stored. Not validated in release builds (a `debug_assert` fires
+    /// in debug builds).
     Ttl { ttl_ms: u64 },
     /// Return stale data immediately while revalidating in the background.
     ///
-    /// Data within `ttl_ms` is served as a fresh cache hit (no refetch).
-    /// Data between `ttl_ms` and `ttl_ms + stale_ms` is served as stale data
-    /// **and** a background revalidation is triggered.
-    /// After `ttl_ms + stale_ms`, data is considered expired and a normal
-    /// fetch is performed (no stale data served).
+    /// Data within `ttl_ms` is served as a fresh cache hit (no refetch). Data
+    /// between `ttl_ms` and `ttl_ms + stale_ms` is served as stale data **and**
+    /// a background revalidation is triggered. After `ttl_ms + stale_ms`, data
+    /// is expired and a normal fetch is performed (no stale data served).
     ///
-    /// **Note:** `stale_ms` should be greater than zero. Setting `stale_ms`
-    /// to `0` effectively disables the stale-while-revalidate feature,
-    /// degenerating to pure TTL behavior (the stale window is an empty set).
-    /// Both `ttl_ms` and `stale_ms` should be greater than zero. This is not
-    /// validated at runtime in release builds, but `debug_assert`s will fire
-    /// in debug builds if either value is zero.
+    /// Both fields should be greater than zero: `ttl_ms = 0` behaves like
+    /// [`NoCache`](Self::NoCache), and `stale_ms = 0` degenerates to pure TTL
+    /// behavior (empty stale window). Not validated in release builds
+    /// (`debug_assert`s fire in debug builds).
     StaleWhileRevalidate { ttl_ms: u64, stale_ms: u64 },
 }
 
@@ -50,12 +45,9 @@ impl CachePolicy {
     /// Human-readable label.
     ///
     /// Sub-second values are shown with millisecond precision (e.g. "500ms")
-    /// rather than truncating to "0s" via integer division.
-    ///
-    /// Thin wrapper around the [`Display`](std::fmt::Display) impl that
-    /// allocates a `String`. Prefer `format!("{policy}")` or writing directly
-    /// to a formatter to avoid the heap allocation for log/diagnostic callers.
-    // Audit fix #45: keep label for backward compat; Display writes directly.
+    /// rather than truncating to "0s" via integer division. Allocates a
+    /// `String`; `format!("{policy}")` writes the same text without the heap
+    /// allocation.
     pub fn label(self) -> String {
         self.to_string()
     }
@@ -157,12 +149,6 @@ impl CachePolicy {
 }
 
 impl std::fmt::Display for CachePolicy {
-    /// Reproduces the exact strings produced by [`CachePolicy::label`].
-    ///
-    /// The duration formatting is inlined here (mirroring [`format_duration`])
-    /// so that no intermediate `String` is allocated when writing to a
-    /// formatter — the whole point of the `Display` impl.
-    // Audit fix #45: write directly to the formatter, avoiding String allocs.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoCache => write!(f, "No cache"),
@@ -180,11 +166,8 @@ impl std::fmt::Display for CachePolicy {
     }
 }
 
-/// Write a duration (in milliseconds) directly to a formatter, mirroring
-/// [`format_duration`] exactly: seconds for `>= 1000ms`, milliseconds otherwise.
-///
-/// This avoids the `String` allocation that `format_duration` performs, while
-/// producing byte-identical output.
+/// Write a duration: seconds for `>= 1000ms`, milliseconds otherwise, so
+/// sub-second values do not collapse to "0s" through integer division.
 fn write_duration(f: &mut std::fmt::Formatter<'_>, ms: u64) -> std::fmt::Result {
     if ms >= 1_000 {
         write!(f, "{}s", ms / 1_000)
@@ -254,41 +237,9 @@ pub enum QueryBeginResult {
     IgnoredWhileLoading { active_request_id: RequestId },
 }
 
-/// Format a duration in milliseconds as a human-readable string.
-///
-/// Shows seconds for values >= 1000ms, milliseconds otherwise.
-/// This avoids the misleading "0s" label that integer division produces
-/// for sub-second values.
-/// Reference formatting impl. The `Display` impls below intentionally inline
-/// this logic (writing directly to the `Formatter`) to avoid the `String`
-/// allocation; this standalone version is retained as the documented reference
-/// and is exercised by the unit tests below. Allowed dead because the lib-only
-/// build has no non-test caller.
-#[allow(dead_code)]
-fn format_duration(ms: u64) -> String {
-    if ms >= 1_000 {
-        format!("{}s", ms / 1_000)
-    } else {
-        format!("{ms}ms")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn format_duration_shows_millis_for_subsecond() {
-        assert_eq!(format_duration(0), "0ms");
-        assert_eq!(format_duration(500), "500ms");
-        assert_eq!(format_duration(999), "999ms");
-    }
-
-    #[test]
-    fn format_duration_shows_seconds_for_one_second_and_above() {
-        assert_eq!(format_duration(1_000), "1s");
-        assert_eq!(format_duration(60_000), "60s");
-    }
 
     #[test]
     fn ttl_zero_label_uses_ms() {

@@ -23,9 +23,9 @@ use serde_json::Value as JsonValue;
 /// - [`Fetched::new`] — no policy override; the resource keeps the caller's policy.
 /// - [`Fetched::with_policy`] — override the resource's policy with the server's.
 /// - [`Fetched::with_meta`] (`persist` feature) — attach opaque metadata that
-///   flows into [`PersistedEntry::meta`](crate::client::persist::PersistedEntry)
-///   so it can be rehydrated on a cold start (e.g. an HTTP `CacheMeta` for
-///   cheap `304` refetches after relaunch).
+///   flows into the persistence layer's `PersistedEntry::meta` so it can be
+///   rehydrated on a cold start (e.g. an HTTP `CacheMeta` for cheap `304`
+///   refetches after relaunch).
 ///
 /// `cache_policy: None` (the default) keeps the caller's per-query policy
 /// unchanged, matching the plain `Result<T, E>` fetcher behavior exactly.
@@ -68,8 +68,8 @@ impl<T> Fetched<T> {
 
     /// Attach opaque metadata (e.g. a serialized HTTP `CacheMeta`) to this
     /// fetched value. Requires the `persist` feature; the metadata flows into
-    /// [`PersistedEntry::meta`](crate::client::persist::PersistedEntry) when the
-    /// resource is persisted, enabling cold-start revalidation.
+    /// the persistence layer's `PersistedEntry::meta` when the resource is
+    /// persisted, enabling cold-start revalidation.
     #[cfg(feature = "persist")]
     pub fn with_meta(mut self, meta: JsonValue) -> Self {
         self.meta = Some(meta);

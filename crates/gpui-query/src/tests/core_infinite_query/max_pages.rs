@@ -52,7 +52,7 @@ fn max_pages_evicts_newest_page_on_prepend() {
 fn max_pages_zero_treated_as_unbounded() {
     let mut r = load_n_pages(3);
 
-    // v2 audit 2: Some(0) is treated as None (unbounded) — no eviction
+    // Some(0) is treated as unbounded — no eviction
     r.set_max_pages(Some(0));
     assert_eq!(r.max_pages(), None);
     assert_eq!(r.page_count(), 3);

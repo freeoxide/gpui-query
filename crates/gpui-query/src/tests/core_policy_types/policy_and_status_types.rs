@@ -5,9 +5,6 @@ use crate::core::*;
 use crate::tests::test_support::assert_serde_roundtrip;
 use std::num::NonZero;
 
-// The serde-roundtrip helper is now shared from `test_support` (extends audit
-// #129 / T10); the four enum roundtrip tests below call it directly.
-
 // ═══════════════════════════════════════════════════════════════════════════
 // QueryStatus
 // ═══════════════════════════════════════════════════════════════════════════
@@ -49,7 +46,6 @@ fn query_status_is_pending() {
 
 #[test]
 fn query_status_serde_roundtrip() {
-    // Audit fix #55: table-driven via the shared roundtrip helper.
     assert_serde_roundtrip(&[
         QueryStatus::Idle,
         QueryStatus::LoadingEmpty,
@@ -157,7 +153,6 @@ fn mutation_status_labels() {
 
 #[test]
 fn mutation_status_serde_roundtrip() {
-    // Audit fix #55: table-driven via the shared roundtrip helper.
     assert_serde_roundtrip(&[
         MutationStatus::Idle,
         MutationStatus::Loading,
@@ -239,7 +234,6 @@ fn cache_policy_ttl_is_expired_past_ttl() {
 
 #[test]
 fn cache_policy_serde_roundtrip() {
-    // Audit fix #55: table-driven via the shared roundtrip helper.
     assert_serde_roundtrip(&[
         CachePolicy::NoCache,
         CachePolicy::Ttl { ttl_ms: 5_000 },
@@ -287,7 +281,6 @@ fn request_policy_labels() {
 
 #[test]
 fn request_policy_serde_roundtrip() {
-    // Audit fix #55: table-driven via the shared roundtrip helper.
     assert_serde_roundtrip(&[RequestPolicy::LatestWins, RequestPolicy::IgnoreWhileLoading]);
 }
 

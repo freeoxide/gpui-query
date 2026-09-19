@@ -1,30 +1,11 @@
 //! Infinite query resource for managing paginated data.
 //!
-//! **v2 fixes**:
-//! - Default `max_pages` is `Some(50)` instead of `None` (prevents unbounded growth)
-//! - `enforce_max_pages_remove_front` uses `Vec::drain` instead of O(n²) `remove(0)`
-//! - Old signal is cancelled before creating a new one on `begin_fetch_next`/`begin_fetch_previous`
-//!
-//! **Audit 2 fixes**:
-//! - `max_pages` of 0 is treated as unbounded (no eviction) to prevent draining all pages
-//! - Cross-direction request replacement (e.g. `begin_fetch_previous` while `begin_fetch_next` is
-//!   active) is explicitly documented for `RequestPolicy::LatestWins`
-//! - `retry_count` and `ignored_results` fields track diagnostics, matching `QueryResource`
-//! - `complete_page_success`/`complete_page_failure` increment `ignored_results` when the request
-//!   ID does not match
-//! - `enforce_max_pages_remove_front`/`enforce_max_pages_remove_back` return evicted pages so
-//!   callers can log or process them
-//! - `reset()` preserves `max_pages` and resets `has_next_page` to its default (`true`);
-//!   consumers should be aware that `has_next_page=true` after reset is an assumption
-//!
-//! **Audit 3 fixes**:
-//! - Internal storage uses `VecDeque` instead of `Vec` so that `prepend_page` /
-//!   `push_front` is O(1) amortized rather than O(n). `VecDeque::push_front`,
-//!   `push_back`, `pop_back`, and `drain` are all O(1) amortized or better.
-//! - `FetchDirection` controls default assumptions for `has_next_page` and
-//!   `has_previous_page`. Forward-only queries (the common case) default
-//!   `has_next_page = true`, while bidirectional queries default both to `false`
-//!   and require explicit opt-in via the fetcher's `has_more` return value.
+//! Page storage is a `VecDeque<Arc<T>>`, so appending and prepending pages
+//! are both O(1) amortized. A bounded `max_pages` (default 50) evicts the
+//! oldest pages on the opposite side of a push; `set_max_pages(Some(0))` is
+//! treated as unbounded. [`FetchDirection`] controls the default
+//! `has_next_page` / `has_previous_page` assumptions on construction and
+//! after `reset()`.
 
 mod accessors;
 mod lifecycle;
@@ -59,7 +40,7 @@ mod tests {
         let r = make_resource();
         assert_eq!(r.status(), QueryStatus::Idle);
         assert!(r.pages().is_empty());
-        assert_eq!(r.max_pages(), Some(50)); // v2: bounded default
+        assert_eq!(r.max_pages(), Some(50));
     }
 
     #[test]
@@ -250,8 +231,6 @@ mod tests {
         assert!(!r.is_page_data_valid());
     }
 
-    // ── Audit 2 tests ─────────────────────────────────────────────────
-
     #[test]
     fn max_pages_zero_treated_as_unbounded() {
         let mut r = make_resource();
@@ -388,8 +367,6 @@ mod tests {
         // has_next_page reset to ForwardOnly default (true)
         assert!(r.has_next_page());
     }
-
-    // ── Audit 3 tests ─────────────────────────────────────────────────
 
     #[test]
     fn forward_only_defaults_has_next_true() {

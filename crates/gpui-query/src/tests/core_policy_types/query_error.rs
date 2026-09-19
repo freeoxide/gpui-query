@@ -76,7 +76,6 @@ fn query_error_as_ref_str() {
 
 #[test]
 fn query_error_serde_roundtrip() {
-    // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[
         QueryError::transport("connection refused"),
         QueryError::cancelled("aborted"),
@@ -143,19 +142,12 @@ fn query_error_sanitized_home_path() {
 
 #[test]
 fn query_error_sanitized_users_path_uppercase() {
-    // NOTE: The sanitizer lowercases the text for matching but the prefix
-    // "/Users/" contains uppercase, so the case-insensitive find may not match
-    // depending on the input. Verify the actual behavior:
+    // Path matching is case-insensitive, so the macOS "/Users/" prefix must
+    // be redacted just like "/home/".
     let err = QueryError::unknown("error in /Users/admin/.env leaked");
     let clean = err.sanitized();
-    // The redact_paths function lowercases the text but tries to find the
-    // mixed-case prefix "/Users/" in the lowercased version — which won't match.
-    // This is a known limitation of the sanitizer for mixed-case path prefixes.
-    // The path should still appear in the output (not redacted) in this case.
-    assert!(
-        clean.message().contains("/Users/admin/.env"),
-        "mixed-case /Users/ prefix not redacted by current implementation"
-    );
+    assert!(!clean.message().contains("/Users/admin/.env"));
+    assert!(clean.message().contains("[REDACTED_PATH]"));
 }
 
 #[test]

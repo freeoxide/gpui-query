@@ -14,11 +14,12 @@ use crate::core::{
 impl<T, E> InfiniteQueryResource<T, E> {
     /// All loaded pages, in order from first to last.
     ///
-    /// Pages are stored internally as `Arc<T>` (audit #5) so that fetchers can
-    /// receive a cheap `Arc::clone` via [`first_page_arc`](Self::first_page_arc) /
-    /// [`last_page_arc`](Self::last_page_arc) instead of copying the page data.
-    /// Most call sites only need a `&T` view — use [`first_page`](Self::first_page)
-    /// / [`last_page`](Self::last_page), or iterate with `.iter().map(|a| a.as_ref())`.
+    /// Pages are stored as `Arc<T>` so fetchers can receive a cheap
+    /// `Arc::clone` via [`first_page_arc`](Self::first_page_arc) /
+    /// [`last_page_arc`](Self::last_page_arc) instead of copying the page
+    /// data. Most call sites only need a `&T` view — use
+    /// [`first_page`](Self::first_page) / [`last_page`](Self::last_page), or
+    /// iterate with `.iter().map(|a| a.as_ref())`.
     ///
     /// **Note**: When `status()` is `Failure`, previously loaded pages are still
     /// present and valid — the failure applies only to the most recent page fetch.
@@ -43,15 +44,15 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.pages.back().map(|a| a.as_ref())
     }
 
-    /// Cheap `Arc::clone` of the first page, if any (audit #5).
+    /// Cheap `Arc::clone` of the first page, if any.
     ///
-    /// Hand this to a `fetch_previous_page` fetcher instead of cloning the full
-    /// page data — only the refcount is bumped.
+    /// Hand this to a `fetch_previous_page` fetcher instead of cloning the
+    /// full page data — only the refcount is bumped.
     pub fn first_page_arc(&self) -> Option<Arc<T>> {
         self.pages.front().cloned()
     }
 
-    /// Cheap `Arc::clone` of the last page, if any (audit #5).
+    /// Cheap `Arc::clone` of the last page, if any.
     ///
     /// Hand this to a `fetch_next_page` fetcher instead of cloning the full
     /// page data — only the refcount is bumped.
@@ -92,8 +93,8 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// The fetch direction mode for this query.
     ///
-    /// **Audit 3**: Controls the default assumptions for `has_next_page` and
-    /// `has_previous_page` after construction and after `reset()`.
+    /// Controls the default `has_next_page` / `has_previous_page` assumptions
+    /// after construction and after `reset()`.
     pub fn direction(&self) -> FetchDirection {
         self.direction
     }
@@ -156,8 +157,8 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// Set the retry policy.
     ///
-    /// Stored by `use_infinite_query` from [`InfiniteQueryOptions::retry_policy`]
-    /// so that fetch helpers can read it from the entity.
+    /// Stored by `use_infinite_query` from its `retry_policy` option so that
+    /// fetch helpers can read it from the entity.
     pub fn set_retry_policy(&mut self, policy: RetryPolicy) {
         self.retry_policy = policy;
     }
@@ -172,14 +173,11 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.last_updated_at.map(QueryTimestamp::as_millis)
     }
 
-    /// Cache age in milliseconds (L6).
+    /// Cache age in milliseconds.
     ///
     /// Mirrors [`QueryResource::cache_age_ms`]: returns `None` when there is
-    /// no recorded `last_updated_at`, and also `None` on clock skew
-    /// (`now_ms` before the recorded timestamp) via `checked_sub`. Used by
-    /// `InfiniteQueryBucket::collect_diagnostics` so the infinite diagnostic
-    /// matches the regular query's `cache_age_ms` behavior (the previous
-    /// inline `saturating_sub` returned `Some(0)` on skew).
+    /// no recorded `last_updated_at`, and `None` on clock skew (`now_ms`
+    /// before the recorded timestamp) via `checked_sub`.
     ///
     /// [`QueryResource::cache_age_ms`]: crate::core::QueryResource::cache_age_ms
     pub fn cache_age_ms(&self, now_ms: u64) -> Option<u64> {
@@ -219,7 +217,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     ///
     /// Mirrors `QueryResource::mark_ignored_result` so the client layer's
     /// bulk-cancel path can bump `ignored_results` for infinite queries the
-    /// same way it does for regular queries (M5 core half).
+    /// same way it does for regular queries.
     pub fn mark_ignored_result(&mut self) {
         self.ignored_results = self.ignored_results.saturating_add(1);
     }

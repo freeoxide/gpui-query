@@ -7,14 +7,9 @@ use crate::core::{
 
 use super::QueryResource;
 
-/// Source of the [`RequestId`] for the shared `begin_request_inner` helper.
-///
-/// Mirrors the `MaybeRequestId` pattern already used by
-/// `InfiniteQueryResource` to dedup its four entry points. Keeping the two
-/// public `begin_request` / `begin_request_with_id` entry points sharing one
-/// implementation avoids the ~90% duplication flagged in N4, and threads the
-/// stored per-resource sequencer (N3) through the `None` path so transient
-/// callers no longer collide at `RequestId(1,1)`.
+/// Source of the [`RequestId`] for the shared `begin_request_inner` helper:
+/// a caller-supplied sequencer, or an optional pre-generated id with a
+/// per-resource fallback.
 enum MaybeRequestId<'a> {
     FromSequencer(&'a mut RequestSequencer),
     Provided(Option<RequestId>),
@@ -42,12 +37,11 @@ impl<T, E> QueryResource<T, E> {
     /// When `maybe_request_id` is `Some`, uses that ID directly (useful when
     /// the bucket's co-located sequencer has already generated the ID).
     /// When `None`, falls back to the resource's own stored sequencer so the
-    /// generated ids are monotonic and collision-free across calls (N3) rather
-    /// than every call producing a colliding `RequestId(1,1)`.
+    /// generated ids stay monotonic and collision-free across calls.
     ///
-    /// This is the preferred entry point for the hook layer (audit fixes
-    /// #1/#5/#15/#18): it allows the bucket's persistent sequencer to provide
-    /// globally unique, monotonically increasing RequestIds.
+    /// This is the preferred entry point for the hook layer: it lets the
+    /// bucket's persistent sequencer provide globally unique, monotonically
+    /// increasing RequestIds.
     pub fn begin_request_with_id(
         &mut self,
         maybe_request_id: Option<RequestId>,
@@ -62,22 +56,15 @@ impl<T, E> QueryResource<T, E> {
     }
 
     /// Shared implementation behind [`begin_request`](Self::begin_request) and
-    /// [`begin_request_with_id`](Self::begin_request_with_id) (N4).
-    ///
-    /// `id_source` selects where the request id comes from: an external
-    /// sequencer (for `begin_request`) or a pre-allocated id with a
-    /// per-resource fallback (for `begin_request_with_id`). The fallback uses
-    /// the resource's own stored sequencer (N3) instead of a fresh
-    /// `RequestSequencer::new()`.
+    /// [`begin_request_with_id`](Self::begin_request_with_id).
     fn begin_request_inner(
         &mut self,
         now_ms: u64,
         fetch_mode: QueryFetchMode,
         mut id_source: MaybeRequestId,
     ) -> QueryBeginResult {
-        // Helper that resolves the next id from whichever source we were given,
-        // evaluated lazily so early-return guards never consume a sequence
-        // number (preserving the original counter-consumption behavior).
+        // Resolve the next id lazily so early-return guards never consume a
+        // sequence number.
         macro_rules! next_id {
             () => {{
                 match &mut id_source {
@@ -152,13 +139,11 @@ impl<T, E> QueryResource<T, E> {
 
     /// Internal: transition to a loading state.
     ///
-    /// **v2 fix**: Cancels the old signal before creating a new one,
-    /// so in-flight fetchers for replaced requests can abort early.
-    ///
-    /// Note: This method performs no guard against the current status. Under
-    /// `LatestWins` policy, a second call while already `LoadingEmpty` is
-    /// intentional — it cancels the old request and starts a new one. The old
-    /// request's async task holds a stale `RequestId` and will be rejected by
+    /// Cancels the old signal before creating a new one, so in-flight
+    /// fetchers for replaced requests can abort early. Under `LatestWins`,
+    /// a second call while already `LoadingEmpty` is intentional: it cancels
+    /// the old request and starts a new one. The old request's async task
+    /// holds a stale `RequestId` and will be rejected by
     /// `accept_current_request()`.
     pub(crate) fn begin_loading(&mut self, request_id: RequestId, now_ms: u64) -> QueryStatus {
         let status = if self.has_data() {
@@ -171,7 +156,7 @@ impl<T, E> QueryResource<T, E> {
         self.started_at = Some(QueryTimestamp::from(now_ms));
         self.error = None;
 
-        // v2 fix: Cancel the OLD signal before replacing it.
+        // Cancel the OLD signal before replacing it.
         if let Some(old_signal) = self.signal.as_ref() {
             old_signal.cancel();
         }
@@ -262,17 +247,14 @@ impl<T, E> QueryResource<T, E> {
 
     /// Reset the resource back to idle, clearing state and diagnostic counters.
     ///
-    /// **v2 fix**: Cancels the signal before clearing it.
-    ///
     /// **Preserves**: `cache_policy`, `request_policy`, `retry_policy`, and `key`.
     /// These are considered configuration, not runtime state, and persist across
     /// resets. Use `QueryResource::new()` to create a fully fresh resource with
     /// default policies.
     ///
-    /// Calling `reset()` on an already-Idle resource resets diagnostic counters
-    /// (`cache_hits`, `cancelled_count`, `ignored_results`, `retry_count`) to zero.
-    /// This is intentional — `reset()` always resets counters regardless of current
-    /// state. If counter preservation is needed, read them before calling `reset()`.
+    /// Counters (`cache_hits`, `cancelled_count`, `ignored_results`,
+    /// `retry_count`) are always reset regardless of current state. If counter
+    /// preservation is needed, read them before calling `reset()`.
     pub fn reset(&mut self) {
         // Cancel signal before dropping
         if let Some(signal) = self.signal.as_ref() {

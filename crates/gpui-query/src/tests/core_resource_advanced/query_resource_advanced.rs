@@ -1,6 +1,6 @@
 //! Tests for QueryResource advanced scenarios.
 //!
-//! Covers untested paths:
+//! Covers:
 //! - Error recovery: Failure -> Success, Failure -> Cancel, Cancel -> Success
 //! - signal_mut accessor
 //! - set_retry_policy and retry_policy interaction

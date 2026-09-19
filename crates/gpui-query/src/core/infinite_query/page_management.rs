@@ -31,10 +31,9 @@ impl<T, E> InfiniteQueryResource<T, E> {
     /// accidentally draining all pages. Callers that want no page retention
     /// should use `reset()` instead.
     ///
-    /// Returns evicted pages (if any) as `Arc<T>` handles so the caller can log
-    /// or process them without cloning the page data (audit #5).
+    /// Returns evicted pages (if any) as `Arc<T>` handles so the caller can
+    /// log or process them without cloning the page data.
     pub fn set_max_pages(&mut self, max: Option<usize>) -> Vec<Arc<T>> {
-        // Treat 0 as unbounded to prevent draining all pages.
         self.max_pages = match max {
             Some(0) => None,
             other => other,
@@ -44,9 +43,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// Append a page to the end.
     ///
-    /// **Audit 3**: Uses `VecDeque::push_back` — O(1) amortized.
-    ///
-    /// Returns evicted pages (if any) as `Arc<T>` handles (audit #5).
+    /// Returns evicted pages (if any) as `Arc<T>` handles.
     pub fn append_page(&mut self, page: T) -> Vec<Arc<T>> {
         self.pages.push_back(Arc::new(page));
         self.enforce_max_pages_remove_front()
@@ -54,21 +51,15 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// Prepend a page to the beginning.
     ///
-    /// **Audit 3**: Uses `VecDeque::push_front` — O(1) amortized instead of
-    /// the previous `Vec::insert(0, page)` which was O(n).
-    ///
-    /// Returns evicted pages (if any) as `Arc<T>` handles (audit #5).
+    /// Returns evicted pages (if any) as `Arc<T>` handles.
     pub fn prepend_page(&mut self, page: T) -> Vec<Arc<T>> {
         self.pages.push_front(Arc::new(page));
         self.enforce_max_pages_remove_back()
     }
 
-    /// **v2 fix**: Use `Vec::drain` instead of O(n²) `remove(0)`.
+    /// Evict pages from the front until within `max_pages`.
     ///
-    /// **Audit 2 fix**: `max_pages` of 0 is treated as unbounded. At least 1
-    /// page is always retained. Returns evicted pages for caller inspection.
-    ///
-    /// **Audit 3**: Uses `VecDeque::drain` — O(k) where k is the number of
+    /// At least 1 page is always retained. O(k) where k is the number of
     /// evicted pages.
     pub(super) fn enforce_max_pages_remove_front(&mut self) -> Vec<Arc<T>> {
         if let Some(max) = self.max_pages
@@ -82,27 +73,16 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
     /// Evict pages from the back until within `max_pages`.
     ///
-    /// **Audit 2 fix**: `max_pages` of 0 is treated as unbounded. At least 1
-    /// page is always retained. Returns evicted pages for caller inspection.
-    ///
-    /// **Audit 3**: Uses `VecDeque::pop_back` — O(1) per eviction.
-    ///
-    /// **Audit 36**: Uses `VecDeque::drain` (matching the front variant) instead
-    /// of a `while`/`pop_back` loop — O(k) where k is the number of evicted
-    /// pages. The drained range is reversed so the returned vector preserves the
-    /// original back-to-front eviction order (most-recently-prepended page first).
+    /// At least 1 page is always retained. The survivors are the first `max`
+    /// pages (indices `0..max`), so the drain starts at `max` — not at
+    /// `len - max`, which would leave too few behind. Drained in reverse so
+    /// the returned vector preserves back-to-front eviction order
+    /// (most-recently-prepended page first) without a separate reverse pass.
     pub(super) fn enforce_max_pages_remove_back(&mut self) -> Vec<Arc<T>> {
         if let Some(max) = self.max_pages
             && max > 0
             && self.pages.len() > max
         {
-            // Evict the oldest `len - max` pages from the back. The pages
-            // that survive are the first `max` (indices `0..max`), so drain
-            // from `max..`. The previous `start = len - max` formula drained
-            // `max` pages from the middle/back and left too few behind.
-            // Drain in reverse so the returned vector preserves the original
-            // back-to-front eviction order (most-recently-prepended page
-            // first) without a separate reverse() pass (N26).
             return self.pages.drain(max..).rev().collect();
         }
         Vec::new()

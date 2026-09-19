@@ -89,9 +89,6 @@ impl<T, E> QueryResource<T, E> {
     }
 
     /// Mutable reference to the cancellation signal.
-    ///
-    /// Currently only exercised by tests; gated accordingly to avoid
-    /// surfacing an unused public API (N23).
     #[cfg(test)]
     pub(crate) fn signal_mut(&mut self) -> Option<&mut QuerySignal> {
         self.signal.as_mut()

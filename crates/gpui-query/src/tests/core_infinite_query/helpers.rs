@@ -29,11 +29,8 @@ const PAGE_LABELS: [&str; 64] = [
     "page55", "page56", "page57", "page58", "page59", "page60", "page61", "page62", "page63",
 ];
 
-/// Default page-content generator used by [`load_n_pages`].
-///
-/// Produces `vec!["page{i}"]` for page index `i`, matching the historical
-/// behavior of `load_n_pages` before it was parameterized. Uses static labels
-/// (no allocation).
+/// Default page-content generator used by [`load_n_pages`]: `vec!["page{i}"]`
+/// for page index `i`, with static labels (no allocation).
 fn default_page(i: usize) -> Vec<&'static str> {
     vec![PAGE_LABELS[i]]
 }

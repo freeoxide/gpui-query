@@ -120,7 +120,6 @@ fn retry_policy_should_retry_zero_max() {
 
 #[test]
 fn retry_policy_serde_roundtrip() {
-    // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[
         RetryPolicy::new(5)
             .with_delay(200)
@@ -167,7 +166,6 @@ fn refetch_trigger_equality_and_copy() {
 
 #[test]
 fn refetch_trigger_serde_roundtrip() {
-    // T10: shared roundtrip helper.
     assert_serde_roundtrip(&[
         RefetchTrigger::Always,
         RefetchTrigger::IfStale,

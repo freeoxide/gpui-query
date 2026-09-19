@@ -113,7 +113,7 @@ impl QueryError {
     /// - Email-like strings
     /// - Long hex sequences (likely API keys)
     ///
-    /// Also truncates the message to [`SANITIZE_MAX_LEN`](super::SANITIZE_MAX_LEN) bytes.
+    /// Also truncates the message to `SANITIZE_MAX_LEN` (512) bytes.
     pub fn sanitized(&self) -> Self {
         let redacted = sanitize_message(&self.message);
         Self {

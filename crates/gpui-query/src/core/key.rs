@@ -85,13 +85,19 @@ impl QueryKey {
     /// Returns the full key as a double-colon-separated path string.
     ///
     /// Useful for diagnostics and DevTools display. Uses `"::"` as the
-    /// separator to avoid ambiguity when segments contain forward slashes.
+    /// separator so segments containing forward slashes stay unambiguous.
     pub fn to_path(&self) -> String {
-        let mut iter = self.0.iter().map(|s| s.as_ref());
-        match iter.next() {
-            Some(first) => iter.fold(first.to_owned(), |acc, s| acc + "::" + s),
-            None => String::new(),
+        const SEP: &str = "::";
+        let len = self.0.iter().map(|s| s.len()).sum::<usize>()
+            + SEP.len() * self.0.len().saturating_sub(1);
+        let mut path = String::with_capacity(len);
+        for (i, segment) in self.0.iter().enumerate() {
+            if i > 0 {
+                path.push_str(SEP);
+            }
+            path.push_str(segment);
         }
+        path
     }
 
     /// Returns `true` if this key starts with the given `prefix`.

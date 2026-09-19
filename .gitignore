@@ -18,6 +18,9 @@ Thumbs.db
 # z-workflow state
 .z-workflow/
 
+# z-proflow state
+.z-proflow/
+
 # Local Playwright/MCP artifacts
 .playwright-mcp/
 

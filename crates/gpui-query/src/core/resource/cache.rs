@@ -16,11 +16,12 @@ impl<T, E> QueryResource<T, E> {
     /// is within the TTL window. The stale-while-revalidate window is NOT
     /// considered fresh — it is stale-but-serveable (see [`is_stale_but_serveable`]).
     ///
-    /// **Boundary behavior**: data at exactly TTL milliseconds old is considered
-    /// fresh (`age <= ttl_ms`). Data older than TTL is stale (`age > ttl_ms`).
-    /// This differs from HTTP `Cache-Control: max-age` where the boundary is
-    /// exclusive. The inclusive boundary is chosen so that the fresh/stale
-    /// partition is total: every age is either fresh or stale, with no gap.
+    /// Data at exactly TTL milliseconds old is considered fresh (`age <= ttl_ms`),
+    /// unlike HTTP `Cache-Control: max-age` where the boundary is exclusive.
+    /// The inclusive boundary keeps the fresh/stale partition total: every age
+    /// is either fresh or stale, with no gap.
+    ///
+    /// [`is_stale_but_serveable`]: Self::is_stale_but_serveable
     pub fn is_cache_fresh(&self, now_ms: u64) -> bool {
         self.has_data()
             && self
@@ -88,33 +89,20 @@ impl<T, E> QueryResource<T, E> {
     /// `Success` as expected.
     pub(crate) fn record_cache_hit(&mut self) {
         self.cache_hits = self.cache_hits.saturating_add(1);
-        // Only transition to Success from non-terminal states.
-        // Failure/Cancelled are terminal — a cache hit on old data should not
-        // silently clear the error a consumer is already handling.
+        // Failure/Cancelled are terminal: a hit on old data must not silently
+        // clear an error the consumer is already handling.
         if !matches!(self.status, QueryStatus::Failure | QueryStatus::Cancelled) {
             self.status = QueryStatus::Success;
             self.error = None;
         }
     }
 
-    /// Record a stale cache hit (data served from stale window).
+    /// Record a stale cache hit (data served from the stale window).
     ///
-    /// Increments cache hit counter and transitions status to
-    /// [`Success`](QueryStatus::Success) **only if the resource is not in a
-    /// terminal failure state** (`Failure` or `Cancelled`), mirroring
-    /// [`record_cache_hit`]. The caller is expected to also trigger a
-    /// background revalidation.
-    ///
-    /// [`record_cache_hit`]: Self::record_cache_hit
+    /// Same behavior as [`record_cache_hit`](Self::record_cache_hit); the caller
+    /// is expected to also trigger a background revalidation.
     pub(crate) fn record_stale_cache_hit(&mut self) {
-        self.cache_hits = self.cache_hits.saturating_add(1);
-        // Mirror record_cache_hit: only transition to Success from
-        // non-terminal states, so a stale hit does not silently clear a
-        // failure error the consumer is already handling.
-        if !matches!(self.status, QueryStatus::Failure | QueryStatus::Cancelled) {
-            self.status = QueryStatus::Success;
-            self.error = None;
-        }
+        self.record_cache_hit();
     }
 
     /// Invalidate the cache (clear last-updated timestamp).

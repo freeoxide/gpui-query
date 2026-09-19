@@ -2,9 +2,8 @@ use serde::{Deserialize, Serialize};
 
 /// Trigger configuration for automatic refetching.
 ///
-/// Note: In v2, these triggers are defined but the event system integration
-/// (window focus, reconnect) is not yet implemented. This enum exists for
-/// forward compatibility and option parsing.
+/// The triggers are parsed and stored, but the event system integration
+/// (window focus, reconnect) is not implemented yet.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RefetchTrigger {
     /// Always refetch when the trigger fires.

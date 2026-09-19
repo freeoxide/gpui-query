@@ -22,13 +22,11 @@ fn new_resource_has_idle_state_with_empty_pages() {
     assert!(r.started_at_ms().is_none());
     assert!(r.last_updated_at_ms().is_none());
 
-    // v2: ForwardOnly defaults
     assert!(r.has_next_page());
     assert!(!r.has_previous_page());
     assert!(!r.is_fetching_next_page());
     assert!(!r.is_fetching_previous_page());
 
-    // v2: bounded default
     assert_eq!(r.max_pages(), Some(50));
     assert_eq!(r.direction(), FetchDirection::ForwardOnly);
 

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 /// Controls fetch behavior based on network connectivity.
 ///
-/// Note: In v2, this is defined for forward compatibility. The actual
-/// network detection is not yet implemented.
+/// Defined for forward compatibility; the actual network detection is not
+/// implemented yet.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetworkMode {
     /// Only fetch when online (default).

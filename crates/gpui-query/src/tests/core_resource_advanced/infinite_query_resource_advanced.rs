@@ -1,6 +1,6 @@
 //! Tests for InfiniteQueryResource advanced scenarios.
 //!
-//! Covers untested paths:
+//! Covers:
 //! - InfiniteQueryResource cross-direction replacement
 //! - InfiniteQueryResource cache_policy and request_policy setters
 //! - InfiniteQueryResource retry_policy and set_retry_policy

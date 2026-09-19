@@ -1,4 +1,4 @@
-//! Comprehensive tests for the core lifecycle of QueryResource (v2).
+//! Comprehensive tests for the QueryResource lifecycle.
 //!
 //! Covers all state transitions, cancellation, stale request rejection,
 //! reset, retry counter management, signal lifecycle, and request policies.

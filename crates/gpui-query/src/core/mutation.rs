@@ -66,15 +66,15 @@ pub struct MutationResource<V, T, E = QueryError> {
     retry_policy: RetryPolicy,
     /// Wall-clock ms of the most recent terminal completion (success/failure);
     /// `None` until the mutation first completes. Read by `MutationBucket`'s GC
-    /// so recency is measured from completion time, not insertion time
-    /// (audit #112). `#[serde(skip)]` — runtime state, not persisted.
+    /// so recency is measured from completion time, not insertion time.
+    /// `#[serde(skip)]` — runtime state, not persisted.
     #[serde(skip)]
     last_updated_at_ms: Option<u64>,
     #[serde(skip)]
     signal: Option<QuerySignal>,
-    /// In-flight background mutation task (audit #6). Stored so that a
-    /// replacement mutation or entity drop (component unmount) aborts the prior
-    /// in-flight task instead of leaving it detached. `#[cfg(feature = "client")]`
+    /// In-flight background mutation task. Stored so that a replacement
+    /// mutation or entity drop (component unmount) aborts the prior in-flight
+    /// task instead of leaving it detached. `#[cfg(feature = "client")]`
     /// because `gpui::Task` is only available with the client feature.
     #[cfg(feature = "client")]
     #[serde(skip)]
@@ -117,7 +117,7 @@ impl<V, T, E> MutationResource<V, T, E> {
 
     /// Wall-clock ms of the most recent terminal completion, or `None` if the
     /// mutation has never completed. Used by `MutationBucket` GC to measure
-    /// recency from completion time rather than insertion time (audit #112).
+    /// recency from completion time rather than insertion time.
     // Only the `client` layer reads this accessor; core-only builds (e.g.
     // wasm32 core) have no caller yet, so silence dead_code there.
     #[cfg_attr(not(feature = "client"), allow(dead_code))]
@@ -270,9 +270,8 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.variables = None;
         self.retry_count = 0;
         self.cancelled_count = 0;
-        // Clear the completion timestamp so MutationBucket GC does not measure
-        // recency from a stale pre-reset completion (mirrors QueryResource::reset
-        // and InfiniteQueryResource::reset clearing last_updated_at).
+        // Clear the completion timestamp so GC does not measure recency from
+        // a pre-reset completion.
         self.last_updated_at_ms = None;
         self.signal = None;
     }
@@ -342,8 +341,8 @@ impl<V, T, E> MutationResource<V, T, E> {
 #[cfg(feature = "client")]
 impl<V, T, E> MutationResource<V, T, E> {
     /// Store a new background mutation task, cancelling any previously stored
-    /// task (audit #6). Called from the hook spawn sites so a replacement
-    /// mutation or entity drop aborts the prior in-flight task.
+    /// task. Called from the hook spawn sites so a replacement mutation or
+    /// entity drop aborts the prior in-flight task.
     pub(crate) fn set_current_task(&mut self, task: gpui::Task<()>) {
         self.current_task.set(task);
     }
