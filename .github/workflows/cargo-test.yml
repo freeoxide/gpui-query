@@ -59,6 +59,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       # No apt step and no `workspaces` override, matching wasm-check.yml:
       # only test executables link against X11/XCB, and neither a release
