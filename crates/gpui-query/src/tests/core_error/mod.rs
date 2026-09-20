@@ -105,14 +105,12 @@ fn sanitized_empty_message_stays_empty() {
 }
 
 #[test]
-fn sanitized_redacts_secret_straddling_truncation_boundary() {
-    let prefix = "x".repeat(500);
-    let secret = "s3cr3tboundaryleak".to_string();
-    let msg = format!("{prefix}bearer {secret}");
+fn sanitized_redacts_email_straddling_truncation_boundary() {
+    let msg = format!("{} alice@corp.com", "x".repeat(505));
     assert!(msg.len() > 512, "precondition: message must exceed the cap");
     let clean = QueryError::response(msg.as_str()).sanitized();
     assert!(
-        !clean.message().contains(&secret),
+        !clean.message().contains("alice"),
         "truncation must not resurrect a partially-redacted secret"
     );
     assert!(clean.message().ends_with("...[truncated]"));

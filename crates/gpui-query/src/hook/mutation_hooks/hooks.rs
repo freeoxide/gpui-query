@@ -79,7 +79,7 @@ where
     since = "0.2.0",
     note = "Use `use_mutation(options, cx)` instead — it now accepts MutationOptions via Into"
 )]
-// Not re-exported; kept alive by the deprecated source-compat test.
+// Not re-exported: pub inside a private module, so no caller can reach it.
 #[allow(dead_code)]
 pub fn use_mutation_with_options<V, T, E, C>(
     options: &MutationOptions,
