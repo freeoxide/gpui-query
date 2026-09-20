@@ -64,12 +64,11 @@ pub enum ParseError {
 }
 
 /// Derives a [`CachePolicy`] from response `Cache-Control` headers ("server
-/// wins"): `no-store`/`no-cache` anywhere wins regardless of position (RFC
-/// 9111 §5.2.2); otherwise the first `max-age` sets the TTL, falling back to
-/// `s-maxage` only when absent (private cache; §5.2.2.10), and a
-/// `stale-while-revalidate` alongside yields the SWR policy. Duplicates keep
-/// their first occurrence (§4.2.1); over-large delta-seconds saturate
-/// (§1.2.2); malformed values error as [`ParseError`].
+/// wins"): `no-store`/`no-cache` from any position wins (RFC 9111 §5.2.2),
+/// otherwise the first `max-age` (`s-maxage` as private-cache fallback,
+/// §5.2.2.10) with `stale-while-revalidate` if present; duplicates keep the
+/// first occurrence (§4.2.1), over-large delta-seconds saturate (§1.2.2),
+/// malformed values error as [`ParseError`].
 pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, ParseError> {
     // Option<Result>: first occurrence wins; errors surface only after the scan.
     let mut s_maxage: Option<Result<u64, ParseError>> = None;

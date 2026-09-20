@@ -76,7 +76,8 @@ impl<B: HttpBackend> HttpCache<B> {
             && meta.stored_at.checked_add(meta.fresh_for).is_none_or(|t| t > SystemTime::now())
             && let Some(body) = self.cached_body(url)?
         {
-            return Ok((body, policy_from_meta(meta), cached_meta.clone()));
+            let policy = policy_from_meta(meta);
+            return Ok((body, policy, cached_meta));
         }
 
         let conditionals = Conditionals::from_meta(cached_meta.as_ref());
