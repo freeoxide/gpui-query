@@ -61,7 +61,8 @@ impl<B: HttpBackend> HttpCache<B> {
     /// revalidates. Returns `(body, policy, meta)`: only a cacheable `200`
     /// stores and yields `meta`, a `304` re-serves the cached body and
     /// refreshes the stored entry unless its own `Cache-Control` blocks
-    /// caching, and everything else is [`CachePolicy::NoCache`] with `None`.
+    /// caching or a concurrent fetch replaced the entry, and everything else
+    /// is [`CachePolicy::NoCache`] with `None`.
     pub async fn fetch(
         &self,
         url: &str,
@@ -99,8 +100,15 @@ impl<B: HttpBackend> HttpCache<B> {
                 && let Some(meta) = refreshed_meta(&resp.headers, old)
             {
                 let mut guard = self.meta.lock().map_err(|_| HttpError::Poisoned)?;
-                guard.insert(url.to_string(), meta.clone());
-                return Ok((body, policy_from_meta(&meta), Some(meta)));
+                // Lost-update guard: the entry can be replaced between the
+                // pre-await clone and this insert; only refresh what was validated.
+                if guard
+                    .get(url)
+                    .is_some_and(|current| same_meta(current, old))
+                {
+                    guard.insert(url.to_string(), meta.clone());
+                    return Ok((body, policy_from_meta(&meta), Some(meta)));
+                }
             }
             let policy = cached_meta
                 .as_ref()
@@ -171,6 +179,14 @@ fn fresh_for_from_policy(policy: CachePolicy) -> Duration {
 
 fn stale_for_from_policy(policy: CachePolicy) -> Duration {
     Duration::from_millis(policy.stale_ms().unwrap_or(0))
+}
+
+fn same_meta(a: &CacheMeta, b: &CacheMeta) -> bool {
+    a.etag == b.etag
+        && a.last_modified == b.last_modified
+        && a.stored_at == b.stored_at
+        && a.fresh_for == b.fresh_for
+        && a.stale_for == b.stale_for
 }
 
 fn policy_from_meta(meta: &CacheMeta) -> CachePolicy {
@@ -274,6 +290,47 @@ mod tests {
         }
     }
 
+    fn resp_200_with_etag(body: &str, cache_control: &str, etag: &str) -> BackendResponse {
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::CACHE_CONTROL, cache_control.parse().unwrap());
+        headers.insert(http::header::ETAG, etag.parse().unwrap());
+        BackendResponse {
+            status: 200,
+            headers,
+            body: Bytes::copy_from_slice(body.as_bytes()),
+        }
+    }
+
+    enum Step {
+        Gated(tokio::sync::oneshot::Receiver<BackendResponse>),
+        Ready(BackendResponse),
+    }
+
+    struct InterleavedBackend {
+        steps: Mutex<VecDeque<Step>>,
+        started: tokio::sync::mpsc::UnboundedSender<String>,
+    }
+
+    impl HttpBackend for InterleavedBackend {
+        type Error = MockError;
+
+        fn fetch(
+            &self,
+            url: &str,
+            _conditionals: Conditionals,
+        ) -> impl Future<Output = Result<BackendResponse, MockError>> + MaybeSend {
+            let step = self.steps.lock().unwrap().pop_front();
+            let _ = self.started.send(url.to_string());
+            async move {
+                match step {
+                    Some(Step::Ready(resp)) => Ok(resp),
+                    Some(Step::Gated(rx)) => rx.await.map_err(|_| MockError),
+                    None => Err(MockError),
+                }
+            }
+        }
+    }
+
     fn resp_304(cache_control: Option<&str>, etag: Option<&str>) -> BackendResponse {
         let mut headers = HeaderMap::new();
         if let Some(cache_control) = cache_control {
@@ -289,8 +346,8 @@ mod tests {
         }
     }
 
-    fn seed_entry(
-        cache: &HttpCache<MockBackend>,
+    fn seed_entry<B: HttpBackend>(
+        cache: &HttpCache<B>,
         url: &str,
         body: &'static [u8],
         fresh_for: Duration,
@@ -532,5 +589,58 @@ mod tests {
         assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 60_000 });
         let stored = cache.meta.lock().unwrap().get(url).cloned().unwrap();
         assert_eq!(stored.stored_at, stored_at);
+    }
+
+    #[tokio::test]
+    async fn not_modified_refresh_does_not_clobber_concurrent_store() {
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let backend = InterleavedBackend {
+            steps: Mutex::new(
+                vec![
+                    Step::Gated(release_rx),
+                    Step::Ready(resp_200_with_etag("new", "max-age=600", "\"v2\"")),
+                ]
+                .into(),
+            ),
+            started: started_tx,
+        };
+        let cache = std::sync::Arc::new(HttpCache::new(backend));
+        let url = "https://example.test/lost-update";
+        seed_entry(
+            &cache,
+            url,
+            b"old",
+            Duration::from_secs(60),
+            SystemTime::now() - Duration::from_secs(3600),
+        );
+
+        let racing = {
+            let cache = std::sync::Arc::clone(&cache);
+            tokio::spawn(async move { cache.fetch(url).await })
+        };
+        assert_eq!(
+            started_rx.recv().await.as_deref(),
+            Some(url),
+            "racing fetch must be parked inside the backend before the writer runs"
+        );
+
+        let (_, _, writer_meta) = cache.fetch(url).await.unwrap();
+        assert_eq!(
+            writer_meta.unwrap().etag.as_deref(),
+            Some("\"v2\""),
+            "writer fetch stores the newer validator first"
+        );
+
+        release_tx.send(resp_304(None, None)).unwrap();
+        racing.await.unwrap().unwrap();
+
+        let stored = cache.meta.lock().unwrap().get(url).cloned().unwrap();
+        assert_eq!(
+            stored.etag.as_deref(),
+            Some("\"v2\""),
+            "a late 304 must not roll the entry back to the pre-await clone"
+        );
+        assert_eq!(stored.fresh_for, Duration::from_secs(600));
     }
 }

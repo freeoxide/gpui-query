@@ -28,7 +28,7 @@ thiserror = "2"
 
 [dev-dependencies]
 serde_json = { workspace = true }
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "sync"] }
 
 # All-features render: the reqwest-gated module and re-export would otherwise
 # be dead intra-doc links.
