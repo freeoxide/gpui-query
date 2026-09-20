@@ -92,6 +92,29 @@ fn sanitized_redacts_email_local_part_containing_underscore() {
 }
 
 #[test]
+fn sanitized_redacts_email_with_digit_bearing_tld() {
+    let clean = QueryError::response("login failed for alice@corp.c0m").sanitized();
+    assert!(!clean.message().contains("alice"));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_redacts_email_with_two_char_digit_tld() {
+    let clean = QueryError::response("no user bob@x.c0 registered").sanitized();
+    assert!(!clean.message().contains("bob"));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_leaves_digit_first_tld_notation_untouched() {
+    let clean = QueryError::response("pinned pkg@1.2.10, art@v1.2x, eve@x.c0-m").sanitized();
+    assert!(clean.message().contains("pkg@1.2.10"));
+    assert!(clean.message().contains("art@v1.2x"));
+    assert!(clean.message().contains("eve@x.c0-m"));
+    assert!(!clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
 fn sanitized_redacts_mongodb_connection_string() {
     let clean = QueryError::transport("connect mongodb://admin:secret@host/db failed").sanitized();
     assert!(clean.message().contains("[REDACTED_CONNECTION]"));
