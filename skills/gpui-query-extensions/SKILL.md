@@ -123,7 +123,7 @@ impl QueryClient {
 |---|---|---|
 | `filter` | `PersistFilter` | `PersistFilter::All` |
 | `max_age` | `std::time::Duration` | `Duration::from_secs(24 * 60 * 60)` (24h); entries older than this at save time are skipped |
-| `debounce` | `std::time::Duration` | `Duration::from_millis(500)`; `Duration::ZERO` disables the timer window (saves still serialize through the drain slot) |
+| `debounce` | `std::time::Duration` | `Duration::from_millis(500)`; `Duration::ZERO` disables the timer window (saves still run at most one per debounce window) |
 
 ```rust
 #[derive(Clone, Debug)]

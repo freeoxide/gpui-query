@@ -184,17 +184,17 @@ Three policies:
 Bulk operations on the `QueryClient`:
 
 ```rust
-let client = cx.global::<QueryClient>();
+cx.update_global::<QueryClient, _>(|client, cx| {
+    // Invalidate all queries with a matching key prefix
+    client.invalidate_queries(&QueryKeyFilter::Prefix(&QueryKey::from(["users"])), cx);
 
-// Invalidate all queries with a matching key prefix
-client.invalidate_queries(&QueryKeyFilter::Prefix(&QueryKey::from(["users"])), cx);
+    // Remove everything
+    client.remove_queries(&QueryKeyFilter::All);
 
-// Remove everything
-client.remove_queries(&QueryKeyFilter::All);
-
-// Optimistic update; the previous value is kept for the resource's
-// rollback_to_previous()
-client.set_query_data::<Vec<User>, MyError>(&key, vec![new_user], cx);
+    // Optimistic update; the previous value is kept for the resource's
+    // rollback_to_previous()
+    client.set_query_data::<Vec<User>, MyError>("users", vec![new_user], cx);
+});
 ```
 
 Invalidation matching supports `Exact`, `Prefix`, and `All` filters via `QueryKeyFilter`.
