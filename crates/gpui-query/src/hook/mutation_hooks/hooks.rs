@@ -73,27 +73,6 @@ where
     (entity, subscription)
 }
 
-/// Deprecated alias of [`use_mutation`], which now takes `MutationOptions`
-/// via `Into`.
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `use_mutation(options, cx)` instead — it now accepts MutationOptions via Into"
-)]
-// Not re-exported: pub inside a private module, so no caller can reach it.
-#[allow(dead_code)]
-pub fn use_mutation_with_options<V, T, E, C>(
-    options: &MutationOptions,
-    cx: &mut Context<C>,
-) -> (Entity<MutationResource<V, T, E>>, Subscription)
-where
-    V: Clone + Send + Sync + 'static,
-    T: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + 'static,
-    C: 'static,
-{
-    use_mutation(options.clone(), cx)
-}
-
 /// All registered mutations for the `(V, T, E)` triple; empty when none exist or no [`QueryClient`] is set.
 ///
 /// # Example
