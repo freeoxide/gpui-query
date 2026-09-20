@@ -60,8 +60,8 @@ impl<B: HttpBackend> HttpCache<B> {
     /// Fetches `url`: a fresh entry skips the network, a stale one
     /// revalidates. Returns `(body, policy, meta)`: only a cacheable `200`
     /// stores and yields `meta`, a `304` re-serves the cached body and
-    /// restarts its freshness window, and everything else is
-    /// [`CachePolicy::NoCache`] with `None`.
+    /// refreshes the stored entry unless its own `Cache-Control` blocks
+    /// caching, and everything else is [`CachePolicy::NoCache`] with `None`.
     pub async fn fetch(
         &self,
         url: &str,
@@ -98,10 +98,8 @@ impl<B: HttpBackend> HttpCache<B> {
             if let Some(old) = cached_meta.as_ref()
                 && let Some(meta) = refreshed_meta(&resp.headers, old)
             {
-                {
-                    let mut guard = self.meta.lock().map_err(|_| HttpError::Poisoned)?;
-                    guard.insert(url.to_string(), meta.clone());
-                }
+                let mut guard = self.meta.lock().map_err(|_| HttpError::Poisoned)?;
+                guard.insert(url.to_string(), meta.clone());
                 return Ok((body, policy_from_meta(&meta), Some(meta)));
             }
             let policy = cached_meta
