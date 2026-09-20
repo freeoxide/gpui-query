@@ -76,11 +76,8 @@ impl FilePersister {
             .lock()
             .map_err(|_| PersistError::Permission("write lock poisoned".to_string()))?;
 
-        if let Some(parent) = self.path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            fs::create_dir_all(parent)?;
-        }
+        let parent = effective_parent(&self.path);
+        fs::create_dir_all(parent)?;
 
         let bytes: Vec<u8> = match self.format {
             PersistFormat::Json => serde_json::to_vec(snapshot)?,
@@ -93,7 +90,6 @@ impl FilePersister {
             }
         };
 
-        let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         let mut tmp = tempfile::Builder::new()
             .prefix(
                 self.path
@@ -281,22 +277,23 @@ fn try_fullfsync(file: &File) {
 /// fsync the parent directory so the rename is durable across power loss.
 #[cfg(unix)]
 fn fsync_parent(parent: &Path) {
-    use std::os::fd::AsRawFd;
     match OpenOptions::new().read(true).open(parent) {
         Ok(dir) => {
-            unsafe extern "C" {
-                fn fsync(fd: std::ffi::c_int) -> std::ffi::c_int;
-            }
-            // SAFETY: fd is a valid open directory file descriptor.
-            let rc = unsafe { fsync(dir.as_raw_fd()) };
-            if rc != 0 {
-                eprintln!("FilePersister: parent-dir fsync failed");
+            if let Err(e) = dir.sync_all() {
+                eprintln!("FilePersister: parent-dir fsync failed: {e}");
             }
         }
         Err(e) => {
             eprintln!("FilePersister: could not open parent dir for fsync: {e}");
         }
     }
+}
+
+/// A bare filename has `parent() == Some("")`, which `open`/`create_dir_all` reject or skip.
+fn effective_parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
 }
 
 #[cfg(test)]
@@ -331,6 +328,33 @@ mod tests {
         assert!(
             loaded.entries.is_empty(),
             "corrupt inner JSON -> empty snapshot"
+        );
+    }
+
+    #[test]
+    fn bincode_corrupt_meta_json_is_tolerated() {
+        let adapter = BincodeSnapshot {
+            entries: HashMap::from([(
+                "users::42".to_string(),
+                BincodeEntry {
+                    value_json: "null".to_string(),
+                    cached_at: 0,
+                    cache_policy: CachePolicy::NoCache,
+                    meta_json: Some("{ this is not valid json".to_string()),
+                },
+            )]),
+            version: PERSIST_VERSION,
+        };
+        let bytes = bincode::serialize(&adapter).expect("serialize adapter frame");
+        assert!(bincode_load(&bytes).is_err());
+    }
+
+    #[test]
+    fn effective_parent_of_bare_filename_is_dot() {
+        assert_eq!(effective_parent(Path::new("cache.json")), Path::new("."));
+        assert_eq!(
+            effective_parent(Path::new("a/b/cache.json")),
+            Path::new("a/b")
         );
     }
 }
