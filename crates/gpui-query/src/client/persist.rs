@@ -325,9 +325,9 @@ impl QueryClient {
                     };
                     // Collect on the main thread (entity reads), save on background (IO).
                     bg.spawn(async move {
-                        if let Err(err) = persister.save(&snapshot).await {
+                        if let Err(_err) = persister.save(&snapshot).await {
                             #[cfg(debug_assertions)]
-                            eprintln!("persist_with: save failed: {err}");
+                            eprintln!("persist_with: save failed: {_err}");
                         }
                     })
                     .detach();
