@@ -43,11 +43,12 @@ The `core` layer also builds for `wasm32-unknown-unknown`; the wasm-specific set
 
 Set up the `QueryClient` as a GPUI global when your app starts:
 
-```rust
-use gpui::App;
+```rust,no_run
+use gpui::Application;
+# use gpui::BorrowAppContext;
 use gpui_query::QueryClient;
 
-App::new().run(|cx| {
+Application::new().run(|cx| {
     cx.set_global(QueryClient::new());
     // ... your views
 });
@@ -55,8 +56,18 @@ App::new().run(|cx| {
 
 Fetch data with `use_query`:
 
-```rust
-use gpui_query::{use_query, QueryOptions};
+```rust,no_run
+use gpui_query::use_query;
+# use gpui::{Context, Entity, Subscription};
+# use gpui_query::QueryResource;
+# struct MyView;
+# #[derive(Clone)]
+# struct User;
+# #[derive(Clone, Debug)]
+# struct MyError;
+# async fn fetch_users() -> Result<Vec<User>, MyError> {
+#     Ok(vec![])
+# }
 
 fn setup_query(cx: &mut Context<MyView>) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
     use_query(
@@ -73,13 +84,27 @@ fn setup_query(cx: &mut Context<MyView>) -> (Entity<QueryResource<Vec<User>, MyE
 
 Read the state in your render method:
 
-```rust
-let label = self.query_entity.read_with(cx, |resource| match resource.status() {
+```rust,no_run
+# use gpui::{Context, Entity};
+# use gpui_query::{QueryResource, QueryStatus};
+# #[derive(Clone)]
+# struct User;
+# #[derive(Clone, Debug)]
+# struct MyError;
+# struct MyView {
+#     query_entity: Entity<QueryResource<Vec<User>, MyError>>,
+# }
+# impl MyView {
+#     fn label(&self, cx: &Context<Self>) -> &'static str {
+let label = self.query_entity.read_with(cx, |resource, _| match resource.status() {
     QueryStatus::LoadingEmpty => "Loading...",
     QueryStatus::Success => "Got data",
     QueryStatus::Failure => "Error",
     _ => "Idle",
 });
+#         label
+#     }
+# }
 ```
 
 ## architecture
@@ -107,8 +132,19 @@ persist = ["client", "hook", "dep:serde_json", "dep:thiserror"]
 
 The primary hook. Pass a key (string or `QueryOptions`), a fetcher function, and the view context. The fetcher receives a `QuerySignal` for cooperative cancellation.
 
-```rust
+```rust,no_run
 use gpui_query::{use_query, QueryOptions, CachePolicy, RetryPolicy};
+# use gpui::Context;
+# use gpui_query::QuerySignal;
+# #[derive(Clone)]
+# struct User;
+# #[derive(Clone, Debug)]
+# struct MyError;
+# fn doc<C: 'static, F, Fut>(cx: &mut Context<C>, fetcher: F)
+# where
+#     F: Fn(QuerySignal) -> Fut + Copy + Send + 'static,
+#     Fut: std::future::Future<Output = Result<Vec<User>, MyError>> + Send + 'static,
+# {
 
 // Simple key
 let (entity, sub) = use_query("users", fetcher, cx);
@@ -121,6 +157,8 @@ let (entity, sub) = use_query(
     fetcher,
     cx,
 );
+# let _ = (entity, sub);
+# }
 ```
 
 `QueryResource<T,E>` tracks the full lifecycle: idle, loading (with or without previous data), success, failure, or cancelled. You get `data()`, `error()`, `status()`, `is_loading()`, `has_data()`, `cache_age_ms(now_ms)`, and `retry_count()`.
@@ -129,8 +167,26 @@ For manual control with no auto-fetch, use `use_query_manual` and trigger fetche
 
 ## mutations
 
-```rust
+```rust,no_run
 use gpui_query::{use_mutation, mutate, MutationCallbacks};
+# use gpui::Context;
+# use gpui_query::mutate_with_callbacks;
+# #[derive(Clone)]
+# struct NewUser {
+#     name: &'static str,
+# }
+# #[derive(Clone)]
+# struct User;
+# #[derive(Clone, Debug)]
+# struct MyError;
+# async fn create_user(vars: NewUser) -> User {
+#     let _ = vars;
+#     User
+# }
+# fn doc<C: 'static>(cx: &mut Context<C>) {
+#     let variables = NewUser { name: "Ada" };
+#     let mutator =
+#         |vars: NewUser| async move { Ok::<User, MyError>(create_user(vars).await) };
 
 let (entity, sub) = use_mutation((), cx);
 
@@ -149,6 +205,7 @@ mutate_with_callbacks(
         .on_error(|err| eprintln!("mutation failed: {err:?}")),
     cx,
 );
+# }
 ```
 
 Mutations track their own state in `MutationResource<V,T,E>` with a begin/complete/retry/reset lifecycle. They don't touch the query cache unless you explicitly invalidate queries in an `on_success` callback.
@@ -157,18 +214,42 @@ Mutations track their own state in `MutationResource<V,T,E>` with a begin/comple
 
 For paginated data. The fetcher receives the last page (or `None` for the first request) and returns `(page_data, has_more)`.
 
-```rust
+```rust,no_run
 use gpui_query::{use_infinite_query, InfiniteQueryOptions};
+# use gpui::Context;
+# #[derive(Clone, Debug)]
+# struct MyError;
+# #[derive(Clone)]
+# struct Page {
+#     cursor: u32,
+# }
+# impl Page {
+#     fn cursor(&self) -> u32 {
+#         self.cursor
+#     }
+# }
+# struct FetchedPage {
+#     items: Page,
+#     has_more: bool,
+# }
+# async fn fetch_page(cursor: Option<u32>) -> Result<FetchedPage, MyError> {
+#     let _ = cursor;
+#     Ok(FetchedPage { items: Page { cursor: 0 }, has_more: false })
+# }
+# fn doc<C: 'static>(cx: &mut Context<C>) {
 
 let (entity, sub) = use_infinite_query(
     InfiniteQueryOptions::new("feed").max_pages(10),
-    |last_page| async move {
+    |last_page: Option<&Page>| {
         let cursor = last_page.map(|p| p.cursor());
-        let page = fetch_page(cursor).await?;
-        Ok::<_, MyError>((page.items, page.has_more))
+        async move {
+            let page = fetch_page(cursor).await?;
+            Ok::<_, MyError>((page.items, page.has_more))
+        }
     },
     cx,
 );
+# }
 ```
 
 Pages are stored in a `VecDeque`. Default cap is 50 pages, configurable via `max_pages()`. Supports bidirectional fetching with `fetch_next_page_infinite` and `fetch_previous_page_infinite`.
@@ -183,7 +264,17 @@ Three policies:
 
 Bulk operations on the `QueryClient`:
 
-```rust
+```rust,no_run
+# use gpui::App;
+# use gpui::AppContext;
+# use gpui::BorrowAppContext;
+# use gpui_query::client::QueryClient;
+# use gpui_query::{QueryKey, QueryKeyFilter};
+# #[derive(Clone)]
+# struct User;
+# #[derive(Clone, Debug)]
+# struct MyError;
+# fn doc(cx: &mut App, new_user: User) {
 cx.update_global::<QueryClient, _>(|client, cx| {
     // Invalidate all queries with a matching key prefix
     client.invalidate_queries(&QueryKeyFilter::Prefix(&QueryKey::from(["users"])), cx);
@@ -195,6 +286,7 @@ cx.update_global::<QueryClient, _>(|client, cx| {
     // rollback_to_previous()
     client.set_query_data::<Vec<User>, MyError>("users", vec![new_user], cx);
 });
+# }
 ```
 
 Invalidation matching supports `Exact`, `Prefix`, and `All` filters via `QueryKeyFilter`.
@@ -220,19 +312,25 @@ Retry delay is `base * 2^attempt`, capped at `max_delay`. The fetcher's `QuerySi
 
 Enable the `persist` feature to save and restore the cache across restarts. Implement the async `Persister` trait, then drive it with `QueryClient::persist_with` (debounced snapshot saves) and the free `hydrate` function (cold-start restore):
 
-```rust
+```rust,no_run
 use std::time::Duration;
 use gpui_query::client::{
     QueryClient, Persister, PersistSnapshot, PersistError, PersistOptions, PersistFilter,
 };
+# use gpui::App;
 
 struct MyPersister; // your backend: file, db, kv, …
 
 impl Persister for MyPersister {
-    async fn load(&self) -> Result<PersistSnapshot, PersistError> { /* … */ }
-    async fn save(&self, _snapshot: &PersistSnapshot) -> Result<(), PersistError> { /* … */ }
+    async fn load(&self) -> Result<PersistSnapshot, PersistError> {
+        Ok(PersistSnapshot::new())
+    }
+    async fn save(&self, _snapshot: &PersistSnapshot) -> Result<(), PersistError> {
+        Ok(())
+    }
 }
 
+# async fn doc(mut client: &mut QueryClient, cx: &mut App) {
 // Debounced saves: coalesces bursts of cache mutations into one snapshot.
 let _handle = client.persist_with(MyPersister, PersistOptions::default(), cx);
 
@@ -240,6 +338,7 @@ let _handle = client.persist_with(MyPersister, PersistOptions::default(), cx);
 gpui_query::client::hydrate(
     &mut client, &MyPersister, &PersistFilter::All, Duration::from_secs(86_400), cx,
 ).await.ok();
+# }
 ```
 
 Only `Success` entries with a registered serializer are persisted; the typed round-trip is driven by `QueryClient::register_serializer` / `register_deserializer`. The companion crate **`gpui-query-persist`** ships a ready-made atomic disk adapter (`FilePersister`). See the [Persistence guide](https://gpui-query.freeoxide.com/docs/guides/persistence).

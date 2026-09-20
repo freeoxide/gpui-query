@@ -33,11 +33,12 @@ The `core` layer also builds for `wasm32-unknown-unknown`: the crate swaps ahash
 
 Set up a `QueryClient` as a GPUI global when your app starts:
 
-```rust
-use gpui::App;
+```rust,no_run
+use gpui::Application;
+# use gpui::BorrowAppContext;
 use gpui_query::QueryClient;
 
-App::new().run(|cx| {
+Application::new().run(|cx| {
     cx.set_global(QueryClient::new());
     // ... your views
 });
@@ -45,8 +46,18 @@ App::new().run(|cx| {
 
 Create a query in your view:
 
-```rust
-use gpui_query::{use_query, QueryOptions};
+```rust,no_run
+use gpui_query::use_query;
+# use gpui::{Context, Entity, Subscription};
+# use gpui_query::QueryResource;
+# struct MyView;
+# #[derive(Clone)]
+# struct User;
+# #[derive(Clone, Debug)]
+# struct MyError;
+# async fn fetch_users() -> Result<Vec<User>, MyError> {
+#     Ok(vec![])
+# }
 
 fn setup_query(cx: &mut Context<MyView>) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
     use_query(
@@ -62,13 +73,27 @@ fn setup_query(cx: &mut Context<MyView>) -> (Entity<QueryResource<Vec<User>, MyE
 
 Read the state in `render`:
 
-```rust
-let label = self.query_entity.read_with(cx, |resource| match resource.status() {
+```rust,no_run
+# use gpui::{Context, Entity};
+# use gpui_query::{QueryResource, QueryStatus};
+# #[derive(Clone)]
+# struct User;
+# #[derive(Clone, Debug)]
+# struct MyError;
+# struct MyView {
+#     query_entity: Entity<QueryResource<Vec<User>, MyError>>,
+# }
+# impl MyView {
+#     fn label(&self, cx: &Context<Self>) -> &'static str {
+let label = self.query_entity.read_with(cx, |resource, _| match resource.status() {
     QueryStatus::LoadingEmpty => "Loading...",
     QueryStatus::Success => "Got data",
     QueryStatus::Failure => "Error",
     _ => "Idle",
 });
+#         label
+#     }
+# }
 ```
 
 ## Feature layers

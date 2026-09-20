@@ -451,3 +451,9 @@ mod tests {
         assert_eq!(back.stored_at, meta.stored_at);
     }
 }
+
+#[cfg(all(doctest, feature = "reqwest"))]
+mod readme_doctests {
+    #[doc = include_str!("../README.md")]
+    struct Readme;
+}

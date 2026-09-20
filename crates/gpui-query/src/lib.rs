@@ -32,3 +32,15 @@ pub use hook::*;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(doctest, feature = "hook"))]
+mod readme_doctests {
+    #[doc = include_str!("../README.md")]
+    struct Readme;
+}
+
+#[cfg(all(doctest, feature = "persist"))]
+mod repo_readme_doctests {
+    #[doc = include_str!("../../../README.md")]
+    struct RepoReadme;
+}
