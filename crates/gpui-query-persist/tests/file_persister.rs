@@ -308,16 +308,20 @@ fn file_persister_non_utf8_json_yields_empty_snapshot() {
 fn file_persister_deeply_nested_json_yields_empty_snapshot() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cache.json");
-    let mut deep = Vec::with_capacity(20_000);
+    let mut deep = Vec::with_capacity(20_091);
+    deep.extend_from_slice(br#"{"entries":{"k":{"value":"#);
     deep.extend(std::iter::repeat_n(b'[', 10_000));
     deep.extend(std::iter::repeat_n(b']', 10_000));
+    deep.extend_from_slice(
+        br#","cached_at":0,"cache_policy":"NoCache","meta":null}},"version":1}"#,
+    );
     std::fs::write(&path, deep).expect("write deep nesting");
 
     let p = FilePersister::json(&path);
     let loaded = pollster::block_on(p.load()).expect("tolerant load");
     assert!(
         loaded.entries.is_empty(),
-        "10k-deep nesting -> empty snapshot"
+        "10k-deep nesting inside an entry value -> empty snapshot"
     );
 }
 
