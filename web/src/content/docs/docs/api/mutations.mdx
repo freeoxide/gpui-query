@@ -248,7 +248,7 @@ Callbacks fire on the final outcome only. Intermediate retry attempts do not tri
 
 ## `RetryPolicy`
 
-Shared between queries and mutations. See the [Queries](/docs/api/queries) page for the full reference. The defaults for mutations differ: `use_mutation` creates a resource with `RetryPolicy::no_retries()`, while `MutationOptions::new()` also defaults to no retries.
+Shared between queries and mutations. See the [Queries](/docs/api/queries) page for the full reference. The defaults for mutations differ: `use_mutation` creates a resource with `RetryPolicy::no_retries()`, while `MutationOptions::default()` also defaults to no retries.
 
 To add retries:
 
