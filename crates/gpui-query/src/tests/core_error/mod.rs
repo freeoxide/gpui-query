@@ -115,6 +115,42 @@ fn sanitized_leaves_digit_first_tld_notation_untouched() {
 }
 
 #[test]
+fn sanitized_redacts_email_with_digit_first_obfuscated_tld() {
+    let clean = QueryError::response("login eve@x.0rg denied").sanitized();
+    assert!(!clean.message().contains("eve@x.0rg"));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_redacts_email_with_digit_first_multi_letter_tld() {
+    let clean = QueryError::response("user admin@corp.1nfo not found").sanitized();
+    assert!(!clean.message().contains("admin@corp.1nfo"));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_redacts_email_with_trailing_fqdn_dot() {
+    let clean = QueryError::response("contact alice@corp.com. now").sanitized();
+    assert!(!clean.message().contains("alice@corp.com."));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_redacts_email_with_digit_tld_and_trailing_dot() {
+    let clean = QueryError::response("leak bob@corp.c0m. here").sanitized();
+    assert!(!clean.message().contains("bob@corp.c0m."));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_leaves_trailing_dot_notation_untouched() {
+    let clean = QueryError::response("seen user@2x. and host foo@bar.").sanitized();
+    assert!(clean.message().contains("user@2x."));
+    assert!(clean.message().contains("foo@bar."));
+    assert!(!clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
 fn sanitized_redacts_mongodb_connection_string() {
     let clean = QueryError::transport("connect mongodb://admin:secret@host/db failed").sanitized();
     assert!(clean.message().contains("[REDACTED_CONNECTION]"));

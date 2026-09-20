@@ -183,7 +183,7 @@ fn redact_emails(input: Cow<'_, str>) -> Cow<'_, str> {
     result.into()
 }
 
-/// TLD contract: at least 2 chars, letter-first, alphanumeric; `c0m` and `c0` redact, while digit-first tails (`2x`, `1.2.10`, version and scale notation) pass through.
+/// TLD contract: >= 2 chars, all-alphanumeric, letter-first or >= 2 letters (`c0m`/`c0`/`0rg` redact; `2x`, `1.2.10` pass); a trailing FQDN dot is trimmed for the slice but stays inside the redaction.
 fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
     let len = chars.len();
     if start >= len {
@@ -209,14 +209,23 @@ fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
         i += 1;
     }
 
+    let scan_end = i;
+    while i > start && chars[i - 1] == '.' {
+        i -= 1;
+    }
+
     let domain_end = i;
     if domain_end <= start + 2 {
         return None;
     }
     let dot_pos = (start..domain_end).rev().find(|&j| chars[j] == '.')?;
     let tld = &chars[dot_pos + 1..domain_end];
-    if tld.len() >= 2 && tld[0].is_alphabetic() && tld.iter().all(|c| c.is_alphanumeric()) {
-        Some(domain_end)
+    let letters = tld.iter().filter(|c| c.is_alphabetic()).count();
+    if tld.len() >= 2
+        && tld.iter().all(|c| c.is_alphanumeric())
+        && (tld[0].is_alphabetic() || letters >= 2)
+    {
+        Some(scan_end)
     } else {
         None
     }
