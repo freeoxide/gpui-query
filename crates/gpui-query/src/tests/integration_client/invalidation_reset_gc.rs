@@ -4,6 +4,24 @@ use crate::client::QueryClient;
 use crate::core::*;
 use crate::tests::test_support::*;
 
+fn create_success_at_time(
+    client: &mut QueryClient,
+    cx: &mut gpui::App,
+    key: &str,
+    data: &str,
+    success_time_ms: u64,
+) {
+    let entity = client.resource_with_policies::<String, QueryError>(
+        QueryKey::from(key),
+        CachePolicy::Ttl { ttl_ms: 60_000 },
+        RequestPolicy::LatestWins,
+        cx,
+    );
+    entity.update(cx, |r, _| {
+        r.apply_success(data.to_string(), success_time_ms)
+    });
+}
+
 #[gpui::test]
 fn test_invalidate_queries_exact_filter(cx: &mut TestAppContext) {
     setup_query_client(cx);
@@ -306,6 +324,67 @@ fn test_gc_across_multiple_type_buckets(cx: &mut TestAppContext) {
             assert!(
                 client.all_queries::<u32, QueryError>().is_empty(),
                 "idle u32 resource evicted"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_mixed_states_precise_eviction(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let prepared = client
+                .prepare_fetch_query::<String, QueryError>("loading", cx)
+                .expect("should start");
+
+            create_success_at_time(client, cx, "success_fresh", "data", 1_000);
+
+            create_success_at_time(client, cx, "success_old", "data", 0);
+
+            assert_eq!(client.all_queries::<String, QueryError>().len(), 3);
+
+            client.gc_with_time(2_500, cx);
+
+            let remaining = client.all_queries::<String, QueryError>();
+            assert_eq!(
+                remaining.len(),
+                2,
+                "exactly 1 of 3 resources should be evicted"
+            );
+
+            let remaining_keys: Vec<String> = remaining
+                .iter()
+                .map(|e| e.read(cx).key().to_path())
+                .collect();
+            assert!(
+                remaining_keys.contains(&"loading".to_string()),
+                "loading should survive: {:?}",
+                remaining_keys
+            );
+            assert!(
+                remaining_keys.contains(&"success_fresh".to_string()),
+                "success_fresh should survive: {:?}",
+                remaining_keys
+            );
+
+            prepared.complete_success("data".to_string(), cx);
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_boundary_success_threshold_exact(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("boundary");
+            create_success_at_time(client, cx, "boundary", "data", 1_000);
+
+            client.gc_with_time(3_000, cx);
+            assert!(
+                client.query::<String, QueryError>(&key).is_none(),
+                "age=2000ms == success_threshold=2000ms => must be evicted (>= boundary)"
             );
         });
     });

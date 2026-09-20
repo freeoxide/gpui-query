@@ -362,6 +362,101 @@ fn test_hydrate_rejects_version_mismatch(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn test_hydrate_hostile_entries_skip_without_panicking(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+
+    let now = crate::client::current_time_ms();
+    let mut snap = PersistSnapshot {
+        entries: Default::default(),
+        version: crate::client::PERSIST_VERSION,
+    };
+    snap.entries.insert(
+        "hostile_shape".to_string(),
+        PersistedEntry {
+            value: serde_json::json!({"evil": [1, null, "x"]}),
+            cached_at: now,
+            cache_policy: crate::core::CachePolicy::default(),
+            meta: None,
+        },
+    );
+    snap.entries.insert(
+        "future_cached_at".to_string(),
+        PersistedEntry {
+            value: serde_json::json!("future"),
+            cached_at: u64::MAX,
+            cache_policy: crate::core::CachePolicy::default(),
+            meta: None,
+        },
+    );
+    snap.entries.insert(
+        "ancient_cached_at".to_string(),
+        PersistedEntry {
+            value: serde_json::json!("ancient"),
+            cached_at: 0,
+            cache_policy: crate::core::CachePolicy::default(),
+            meta: None,
+        },
+    );
+    *persister.load_value.lock().unwrap() = Some(snap);
+
+    struct H {
+        hostile: Entity<QueryResource<String, QueryError>>,
+        future: Entity<QueryResource<String, QueryError>>,
+        ancient: Entity<QueryResource<String, QueryError>>,
+    }
+    let harness = cx.new(|cx| {
+        cx.update_global::<QueryClient, _>(|client, _cx| {
+            client
+                .register_deserializer::<String, QueryError>(|v| v.as_str().map(|s| s.to_string()));
+        });
+        let hostile = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.resource::<String, QueryError>(QueryKey::from("hostile_shape"), cx)
+        });
+        let future = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.resource::<String, QueryError>(QueryKey::from("future_cached_at"), cx)
+        });
+        let ancient = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.resource::<String, QueryError>(QueryKey::from("ancient_cached_at"), cx)
+        });
+        H {
+            hostile,
+            future,
+            ancient,
+        }
+    });
+
+    let outcome = cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            block_on_ready(hydrate(
+                client,
+                &persister,
+                &PersistFilter::All,
+                Duration::from_secs(60),
+                cx,
+            ))
+        })
+    });
+    assert!(outcome.is_ok(), "hostile entries must not fail hydrate");
+
+    cx.update(|cx| {
+        assert!(
+            harness.read(cx).hostile.read(cx).data().is_none(),
+            "a value with a hostile JSON shape must be skipped, not primed or panicked on"
+        );
+        assert!(
+            harness.read(cx).ancient.read(cx).data().is_none(),
+            "an entry older than max_age must be filtered out"
+        );
+        assert_eq!(
+            harness.read(cx).future.read(cx).data(),
+            Some(&"future".to_string()),
+            "u64::MAX cached_at must saturate to age 0 and stay hydratable"
+        );
+    });
+}
+
+#[gpui::test]
 fn test_persist_with_driven_by_real_fetch_completion(cx: &mut TestAppContext) {
     setup_query_client(cx);
     let persister = MemPersister::default();

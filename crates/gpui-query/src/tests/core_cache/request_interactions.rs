@@ -122,6 +122,25 @@ fn record_cache_hit_does_not_clear_failure_status() {
 }
 
 #[test]
+fn record_cache_hit_does_not_clear_cancelled_status() {
+    let mut r = ttl_resource();
+    seed_data(&mut r, "data", STORED_AT_MS);
+
+    let mut seq = test_sequencer();
+    let _ = r.begin_request(&mut seq, STORED_AT_MS + 100, QueryFetchMode::Force);
+    r.cancel(QueryError::cancelled("abort"));
+    assert_eq!(r.status(), QueryStatus::Cancelled);
+
+    r.record_cache_hit();
+    assert_eq!(
+        r.status(),
+        QueryStatus::Cancelled,
+        "cache hit should not clear Cancelled status"
+    );
+    assert_eq!(r.cache_hits(), 1);
+}
+
+#[test]
 fn cache_policy_accessor_roundtrip() {
     let mut r = ttl_resource();
     assert_eq!(r.cache_policy(), CachePolicy::Ttl { ttl_ms: TTL_MS });

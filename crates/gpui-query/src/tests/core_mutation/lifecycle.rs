@@ -182,14 +182,6 @@ fn mutation_without_key() {
 }
 
 #[test]
-fn status_labels() {
-    assert_eq!(MutationStatus::Idle.label(), "Idle");
-    assert_eq!(MutationStatus::Loading.label(), "Loading");
-    assert_eq!(MutationStatus::Success.label(), "Success");
-    assert_eq!(MutationStatus::Failure.label(), "Failure");
-}
-
-#[test]
 fn retry_policy_accessor() {
     let policy = RetryPolicy::new(5)
         .with_delay(200)

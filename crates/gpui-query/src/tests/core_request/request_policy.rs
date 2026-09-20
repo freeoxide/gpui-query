@@ -85,6 +85,24 @@ fn ignore_while_loading_rejects_new_request_when_loading() {
 }
 
 #[test]
+fn ignore_while_loading_rejects_forced_fetch_when_loading() {
+    let mut resource: QueryResource<&str> = test_resource_with_policies(
+        "key",
+        CachePolicy::NoCache,
+        RequestPolicy::IgnoreWhileLoading,
+    );
+    let mut seq = test_sequencer();
+
+    let _ = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
+
+    let result = resource.begin_request(&mut seq, TEST_NOW_MS, QueryFetchMode::Force);
+    assert!(
+        matches!(result, QueryBeginResult::IgnoredWhileLoading { .. }),
+        "Force mode should still respect IgnoreWhileLoading"
+    );
+}
+
+#[test]
 fn ignore_while_loading_allows_new_request_after_completion() {
     let mut resource: QueryResource<&str> = test_resource_with_policies(
         "key",

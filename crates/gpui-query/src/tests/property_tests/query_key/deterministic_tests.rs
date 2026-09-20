@@ -3,6 +3,51 @@ use crate::core::*;
 use super::strategies::*;
 
 #[test]
+fn key_join_appends_and_chains_segments() {
+    let key = QueryKey::from(["users"]).join("42");
+    assert_eq!(key.parts().len(), 2);
+    assert_eq!(key.to_path(), "users::42");
+
+    let chained = key.join("posts");
+    assert_eq!(chained.parts().len(), 3);
+    assert_eq!(chained.to_path(), "users::42::posts");
+    assert_eq!(key.parts().len(), 2, "join must not mutate the receiver");
+}
+
+#[test]
+fn key_from_vec_string() {
+    let key = QueryKey::from(vec!["users".to_string(), "42".to_string()]);
+    assert_eq!(key.parts().len(), 2);
+    assert_eq!(key.to_path(), "users::42");
+}
+
+#[test]
+fn key_deref_allows_indexing_and_len() {
+    let key = QueryKey::from(["a", "b", "c"]);
+    assert_eq!(&*key[0], "a");
+    assert_eq!(&*key[2], "c");
+    assert_eq!(key.len(), 3);
+}
+
+#[test]
+fn key_deserialize_accepts_single_string() {
+    let key: QueryKey = serde_json::from_str("\"users\"").unwrap();
+    assert_eq!(key.parts().len(), 1);
+    assert_eq!(key.first_segment(), "users");
+}
+
+#[test]
+fn key_deserialize_rejects_malformed_shapes() {
+    for json in ["null", "42", "[\"a\", 1]", "[[\"a\"]]", "[]", "{}"] {
+        let result: Result<QueryKey, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "malformed input {json} must Err, not panic or accept"
+        );
+    }
+}
+
+#[test]
 fn key_empty_string_segment_distinguishes_from_multi() {
     let single_empty = QueryKey::from([""]);
     let two_empty = QueryKey::from(["", ""]);

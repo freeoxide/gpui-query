@@ -90,3 +90,40 @@ fn sanitized_redacts_email_local_part_containing_underscore() {
     assert!(!clean.message().contains("alice"));
     assert!(clean.message().contains("[REDACTED_EMAIL]"));
 }
+
+#[test]
+fn sanitized_redacts_mongodb_connection_string() {
+    let clean = QueryError::transport("connect mongodb://admin:secret@host/db failed").sanitized();
+    assert!(clean.message().contains("[REDACTED_CONNECTION]"));
+    assert!(!clean.message().contains("admin:secret"));
+}
+
+#[test]
+fn sanitized_empty_message_stays_empty() {
+    let clean = QueryError::response("").sanitized();
+    assert_eq!(clean.message(), "");
+}
+
+#[test]
+fn sanitized_redacts_secret_straddling_truncation_boundary() {
+    let prefix = "x".repeat(500);
+    let secret = "s3cr3tboundaryleak".to_string();
+    let msg = format!("{prefix}bearer {secret}");
+    assert!(msg.len() > 512, "precondition: message must exceed the cap");
+    let clean = QueryError::response(msg.as_str()).sanitized();
+    assert!(
+        !clean.message().contains(&secret),
+        "truncation must not resurrect a partially-redacted secret"
+    );
+    assert!(clean.message().ends_with("...[truncated]"));
+}
+
+#[test]
+fn sanitized_redacts_secret_beyond_truncation_boundary() {
+    let prefix = "x".repeat(600);
+    let msg = format!("{prefix}bearer s3cr3tfarpast");
+    let clean = QueryError::response(msg.as_str()).sanitized();
+    assert!(!clean.message().contains("s3cr3tfarpast"));
+    assert!(clean.message().ends_with("...[truncated]"));
+    assert!(clean.message().len() <= 512 + "...[truncated]".len());
+}

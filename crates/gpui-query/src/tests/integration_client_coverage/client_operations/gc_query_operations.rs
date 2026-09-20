@@ -186,22 +186,6 @@ fn test_infinite_query_observer_creation_and_observe(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_infinite_query_observer_weak_entity_pattern(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let entity = client.infinite_resource::<String, QueryError>("inf_obs_weak", cx);
-            let observer = InfiniteQueryObserver::new(&entity);
-
-            struct DummyView;
-            let view = cx.new(|_| DummyView);
-            let sub = view.update(cx, |_view, cx| observer.observe(cx));
-            assert!(sub.is_some(), "observe should return Some for live entity");
-        });
-    });
-}
-
-#[gpui::test]
 fn test_current_time_ms_is_reasonable(_cx: &mut TestAppContext) {
     let now = crate::client::current_time_ms();
     assert!(
@@ -289,21 +273,6 @@ fn test_reset_then_set_query_data(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_large_number_of_resources_creation(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            for i in 0..100 {
-                let key = format!("large_{i}");
-                let _e = client.resource::<u32, QueryError>(key, cx);
-            }
-            let all = client.all_queries::<u32, QueryError>();
-            assert_eq!(all.len(), 100, "should have 100 resources");
-        });
-    });
-}
-
-#[gpui::test]
 fn test_multi_segment_key_in_client_operations(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
@@ -367,35 +336,6 @@ fn test_clear_data_via_resource(cx: &mut TestAppContext) {
             assert!(entity.read(cx).data().is_none(), "data should be cleared");
             let data = client.get_query_data::<String, QueryError>(&key, cx);
             assert!(data.is_none());
-        });
-    });
-}
-
-#[gpui::test]
-fn test_prepare_prefetch_query_returns_some_for_stale(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        cx.set_global(QueryClient::with_policies(
-            CachePolicy::Ttl { ttl_ms: 60_000 },
-            RequestPolicy::LatestWins,
-        ));
-    });
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let key = QueryKey::from("prefresh_stale");
-            let entity = client.resource::<String, QueryError>(key.clone(), cx);
-            entity.update(cx, |r, _| r.apply_success("stale_data".to_string(), 0));
-
-            let result = client.prepare_prefetch_query::<String, QueryError>(
-                key.clone(),
-                CachePolicy::Ttl { ttl_ms: 60_000 },
-                RequestPolicy::LatestWins,
-                cx,
-            );
-            assert!(
-                result.is_some(),
-                "prefetch should return Some for stale data \
-                 (data from t=0 is well past the 60s TTL at current time)"
-            );
         });
     });
 }

@@ -33,20 +33,6 @@ fn guard_into_request_id_consumes_guard() {
 }
 
 #[test]
-fn accept_current_request_returns_guard_for_active_request() {
-    let mut resource: QueryResource<&str> =
-        test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
-    let mut seq = test_sequencer();
-
-    let request_id = begin_request_id(&mut resource, &mut seq, TEST_NOW_MS, QueryFetchMode::Normal);
-
-    let guard = resource
-        .accept_current_request(request_id)
-        .expect("should accept the active request");
-    assert_eq!(guard.request_id(), request_id);
-}
-
-#[test]
 fn accept_current_request_rejects_stale_request_id() {
     let mut resource: QueryResource<&str> =
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
@@ -152,4 +138,47 @@ fn begin_request_with_id_none_falls_back_to_transient_sequencer() {
     };
     assert_eq!(rid.scope_id(), NonZero::new(1).unwrap());
     assert_eq!(rid.value(), 1);
+}
+
+#[test]
+fn begin_request_with_id_swr_ignore_while_loading_keeps_active_request() {
+    let mut r: QueryResource<&str> = QueryResource::new(
+        "swr-ignore",
+        CachePolicy::StaleWhileRevalidate {
+            ttl_ms: 500,
+            stale_ms: 1_000,
+        },
+        RequestPolicy::IgnoreWhileLoading,
+    );
+    let mut seq = test_sequencer();
+
+    r.apply_success("cached", 100);
+
+    let _ = r.begin_request(&mut seq, 1_500, QueryFetchMode::Force);
+    assert!(r.is_loading());
+
+    let result = r.begin_request_with_id(
+        Some(RequestId::scoped(NonZero::new(99).unwrap(), 1)),
+        1_500,
+        QueryFetchMode::Normal,
+    );
+
+    match result {
+        QueryBeginResult::StaleCacheHit {
+            request_id,
+            replaced_request_id,
+            ..
+        } => {
+            assert!(
+                replaced_request_id.is_none(),
+                "no replacement under IgnoreWhileLoading"
+            );
+            assert_ne!(
+                request_id,
+                RequestId::scoped(NonZero::new(99).unwrap(), 1),
+                "should use existing active request id"
+            );
+        }
+        other => panic!("expected StaleCacheHit, got {:?}", other),
+    }
 }

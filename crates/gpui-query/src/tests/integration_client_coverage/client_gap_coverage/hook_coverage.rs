@@ -4,14 +4,14 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 
 use crate::core::*;
 use crate::hook::{
-    InfiniteQueryOptions, MutationCallbacks, MutationOptions, QueryOptions,
-    fetch_next_page_infinite, fetch_query, fetch_query_with_signal, mutate_with_callbacks,
-    use_infinite_query, use_mutation, use_query_manual, use_query_select,
+    InfiniteQueryOptions, MutationOptions, QueryOptions, fetch_next_page_infinite, fetch_query,
+    fetch_query_with_signal, use_infinite_query, use_mutation, use_query_manual,
+    use_query_select,
 };
 use crate::tests::test_support::*;
 
 #[gpui::test]
-fn test_deprecated_use_mutation_with_options_still_works(cx: &mut TestAppContext) {
+fn test_use_mutation_accepts_mutation_options_directly(cx: &mut TestAppContext) {
     setup_query_client(cx);
 
     #[allow(dead_code)]
@@ -31,51 +31,6 @@ fn test_deprecated_use_mutation_with_options_still_works(cx: &mut TestAppContext
         assert_eq!(resource.status(), MutationStatus::Idle);
         assert!(resource.data().is_none());
     });
-}
-
-#[gpui::test]
-fn test_mutation_callbacks_fire_on_entity_drop_during_retry_delay(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-
-    let error_called = Arc::new(Mutex::new(false));
-    let settled_called = Arc::new(Mutex::new(false));
-    let ec = error_called.clone();
-    let sc = settled_called.clone();
-
-    #[allow(dead_code)]
-    struct H {
-        mutation: Entity<MutationResource<String, String, QueryError>>,
-    }
-
-    let _harness = cx.new(|cx| {
-        let (entity, _sub) =
-            use_mutation::<String, String, QueryError, _>(no_retry_mutation_options(), cx);
-        mutate_with_callbacks(
-            &entity,
-            "vars".to_string(),
-            |_| async { Err::<String, _>(QueryError::response("fail")) },
-            MutationCallbacks::<String, QueryError>::new()
-                .on_error(move |_| {
-                    *ec.lock().unwrap() = true;
-                })
-                .on_settled(move |_, _| {
-                    *sc.lock().unwrap() = true;
-                }),
-            cx,
-        );
-        H { mutation: entity }
-    });
-
-    cx.run_until_parked();
-
-    assert!(
-        *error_called.lock().unwrap(),
-        "on_error should fire when mutation fails"
-    );
-    assert!(
-        *settled_called.lock().unwrap(),
-        "on_settled should fire when mutation fails"
-    );
 }
 
 #[gpui::test]

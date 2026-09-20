@@ -75,10 +75,6 @@ pub fn nocache_resource(key: impl Into<QueryKey>) -> QueryResource<&'static str>
     QueryResource::new(key, CachePolicy::NoCache, RequestPolicy::LatestWins)
 }
 
-pub fn fresh_resource() -> QueryResource<&'static str> {
-    nocache_resource("invariant-test")
-}
-
 pub fn begin_request_id(
     r: &mut QueryResource<impl Clone, impl Clone>,
     seq: &mut RequestSequencer,
@@ -95,15 +91,6 @@ pub fn begin_request_id(
             r.active_request_id(),
         ),
     }
-}
-
-pub fn complete_success_id<T, E>(
-    r: &mut QueryResource<T, E>,
-    request_id: RequestId,
-    data: T,
-    now_ms: u64,
-) -> bool {
-    r.complete_current_success(request_id, data, now_ms)
 }
 
 #[cfg(feature = "hook")]

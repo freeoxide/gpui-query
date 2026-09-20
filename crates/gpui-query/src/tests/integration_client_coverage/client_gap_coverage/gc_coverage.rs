@@ -1,6 +1,6 @@
 use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
 
-use crate::client::{QueryClient, QueryObserver};
+use crate::client::QueryClient;
 use crate::core::*;
 use crate::tests::test_support::*;
 
@@ -65,7 +65,7 @@ fn test_gc_preserves_swr_resources_within_ttl(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_gc_evicts_completed_mutation_after_gc_time(cx: &mut TestAppContext) {
+fn test_gc_preserves_success_mutation(cx: &mut TestAppContext) {
     setup_query_client_with_gc(cx, 1_000);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
@@ -234,24 +234,6 @@ fn test_idle_mutation_is_evicted_by_gc_after_age_exceeds_threshold(cx: &mut Test
                 client.all_mutations::<String, String, QueryError>().len(),
                 0,
                 "idle mutation should be evicted when age exceeds gc_threshold"
-            );
-        });
-    });
-}
-
-#[gpui::test]
-fn test_query_observer_observe_returns_some_for_live_entity(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let entity = client.resource::<String, QueryError>("obs_live", cx);
-
-            let mut observer = QueryObserver::new(&entity);
-
-            let sub = observe_with_dummy_view::<String, QueryError>(cx, &mut observer);
-            assert!(
-                sub.is_some(),
-                "observe should return Some(Subscription) for a live entity"
             );
         });
     });

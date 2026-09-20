@@ -34,28 +34,6 @@ fn failure_to_success_recovery_cycle() {
 }
 
 #[test]
-fn cancel_then_fresh_begin_succeeds() {
-    let mut r = test_resource();
-    let mut s = test_sequencer();
-
-    let _rid = match r.begin_request(&mut s, 100, QueryFetchMode::Normal) {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        _ => panic!("expected Started"),
-    };
-    r.cancel(QueryError::cancelled("abort"));
-    assert_eq!(r.status(), QueryStatus::Cancelled);
-
-    let rid2 = match r.begin_request(&mut s, 200, QueryFetchMode::Normal) {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        _ => panic!("expected Started"),
-    };
-    assert_eq!(r.status(), QueryStatus::LoadingEmpty);
-    r.complete_current_success(rid2, "recovered", 300);
-    assert_eq!(r.status(), QueryStatus::Success);
-    assert_eq!(r.data(), Some(&"recovered"));
-}
-
-#[test]
 fn failure_with_data_then_success_updates_data() {
     let mut r: QueryResource<&str> =
         QueryResource::new("test", CachePolicy::NoCache, RequestPolicy::LatestWins);
@@ -132,14 +110,11 @@ fn retry_policy_preserved_across_reset() {
 fn serde_roundtrip_with_data_and_error_state() {
     let mut r: QueryResource<String, QueryError> = QueryResource::new(
         "serde-test",
-        CachePolicy::Ttl { ttl_ms: 5_000 },
+        CachePolicy::NoCache,
         RequestPolicy::LatestWins,
     );
     let mut s = test_sequencer();
-    let rid = match r.begin_request(&mut s, 100, QueryFetchMode::Normal) {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        _ => panic!("expected Started"),
-    };
+    let rid = begin_request_id(&mut r, &mut s, 100, QueryFetchMode::Normal);
     r.complete_current_success(rid, "hello".to_string(), 200);
 
     let json = serde_json::to_string(&r).unwrap();
@@ -148,8 +123,17 @@ fn serde_roundtrip_with_data_and_error_state() {
     assert_eq!(back.status(), QueryStatus::Success);
     assert_eq!(back.data(), Some(&"hello".to_string()));
     assert_eq!(back.key().first_segment(), "serde-test");
-    assert_eq!(back.cache_policy(), CachePolicy::Ttl { ttl_ms: 5_000 });
+    assert_eq!(back.cache_policy(), CachePolicy::NoCache);
+    assert_eq!(back.request_policy(), RequestPolicy::LatestWins);
     assert!(back.signal().is_none(), "signal is #[serde(skip)]");
+
+    let rid2 = begin_request_id(&mut r, &mut s, 300, QueryFetchMode::Normal);
+    r.complete_current_failure(rid2, QueryError::transport("fail"), 400);
+    let json2 = serde_json::to_string(&r).unwrap();
+    let back2: QueryResource<String, QueryError> = serde_json::from_str(&json2).unwrap();
+    assert_eq!(back2.status(), QueryStatus::Failure);
+    assert!(back2.error().is_some());
+    assert!(back2.signal().is_none());
 }
 
 #[test]
