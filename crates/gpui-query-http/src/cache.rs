@@ -59,8 +59,9 @@ impl<B: HttpBackend> HttpCache<B> {
 
     /// Fetches `url`: a fresh entry skips the network, a stale one
     /// revalidates. Returns `(body, policy, meta)`: only a cacheable `200`
-    /// stores and yields `meta`, a `304` re-serves the cached body, and
-    /// everything else is [`CachePolicy::NoCache`] with `None`.
+    /// stores and yields `meta`, a `304` re-serves the cached body and
+    /// restarts its freshness window, and everything else is
+    /// [`CachePolicy::NoCache`] with `None`.
     pub async fn fetch(
         &self,
         url: &str,
@@ -93,10 +94,18 @@ impl<B: HttpBackend> HttpCache<B> {
                     url: url.to_string(),
                 });
             };
+            if let Some(old) = cached_meta.as_ref()
+                && let Some(meta) = refreshed_meta(&resp.headers, old)
+            {
+                {
+                    let mut guard = self.meta.lock().map_err(|_| HttpError::Poisoned)?;
+                    guard.insert(url.to_string(), meta.clone());
+                }
+                return Ok((body, policy_from_meta(&meta), Some(meta)));
+            }
             let policy = cached_meta
                 .as_ref()
-                .map(policy_from_meta)
-                .unwrap_or(CachePolicy::NoCache);
+                .map_or(CachePolicy::NoCache, policy_from_meta);
             return Ok((body, policy, cached_meta));
         }
 
@@ -177,6 +186,27 @@ fn policy_from_meta(meta: &CacheMeta) -> CachePolicy {
     }
 }
 
+/// RFC 9111 §4.3.4: a `304` updates stored fields and restarts freshness;
+/// a `no-store`/`no-cache`/malformed `Cache-Control` on it leaves the entry
+/// untouched.
+fn refreshed_meta(headers: &HeaderMap, old: &CacheMeta) -> Option<CacheMeta> {
+    let policy = if headers.contains_key(http::header::CACHE_CONTROL) {
+        match cache_policy_from_headers(headers) {
+            Ok(p) if p != CachePolicy::NoCache => Some(p),
+            _ => return None,
+        }
+    } else {
+        None
+    };
+    Some(CacheMeta {
+        etag: header_str(headers, "etag").or_else(|| old.etag.clone()),
+        last_modified: header_str(headers, "last-modified").or_else(|| old.last_modified.clone()),
+        stored_at: SystemTime::now(),
+        fresh_for: policy.map_or(old.fresh_for, fresh_for_from_policy),
+        stale_for: policy.map_or(old.stale_for, stale_for_from_policy),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,14 +275,43 @@ mod tests {
         }
     }
 
-    fn resp_304_with_etag(etag: &str) -> BackendResponse {
+    fn resp_304(cache_control: Option<&str>, etag: Option<&str>) -> BackendResponse {
         let mut headers = HeaderMap::new();
-        headers.insert(http::header::ETAG, etag.parse().unwrap());
+        if let Some(cache_control) = cache_control {
+            headers.insert(http::header::CACHE_CONTROL, cache_control.parse().unwrap());
+        }
+        if let Some(etag) = etag {
+            headers.insert(http::header::ETAG, etag.parse().unwrap());
+        }
         BackendResponse {
             status: 304,
             headers,
             body: Bytes::new(),
         }
+    }
+
+    fn seed_entry(
+        cache: &HttpCache<MockBackend>,
+        url: &str,
+        body: &'static [u8],
+        fresh_for: Duration,
+        stored_at: SystemTime,
+    ) {
+        cache.meta.lock().unwrap().insert(
+            url.to_string(),
+            CacheMeta {
+                etag: Some("\"v0\"".to_string()),
+                last_modified: None,
+                stored_at,
+                fresh_for,
+                stale_for: Duration::ZERO,
+            },
+        );
+        cache
+            .bodies
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), Bytes::copy_from_slice(body));
     }
 
     #[tokio::test]
@@ -292,7 +351,7 @@ mod tests {
     async fn not_modified_returns_cached_body() {
         let backend = MockBackend::new(vec![
             Ok(resp_200("payload", "max-age=0, stale-while-revalidate=60")),
-            Ok(resp_304_with_etag("\"v1\"")),
+            Ok(resp_304(None, Some("\"v1\""))),
         ]);
         let cache = HttpCache::new(backend);
 
@@ -386,7 +445,7 @@ mod tests {
 
     #[tokio::test]
     async fn not_modified_without_cached_body_is_typed_error() {
-        let backend = MockBackend::new(vec![Ok(resp_304_with_etag("\"v1\""))]);
+        let backend = MockBackend::new(vec![Ok(resp_304(None, Some("\"v1\"")))]);
         let cache = HttpCache::new(backend);
 
         let err = cache.fetch("https://example.test/e").await.unwrap_err();
@@ -394,5 +453,85 @@ mod tests {
             matches!(err, HttpError::NotModifiedWithoutCachedBody { .. }),
             "got {err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn not_modified_restarts_freshness_window() {
+        let backend = MockBackend::new(vec![Ok(resp_304(None, Some("\"v1\"")))]);
+        let cache = HttpCache::new(backend);
+        let url = "https://example.test/refresh";
+        seed_entry(
+            &cache,
+            url,
+            b"cached",
+            Duration::from_secs(60),
+            SystemTime::now() - Duration::from_secs(3600),
+        );
+
+        let (body, policy, meta) = cache.fetch(url).await.unwrap();
+        assert_eq!(body, Bytes::from_static(b"cached"));
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 60_000 });
+        assert_eq!(
+            meta.expect("304 yields meta").etag.as_deref(),
+            Some("\"v1\""),
+            "304 fields update the stored entry"
+        );
+
+        let (body2, _, _) = cache.fetch(url).await.unwrap();
+        assert_eq!(body2, Bytes::from_static(b"cached"));
+        assert_eq!(
+            cache.backend.calls(),
+            1,
+            "refreshed entry serves without the network"
+        );
+    }
+
+    #[tokio::test]
+    async fn not_modified_adopts_new_cache_control() {
+        let backend = MockBackend::new(vec![Ok(resp_304(Some("max-age=300"), None))]);
+        let cache = HttpCache::new(backend);
+        let url = "https://example.test/new-window";
+        seed_entry(
+            &cache,
+            url,
+            b"cached",
+            Duration::from_secs(60),
+            SystemTime::now() - Duration::from_secs(3600),
+        );
+
+        let (_, policy, _) = cache.fetch(url).await.unwrap();
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 300_000 });
+        let stored = cache.meta.lock().unwrap().get(url).cloned().unwrap();
+        assert_eq!(stored.fresh_for, Duration::from_secs(300));
+    }
+
+    #[tokio::test]
+    async fn not_modified_with_no_store_keeps_stale_meta() {
+        let backend = MockBackend::new(vec![Ok(resp_304(Some("no-store"), None))]);
+        let cache = HttpCache::new(backend);
+        let url = "https://example.test/no-resurrect";
+        let stored_at = SystemTime::now() - Duration::from_secs(3600);
+        seed_entry(&cache, url, b"cached", Duration::from_secs(60), stored_at);
+
+        let (body, _, _) = cache.fetch(url).await.unwrap();
+        assert_eq!(body, Bytes::from_static(b"cached"));
+        let stored = cache.meta.lock().unwrap().get(url).cloned().unwrap();
+        assert_eq!(stored.stored_at, stored_at, "no-store 304 must not refresh");
+        assert_eq!(stored.etag.as_deref(), Some("\"v0\""));
+    }
+
+    #[tokio::test]
+    async fn not_modified_with_malformed_cache_control_still_serves() {
+        let backend = MockBackend::new(vec![Ok(resp_304(Some("max-age=abc"), None))]);
+        let cache = HttpCache::new(backend);
+        let url = "https://example.test/malformed-304";
+        let stored_at = SystemTime::now() - Duration::from_secs(3600);
+        seed_entry(&cache, url, b"cached", Duration::from_secs(60), stored_at);
+
+        let (body, policy, _) = cache.fetch(url).await.unwrap();
+        assert_eq!(body, Bytes::from_static(b"cached"));
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 60_000 });
+        let stored = cache.meta.lock().unwrap().get(url).cloned().unwrap();
+        assert_eq!(stored.stored_at, stored_at);
     }
 }
