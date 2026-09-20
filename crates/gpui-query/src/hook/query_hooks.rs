@@ -3,6 +3,8 @@
 //! `WeakEntity`, so it self-terminates on entity drop.
 
 use gpui::{BorrowAppContext as _, Context, Entity, Subscription};
+#[cfg(not(debug_assertions))]
+use gpui::AppContext as _;
 
 use crate::client::{QueryClient, QueryObserver};
 use crate::core::{
