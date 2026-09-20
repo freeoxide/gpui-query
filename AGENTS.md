@@ -26,7 +26,7 @@ Task runner is `just` (justfile at repo root). Recipes shown with their raw equi
 
 - Test everything: `just test` / `cargo test --all-features`.
 - Test one layer: `just test-feature hook` / `cargo test --features "hook"`.
-- Core-only (no GPUI): `cargo test --no-default-features --features core`.
+- Core-only (no GPUI): `cargo test -p gpui-query --no-default-features --features core`.
 - Build all: `cargo build --all-features`.
 - Docs: `cargo doc --all-features`.
 
