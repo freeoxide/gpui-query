@@ -27,7 +27,7 @@ If you only want the core state machine without pulling in GPUI:
 gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }
 ```
 
-The `core` layer also builds for `wasm32-unknown-unknown`: the crate swaps ahash to compile-time RNG on wasm targets internally, so no extra configuration is needed. The `client`, `hook`, and `persist` layers are native-only because they depend on `gpui`, which does not build for `wasm32-unknown-unknown`.
+The `core` layer also builds for `wasm32-unknown-unknown`: the crate swaps ahash to compile-time RNG on wasm targets internally, so no extra configuration is needed. The `client`, `hook`, and `persist` layers are native-only because they depend on `gpui`, which does not build for wasm.
 
 ## Quick start
 
@@ -48,7 +48,7 @@ Create a query in your view:
 ```rust
 use gpui_query::{use_query, QueryOptions};
 
-fn setup_query(cx: &mut ViewContext<MyView>) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
+fn setup_query(cx: &mut Context<MyView>) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
     use_query(
         "users",
         |signal| async move {
@@ -63,17 +63,12 @@ fn setup_query(cx: &mut ViewContext<MyView>) -> (Entity<QueryResource<Vec<User>,
 Read the state in `render`:
 
 ```rust
-fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-    let entity = self.query_entity.clone();
-    entity.read_with(cx, |resource| {
-        match resource.status() {
-            QueryStatus::LoadingEmpty => "Loading...",
-            QueryStatus::Success => "Got data",
-            QueryStatus::Failure => "Error",
-            _ => "Idle",
-        }
-    })
-}
+let label = self.query_entity.read_with(cx, |resource| match resource.status() {
+    QueryStatus::LoadingEmpty => "Loading...",
+    QueryStatus::Success => "Got data",
+    QueryStatus::Failure => "Error",
+    _ => "Idle",
+});
 ```
 
 ## Feature layers

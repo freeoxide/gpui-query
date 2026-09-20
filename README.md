@@ -12,7 +12,7 @@ Fetch, cache, and synchronize async data in GPUI applications without hand-rolli
 
 GPUI renders synchronously on the main thread. That makes async data awkward: you have to track loading states, handle errors, cache responses, deduplicate concurrent requests, and retry on failure. gpui-query handles all of it.
 
-You write a fetcher function. The library manages caching, retry, deduplication, stale-while-revalidate, garbage collection, and cooperative cancellation, on top of GPUI's `Entity` and `ViewContext` system.
+You write a fetcher function. The library manages caching, retry, deduplication, stale-while-revalidate, garbage collection, and cooperative cancellation on top of GPUI's `Entity` system.
 
 The API mirrors TanStack Query: `use_query`, `use_mutation`, and `use_infinite_query` hooks that return `Entity` handles you read from in your view's `render` method.
 
@@ -37,7 +37,7 @@ To use only the core state machine with no GPUI dependency:
 gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }
 ```
 
-The `core` layer also builds for `wasm32-unknown-unknown`. The wasm-specific setup (ahash switches to compile-time RNG on wasm targets) is handled internally, so there is nothing to configure. The `client`, `hook`, and `persist` layers are native-only: they depend on `gpui`, which does not build for `wasm32-unknown-unknown`.
+The `core` layer also builds for `wasm32-unknown-unknown`; the wasm-specific setup (ahash switches to compile-time RNG on wasm targets) is handled internally. The `client`, `hook`, and `persist` layers are native-only: they depend on `gpui`, which does not build for wasm.
 
 ## quick start
 
@@ -58,7 +58,7 @@ Fetch data with `use_query`:
 ```rust
 use gpui_query::{use_query, QueryOptions};
 
-fn setup_query(cx: &mut ViewContext<MyView>) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
+fn setup_query(cx: &mut Context<MyView>) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
     use_query(
         "users",
         |signal| async move {
@@ -74,17 +74,12 @@ fn setup_query(cx: &mut ViewContext<MyView>) -> (Entity<QueryResource<Vec<User>,
 Read the state in your render method:
 
 ```rust
-fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-    let entity = self.query_entity.clone();
-    entity.read_with(cx, |resource| {
-        match resource.status() {
-            QueryStatus::LoadingEmpty => "Loading...",
-            QueryStatus::Success => "Got data",
-            QueryStatus::Failure => "Error",
-            _ => "Idle",
-        }
-    })
-}
+let label = self.query_entity.read_with(cx, |resource| match resource.status() {
+    QueryStatus::LoadingEmpty => "Loading...",
+    QueryStatus::Success => "Got data",
+    QueryStatus::Failure => "Error",
+    _ => "Idle",
+});
 ```
 
 ## architecture
@@ -128,7 +123,7 @@ let (entity, sub) = use_query(
 );
 ```
 
-`QueryResource<T,E>` tracks the full lifecycle: idle, loading (with or without previous data), success, failure, or cancelled. You get `data()`, `error()`, `status()`, `is_loading()`, `has_data()`, `display_data()` (returns data or a placeholder), `cache_age_ms()`, and `retry_count()`.
+`QueryResource<T,E>` tracks the full lifecycle: idle, loading (with or without previous data), success, failure, or cancelled. You get `data()`, `error()`, `status()`, `is_loading()`, `has_data()`, `cache_age_ms(now_ms)`, and `retry_count()`.
 
 For manual control with no auto-fetch, use `use_query_manual` and trigger fetches with `fetch_query` when you're ready.
 
@@ -163,10 +158,10 @@ Mutations track their own state in `MutationResource<V,T,E>` with a begin/comple
 For paginated data. The fetcher receives the last page (or `None` for the first request) and returns `(page_data, has_more)`.
 
 ```rust
-use gpui_query::{use_infinite_query, InfiniteQueryOptions, QueryKey};
+use gpui_query::{use_infinite_query, InfiniteQueryOptions};
 
 let (entity, sub) = use_infinite_query(
-    InfiniteQueryOptions::new(QueryKey::from(["feed"])).max_pages(Some(10)),
+    InfiniteQueryOptions::new("feed").max_pages(10),
     |last_page| async move {
         let cursor = last_page.map(|p| p.cursor());
         let page = fetch_page(cursor).await?;
@@ -195,11 +190,11 @@ let client = cx.global::<QueryClient>();
 client.invalidate_queries(&QueryKeyFilter::Prefix(&QueryKey::from(["users"])), cx);
 
 // Remove everything
-client.remove_queries(&QueryKeyFilter::All, cx);
+client.remove_queries(&QueryKeyFilter::All);
 
-// Optimistic update
-client.set_query_data::<Vec<User>, MyError>(&key, Some(vec![new_user]), cx);
-client.rollback_query_data::<Vec<User>, MyError>(&key, cx);
+// Optimistic update; the previous value is kept for the resource's
+// rollback_to_previous()
+client.set_query_data::<Vec<User>, MyError>(&key, vec![new_user], cx);
 ```
 
 Invalidation matching supports `Exact`, `Prefix`, and `All` filters via `QueryKeyFilter`.
@@ -255,7 +250,7 @@ Only `Success` entries with a registered serializer are persisted; the typed rou
 
 `QueryError::sanitized()` redacts connection strings, bearer tokens, file paths, emails, and hex keys from error messages. Useful for logging without leaking secrets.
 
-`use_query_select` projects a `QueryResource<T,E>` through a `SelectTransform<T,U>` to produce a `MappedQueryResource` that derives values from cached data. No extra fetches are needed.
+`use_query_select` projects a `QueryResource<T,E>` through a `SelectTransform<T,U>` to produce a `MappedQueryResource` that derives values from cached data.
 
 `ClientDiagnostic`, `QueryDiagnostic`, and `MutationDiagnostic` give you runtime introspection of the query client's internal state for debugging.
 

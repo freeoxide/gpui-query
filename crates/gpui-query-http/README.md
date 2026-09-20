@@ -25,10 +25,10 @@ The usage examples also reference `gpui-query` (for `core::{CachePolicy, Fetched
 ## What it does
 
 - Header → policy ("server wins"): `cache_policy_from_headers` reads RFC 9111 `Cache-Control` directives and returns the matching `gpui_query::core::CachePolicy`.
-- In-memory HTTP cache: `HttpCache<B>` wraps any `HttpBackend`. Fresh entries skip the network entirely, stale entries revalidate with `If-None-Match` / `If-Modified-Since`, and a `304 Not Modified` refreshes the entry without transferring a body.
+- In-memory HTTP cache: `HttpCache<B>` wraps any `HttpBackend`. Fresh entries skip the network entirely, stale entries revalidate with `If-None-Match` / `If-Modified-Since`, and a `304 Not Modified` re-serves the cached body and refreshes the stored entry unless its own `Cache-Control` blocks caching.
 - Pluggable backend: `HttpBackend` abstracts a single conditional `GET`. The crate ships `ReqwestBackend` behind the `reqwest` feature; any other client can implement the trait and feed `HttpCache::new`.
 - Serializable metadata: `CacheMeta` (ETag, `Last-Modified`, `stored_at`, `fresh_for`, `stale_for`) is serde-serializable, so it round-trips through a persistence layer for cheap `304` refetches on cold start.
-- Typed errors: `ParseError` (`InvalidMaxAge`, `InvalidStaleWhileRevalidate`) for malformed directives, `HttpError` for backend failures, poisoned mutexes, and spurious `304`s. A malformed `Cache-Control` never fails a fetch: `HttpCache::fetch` serves the body uncacheable and stores nothing. `ParseError` (wrapped as `HttpError::InvalidPolicy`) surfaces only for direct callers of `cache_policy_from_headers`.
+- Typed errors: `ParseError` (`InvalidMaxAge`, `InvalidStaleWhileRevalidate`) for malformed directives, `HttpError` for backend failures, poisoned mutexes, and spurious `304`s. A malformed `Cache-Control` never fails a fetch: `HttpCache::fetch` serves the body uncacheable and stores nothing. `ParseError` surfaces only for direct callers of `cache_policy_from_headers`.
 
 Parsing rules (priority order):
 
