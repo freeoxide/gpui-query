@@ -20,21 +20,21 @@ The API mirrors TanStack Query: `use_query`, `use_mutation`, and `use_infinite_q
 
 ```toml
 [dependencies]
-gpui-query = "0.2.1"
+gpui-query = "0.2.2"
 ```
 
 This pulls in the `client` layer (which includes `core`). To use the declarative hooks:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.2.1", features = ["hook"] }
+gpui-query = { version = "0.2.2", features = ["hook"] }
 ```
 
 To use only the core state machine with no GPUI dependency:
 
 ```toml
 [dependencies]
-gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }
+gpui-query = { version = "0.2.2", default-features = false, features = ["core"] }
 ```
 
 The `core` layer also builds for `wasm32-unknown-unknown`; the wasm-specific setup (ahash switches to compile-time RNG on wasm targets) is handled internally. The `client`, `hook`, and `persist` layers are native-only: they depend on `gpui`, which does not build for wasm.

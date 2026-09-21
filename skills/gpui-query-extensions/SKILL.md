@@ -22,7 +22,7 @@ Do NOT reach for them for ephemeral in-memory state, or if you only need client-
 ```toml
 [dependencies]
 gpui      = "0.2.2"
-gpui-query = { version = "0.2.1", features = ["persist"] }   # enables persist layer
+gpui-query = { version = "0.2.2", features = ["persist"] }   # enables persist layer
 
 # HTTP cache (optional reqwest backend):
 gpui-query-http = { version = "0.1", features = ["reqwest"] } # drop "reqwest" to use your own HttpBackend

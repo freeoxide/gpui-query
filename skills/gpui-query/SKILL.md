@@ -1,11 +1,11 @@
 ---
 name: gpui-query
-description: Use when building a GPUI app that depends on gpui-query (v0.2.1): writing use_query / use_mutation / use_infinite_query / use_query_select hooks; configuring in-memory CachePolicy (NoCache/Ttl/StaleWhileRevalidate) or RetryPolicy; constructing QueryKey / QueryKeyFilter; calling QueryClient for fetch_query / prefetch / set_query_data / invalidate_queries / cancel_queries / reset_queries / remove_queries; wiring cx.set_global(QueryClient::new()); or debugging observer re-render / stale-write / GC behavior. Do NOT use for general GPUI app work that does not involve gpui-query, for the HTTP-cache/disk-persistence satellites (use the gpui-query-extensions skill), or for editing the gpui-query crate itself (see AGENTS.md for crate-internal work).
+description: Use when building a GPUI app that depends on gpui-query (v0.2.2): writing use_query / use_mutation / use_infinite_query / use_query_select hooks; configuring in-memory CachePolicy (NoCache/Ttl/StaleWhileRevalidate) or RetryPolicy; constructing QueryKey / QueryKeyFilter; calling QueryClient for fetch_query / prefetch / set_query_data / invalidate_queries / cancel_queries / reset_queries / remove_queries; wiring cx.set_global(QueryClient::new()); or debugging observer re-render / stale-write / GC behavior. Do NOT use for general GPUI app work that does not involve gpui-query, for the HTTP-cache/disk-persistence satellites (use the gpui-query-extensions skill), or for editing the gpui-query crate itself (see AGENTS.md for crate-internal work).
 ---
 
 # gpui-query (essential)
 
-Async state management for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui), inspired by TanStack Query v5. You write a fetcher; the library caches, retries, deduplicates, invalidates, garbage-collects, and cooperatively cancels. Crate: `gpui-query` v0.2.1. This skill covers the in-memory core/client/hook tiers (persistence and HTTP-cache satellites are separate).
+Async state management for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui), inspired by TanStack Query v5. You write a fetcher; the library caches, retries, deduplicates, invalidates, garbage-collects, and cooperatively cancels. Crate: `gpui-query` v0.2.2. This skill covers the in-memory core/client/hook tiers (persistence and HTTP-cache satellites are separate).
 
 ## Install
 
@@ -13,9 +13,9 @@ Three strictly-additive tiers, glob re-exported at the crate root (`pub use core
 
 | Tier | Cargo line | What you get |
 |---|---|---|
-| core only (no GPUI) | `gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }` | `QueryResource` state machine, `CachePolicy`, `RetryPolicy`, `QueryKey`, `QuerySignal`. Zero GPUI dep, usable in non-GPUI libs. |
-| client (DEFAULT) | `gpui-query = "0.2.1"` | + `QueryClient` GPUI `Global`: type-partitioned buckets, GC, bulk invalidate/cancel/reset/remove, observers, `PreparedFetch`. |
-| hooks | `gpui-query = { version = "0.2.1", features = ["hook"] }` | + `use_query` / `use_mutation` / `use_infinite_query` / `use_query_select`. |
+| core only (no GPUI) | `gpui-query = { version = "0.2.2", default-features = false, features = ["core"] }` | `QueryResource` state machine, `CachePolicy`, `RetryPolicy`, `QueryKey`, `QuerySignal`. Zero GPUI dep, usable in non-GPUI libs. |
+| client (DEFAULT) | `gpui-query = "0.2.2"` | + `QueryClient` GPUI `Global`: type-partitioned buckets, GC, bulk invalidate/cancel/reset/remove, observers, `PreparedFetch`. |
+| hooks | `gpui-query = { version = "0.2.2", features = ["hook"] }` | + `use_query` / `use_mutation` / `use_infinite_query` / `use_query_select`. |
 
 The `client` tier pulls `gpui = "0.2.2"`. macOS builds of any tier with GPUI need the Metal Toolchain installed once: `xcodebuild -downloadComponent MetalToolchain` (core-only builds need nothing).
 
