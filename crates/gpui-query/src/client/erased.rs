@@ -3,11 +3,13 @@
 
 use crate::client::devtools::{MutationDiagnostic, QueryDiagnostic};
 #[cfg(feature = "persist")]
-use crate::client::persist::{PersistedEntry, SerializerRegistry};
+use crate::client::persist::PersistedEntry;
 use crate::core::QueryKeyFilter;
 #[cfg(feature = "persist")]
 use crate::core::{MutationStatus, QueryStatus};
 
+/// Erased surface behind both query maps in `QueryClient`; `TypeId` keys
+/// keep the downcast to the concrete bucket sound.
 pub(crate) trait ErasedBucket {
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
@@ -17,47 +19,24 @@ pub(crate) trait ErasedBucket {
     fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
     fn remove_matching(&mut self, filter: &QueryKeyFilter);
     fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
-    /// Push diagnostics into the caller's Vec so `QueryClient::diagnostics`
-    /// pre-sizes one destination instead of allocating per bucket.
+    /// Pushes into the caller's Vec so `QueryClient::diagnostics` pre-sizes
+    /// one destination instead of allocating per bucket.
     fn collect_diagnostics_into(&self, now_ms: u64, cx: &gpui::App, out: &mut Vec<QueryDiagnostic>);
     /// Key/status pairs without the per-entry allocations of full
     /// diagnostics; used by `dehydrate`.
     #[cfg(feature = "persist")]
     fn collect_key_status_into(&self, cx: &gpui::App, out: &mut Vec<(String, QueryStatus)>);
-    /// Entries whose `T` has no registered serializer are skipped.
+    /// Entries whose `T` has no registered serializer are skipped; filter
+    /// and max-age are checked before serializing so skipped entries cost
+    /// nothing.
     #[cfg(feature = "persist")]
     fn collect_persistable_into(
         &self,
         cx: &gpui::App,
-        serializers: &SerializerRegistry,
-        now_ms: u64,
+        collect: &crate::client::bucket::shared::PersistCollect<'_>,
         out: &mut Vec<(crate::core::QueryKey, PersistedEntry)>,
     );
     /// Prunes the persisted-meta map of keys whose entries were evicted.
-    #[cfg(feature = "persist")]
-    fn contains_key(&self, key: &crate::core::QueryKey) -> bool;
-}
-
-pub(crate) trait ErasedInfiniteBucket {
-    fn as_any(&self) -> &dyn std::any::Any;
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-    fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &gpui::App);
-    fn count(&self) -> usize;
-    fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
-    fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
-    fn remove_matching(&mut self, filter: &QueryKeyFilter);
-    fn cancel_matching(&mut self, filter: &QueryKeyFilter, cx: &mut gpui::App);
-    fn collect_diagnostics_into(&self, now_ms: u64, cx: &gpui::App, out: &mut Vec<QueryDiagnostic>);
-    #[cfg(feature = "persist")]
-    fn collect_key_status_into(&self, cx: &gpui::App, out: &mut Vec<(String, QueryStatus)>);
-    #[cfg(feature = "persist")]
-    fn collect_persistable_into(
-        &self,
-        cx: &gpui::App,
-        serializers: &SerializerRegistry,
-        now_ms: u64,
-        out: &mut Vec<(crate::core::QueryKey, PersistedEntry)>,
-    );
     #[cfg(feature = "persist")]
     fn contains_key(&self, key: &crate::core::QueryKey) -> bool;
 }

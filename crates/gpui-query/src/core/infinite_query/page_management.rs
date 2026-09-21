@@ -1,5 +1,3 @@
-//! Page management methods for [`InfiniteQueryResource`].
-
 use std::sync::Arc;
 
 use super::{FetchDirection, InfiniteQueryResource};

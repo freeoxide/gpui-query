@@ -1,7 +1,4 @@
 //! Mutation hooks and internal retry loops.
-//!
-//! `use_mutation_with_options` is deprecated and deliberately not re-exported:
-//! the `pub use` would fire the deprecation lint on every import.
 
 mod hooks;
 mod internals;

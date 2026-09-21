@@ -1,5 +1,3 @@
-//! Query resource cache logic.
-
 use crate::core::{QueryStatus, QueryTimestamp};
 
 use super::QueryResource;
@@ -14,28 +12,22 @@ impl<T, E> QueryResource<T, E> {
     pub fn is_cache_fresh(&self, now_ms: u64) -> bool {
         self.has_data()
             && self
-                .cache_policy
-                .ttl_ms()
-                .zip(self.cache_age_ms(now_ms))
-                .map(|(ttl_ms, age_ms)| age_ms <= ttl_ms)
-                .unwrap_or(false)
+                .cache_age_ms(now_ms)
+                .is_some_and(|age_ms| self.cache_policy.is_fresh(age_ms))
     }
 
     pub fn is_stale_but_serveable(&self, now_ms: u64) -> bool {
         self.has_data()
             && self
                 .cache_age_ms(now_ms)
-                .map(|age_ms| self.cache_policy.is_stale_but_serveable(age_ms))
-                .unwrap_or(false)
+                .is_some_and(|age_ms| self.cache_policy.is_stale_but_serveable(age_ms))
     }
 
     pub fn is_cache_expired(&self, now_ms: u64) -> bool {
-        if !self.has_data() {
-            return true;
-        }
-        self.cache_age_ms(now_ms)
-            .map(|age_ms| self.cache_policy.is_expired(age_ms))
-            .unwrap_or(true)
+        !self.has_data()
+            || self
+                .cache_age_ms(now_ms)
+                .is_none_or(|age_ms| self.cache_policy.is_expired(age_ms))
     }
 
     pub fn should_short_circuit_cache(&self, now_ms: u64) -> bool {
@@ -56,10 +48,6 @@ impl<T, E> QueryResource<T, E> {
             self.status = QueryStatus::Success;
             self.error = None;
         }
-    }
-
-    pub(crate) fn record_stale_cache_hit(&mut self) {
-        self.record_cache_hit();
     }
 
     /// Data is retained; only the last-updated timestamp is cleared.

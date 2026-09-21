@@ -1,5 +1,3 @@
-//! Standard trait implementations for [`QueryError`](super::QueryError).
-
 use super::types::QueryError;
 
 impl std::fmt::Display for QueryError {

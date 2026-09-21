@@ -37,24 +37,27 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Prepare
     /// A no-op if the request ID is no longer active (replaced by a newer
     /// request).
     pub fn complete_success(self, data: T, cx: &mut App) {
-        self.entity.update(cx, |resource, _cx| {
-            let accepted = resource.complete_current_success(self.request_id, data, self.now_ms);
-            // Wake the persistence driver only when accepted; a stale no-op must not schedule a save.
-            if accepted {
-                #[cfg(feature = "persist")]
-                _cx.default_global::<crate::client::CacheMutation>();
-            }
-        });
+        self.complete(Ok(data), cx);
     }
 
     /// A no-op if the request ID is no longer active (replaced by a newer
     /// request).
     pub fn complete_failure(self, error: E, cx: &mut App) {
-        self.entity.update(cx, |resource, _cx| {
-            let accepted = resource.complete_current_failure(self.request_id, error, self.now_ms);
+        self.complete(Err(error), cx);
+    }
+
+    fn complete(self, outcome: Result<T, E>, cx: &mut App) {
+        self.entity.update(cx, |resource, cx| {
+            let accepted = match outcome {
+                Ok(data) => resource.complete_current_success(self.request_id, data, self.now_ms),
+                Err(error) => {
+                    resource.complete_current_failure(self.request_id, error, self.now_ms)
+                }
+            };
+            // Wake the persistence driver only when accepted; a stale no-op must not schedule a save.
             if accepted {
                 #[cfg(feature = "persist")]
-                _cx.default_global::<crate::client::CacheMutation>();
+                cx.default_global::<crate::client::CacheMutation>();
             }
         });
     }

@@ -5,9 +5,7 @@ use gpui::{BorrowAppContext as _, Context, Entity};
 use crate::client::QueryClient;
 use crate::core::InfiniteQueryResource;
 
-use super::fetch_runners::{
-    PageDirection, run_fetch_next_page_with_id, run_fetch_previous_page_with_id,
-};
+use super::fetch_runners::{PageDirection, run_fetch_page_with_id};
 use crate::hook::current_time_ms;
 
 /// If a fetch is already in flight, its signal is cancelled and the new request supersedes it.
@@ -38,7 +36,7 @@ pub fn fetch_next_page_infinite<T, E, C, FNext, Fut>(
     FNext: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    fetch_page_infinite(entity, fetcher, cx, PageDirection::Next);
+    spawn_page_fetch(entity, fetcher, PageDirection::Next, cx);
 }
 
 /// Backward variant: the fetcher receives the first page (not the last) as its cursor.
@@ -53,14 +51,16 @@ pub fn fetch_previous_page_infinite<T, E, C, FPrev, Fut>(
     FPrev: Fn(Option<&T>) -> Fut + 'static,
     Fut: std::future::Future<Output = Result<(T, bool), E>> + Send + 'static,
 {
-    fetch_page_infinite(entity, fetcher, cx, PageDirection::Previous);
+    spawn_page_fetch(entity, fetcher, PageDirection::Previous, cx);
 }
 
-fn fetch_page_infinite<T, E, C, F, Fut>(
+/// Mints the `RequestId` from the bucket sequencer, begins the fetch, and
+/// stores the task so a replacement fetch or entity drop aborts it.
+pub(super) fn spawn_page_fetch<T, E, C, F, Fut>(
     entity: &Entity<InfiniteQueryResource<T, E>>,
     fetcher: F,
-    cx: &mut Context<C>,
     direction: PageDirection,
+    cx: &mut Context<C>,
 ) where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + std::fmt::Debug + 'static,
@@ -91,15 +91,8 @@ fn fetch_page_infinite<T, E, C, F, Fut>(
 
     if let Some(request_id) = request_id {
         let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-        // Stored on the resource: a replacement fetch or unmount aborts the prior task.
-        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| match direction {
-            PageDirection::Next => {
-                run_fetch_next_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx).await;
-            }
-            PageDirection::Previous => {
-                run_fetch_previous_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx)
-                    .await;
-            }
+        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+            run_fetch_page_with_id(&weak, &fetcher, request_id, &retry_policy, cx, direction).await;
         });
         entity.update(cx, |r, _| r.set_current_task(task));
     }

@@ -17,11 +17,11 @@ use crate::core::{CachePolicy, RefetchTrigger, RequestPolicy, RetryPolicy};
 /// # struct MyError;
 /// # fn _doc(cx: &mut gpui::Context<()>) {
 ///
-/// let result = use_query("users", |signal| async move {
+/// let (_entity, _sub) = use_query("users", |signal| async move {
 ///     Ok::<Vec<User>, MyError>(vec![])
 /// }, cx);
 ///
-/// let result = use_query(
+/// let (_entity, _sub) = use_query(
 ///     QueryOptions::new("users")
 ///         .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
 ///         .retry_policy(RetryPolicy::new(5)),
@@ -100,19 +100,34 @@ macro_rules! impl_query_options_builders {
     };
 }
 
+/// `From` key conversions shared by both option types.
+macro_rules! impl_key_conversions {
+    ($t:ident) => {
+        impl From<&str> for $t {
+            fn from(key: &str) -> Self {
+                Self::new(key)
+            }
+        }
+
+        impl From<String> for $t {
+            fn from(key: String) -> Self {
+                Self::new(key)
+            }
+        }
+
+        impl From<crate::core::QueryKey> for $t {
+            fn from(key: crate::core::QueryKey) -> Self {
+                Self::new(key)
+            }
+        }
+    };
+}
+
 impl QueryOptions {
     pub fn new(key: impl Into<crate::core::QueryKey>) -> Self {
         Self {
             key: key.into(),
-            cache_policy: CachePolicy::default(),
-            request_policy: RequestPolicy::default(),
-            retry_policy: RetryPolicy::default(),
-            gc_time_ms: 300_000,
-            keep_previous_data: false,
-            force_fetch: false,
-            refetch_on_mount: RefetchTrigger::default(),
-            refetch_on_window_focus: RefetchTrigger::default(),
-            refetch_on_reconnect: RefetchTrigger::default(),
+            ..Self::default()
         }
     }
 
@@ -129,23 +144,7 @@ impl QueryOptions {
 
 impl_query_options_builders!(QueryOptions);
 
-impl From<&str> for QueryOptions {
-    fn from(key: &str) -> Self {
-        Self::new(key)
-    }
-}
-
-impl From<String> for QueryOptions {
-    fn from(key: String) -> Self {
-        Self::new(key)
-    }
-}
-
-impl From<crate::core::QueryKey> for QueryOptions {
-    fn from(key: crate::core::QueryKey) -> Self {
-        Self::new(key)
-    }
-}
+impl_key_conversions!(QueryOptions);
 
 impl From<(crate::core::QueryKey, CachePolicy, RequestPolicy)> for QueryOptions {
     fn from(
@@ -278,11 +277,7 @@ impl InfiniteQueryOptions {
     pub fn new(key: impl Into<crate::core::QueryKey>) -> Self {
         Self {
             key: key.into(),
-            cache_policy: CachePolicy::default(),
-            request_policy: RequestPolicy::default(),
-            max_pages: Some(50),
-            retry_policy: RetryPolicy::default(),
-            gc_time_ms: 300_000,
+            ..Self::default()
         }
     }
 
@@ -302,20 +297,4 @@ impl InfiniteQueryOptions {
 
 impl_query_options_builders!(InfiniteQueryOptions);
 
-impl From<&str> for InfiniteQueryOptions {
-    fn from(key: &str) -> Self {
-        Self::new(key)
-    }
-}
-
-impl From<String> for InfiniteQueryOptions {
-    fn from(key: String) -> Self {
-        Self::new(key)
-    }
-}
-
-impl From<crate::core::QueryKey> for InfiniteQueryOptions {
-    fn from(key: crate::core::QueryKey) -> Self {
-        Self::new(key)
-    }
-}
+impl_key_conversions!(InfiniteQueryOptions);

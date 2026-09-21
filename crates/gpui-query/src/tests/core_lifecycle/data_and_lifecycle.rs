@@ -1,5 +1,6 @@
 use crate::core::*;
 use crate::tests::core_lifecycle::transitions::*;
+use crate::tests::test_support::nocache_resource;
 
 #[test]
 fn invalidate_clears_timestamp_but_retains_data_and_active_request() {
@@ -91,6 +92,50 @@ fn is_current_request_matches_active() {
     let (rid2, _) = begin(&mut r, &mut s, 200);
     assert!(!r.is_current_request(rid1), "rid1 is stale");
     assert!(r.is_current_request(rid2), "rid2 is current");
+}
+
+#[test]
+fn complete_success_optional_none_yields_idle_some_yields_success() {
+    {
+        let mut r = nocache_resource("optional-none");
+        let mut s = seq();
+        let (rid, _) = begin(&mut r, &mut s, 100);
+        let guard = r.accept_current_request(rid).unwrap();
+        r.complete_success_optional(guard, None, 200);
+        assert_eq!(r.status(), QueryStatus::Idle, "None data => Idle");
+        assert!(r.data().is_none());
+        assert!(r.error().is_none());
+    }
+
+    {
+        let mut r = nocache_resource("optional-some");
+        let mut s = seq();
+        let (rid, _) = begin(&mut r, &mut s, 100);
+        let guard = r.accept_current_request(rid).unwrap();
+        r.complete_success_optional(guard, Some("data"), 200);
+        assert_eq!(r.status(), QueryStatus::Success);
+        assert_eq!(r.data(), Some(&"data"));
+    }
+}
+
+#[test]
+fn is_data_stale_by_status() {
+    let mut r = nocache_resource("stale-heuristic");
+    assert!(!r.is_data_stale(), "no data => not stale");
+
+    let mut s = seq();
+    let (rid, _) = begin(&mut r, &mut s, 100);
+    r.complete_current_success(rid, "data", 200);
+    assert!(!r.is_data_stale(), "Success with data => not stale");
+
+    let _ = begin(&mut r, &mut s, 300);
+    assert_eq!(r.status(), QueryStatus::LoadingWithData);
+    assert!(r.is_data_stale(), "LoadingWithData with data => stale");
+
+    let (rid2, _) = begin(&mut r, &mut s, 400);
+    r.complete_current_failure_with_data(rid2, "fallback", QueryError::response("err"), 500);
+    assert_eq!(r.status(), QueryStatus::Failure);
+    assert!(r.is_data_stale(), "Failure with data => stale");
 }
 
 #[test]

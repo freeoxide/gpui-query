@@ -4,6 +4,7 @@ use std::any::TypeId;
 
 use gpui::{App, Entity};
 
+use crate::client::erased::{ErasedBucket, ErasedMutationBucket};
 use crate::client::infinite_bucket::InfiniteQueryBucket;
 use crate::client::mutation_bucket::MutationBucket;
 use crate::core::{
@@ -42,7 +43,7 @@ impl QueryClient {
             .entry(type_id)
             .or_insert_with(|| Box::new(InfiniteQueryBucket::<T, E>::new()));
 
-        let typed = Self::infinite_bucket_or_recreate::<T, E>(bucket);
+        let typed = Self::bucket_or_recreate(bucket, InfiniteQueryBucket::<T, E>::new);
         let entity = typed.get_or_create(key.into(), cache_policy, request_policy, cx);
         self.maybe_opportunistic_gc(cx);
         entity
@@ -68,7 +69,7 @@ impl QueryClient {
     ) -> Option<crate::core::RequestId> {
         let type_id = TypeId::of::<(T, E)>();
         let bucket = self.infinite_buckets.get_mut(&type_id)?;
-        let typed = Self::infinite_bucket_or_recreate::<T, E>(bucket);
+        let typed = Self::bucket_or_recreate(bucket, InfiniteQueryBucket::<T, E>::new);
         typed.sequencer_mut(key).map(|seq| seq.next_request())
     }
 
@@ -122,82 +123,45 @@ impl QueryClient {
             .unwrap_or_default()
     }
 
-    fn for_each_query_bucket_mut<F>(&mut self, mut f: F)
-    where
-        F: FnMut(EitherBucket<'_>),
-    {
+    fn for_each_query_bucket_mut(&mut self, mut f: impl FnMut(&mut dyn ErasedBucket)) {
         for bucket in self.buckets.values_mut() {
-            f(EitherBucket::Query(bucket.as_mut()));
+            f(bucket.as_mut());
         }
         for bucket in self.infinite_buckets.values_mut() {
-            f(EitherBucket::Infinite(bucket.as_mut()));
+            f(bucket.as_mut());
         }
     }
 
     /// Data is kept but marked stale.
     pub fn invalidate_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        self.for_each_query_bucket_mut(|b| match b {
-            EitherBucket::Query(b) => b.invalidate_matching(filter, cx),
-            EitherBucket::Infinite(b) => b.invalidate_matching(filter, cx),
-        });
+        self.for_each_query_bucket_mut(|b| b.invalidate_matching(filter, cx));
     }
 
     /// Data and status are cleared.
     pub fn reset_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        self.for_each_query_bucket_mut(|b| match b {
-            EitherBucket::Query(b) => b.reset_matching(filter, cx),
-            EitherBucket::Infinite(b) => b.reset_matching(filter, cx),
-        });
+        self.for_each_query_bucket_mut(|b| b.reset_matching(filter, cx));
     }
 
     /// Entries are removed from the cache entirely.
     pub fn remove_queries(&mut self, filter: &QueryKeyFilter) {
-        self.for_each_query_bucket_mut(|b| match b {
-            EitherBucket::Query(b) => b.remove_matching(filter),
-            EitherBucket::Infinite(b) => b.remove_matching(filter),
-        });
+        self.for_each_query_bucket_mut(|b| b.remove_matching(filter));
     }
 
     /// Cancels matching in-flight requests with a
     /// [`QueryError::cancelled`](crate::core::QueryError::cancelled) error;
     /// TanStack `queryClient.cancelQueries()`.
     pub fn cancel_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
-        self.for_each_query_bucket_mut(|b| match b {
-            EitherBucket::Query(b) => b.cancel_matching(filter, cx),
-            EitherBucket::Infinite(b) => b.cancel_matching(filter, cx),
-        });
+        self.for_each_query_bucket_mut(|b| b.cancel_matching(filter, cx));
     }
 
-    fn infinite_bucket_or_recreate<
-        T: Clone + Send + Sync + 'static,
-        E: Clone + Send + Sync + 'static,
-    >(
-        bucket: &mut Box<dyn super::erased::ErasedInfiniteBucket>,
-    ) -> &mut InfiniteQueryBucket<T, E> {
-        if bucket
-            .as_any_mut()
-            .downcast_mut::<InfiniteQueryBucket<T, E>>()
-            .is_none()
-        {
-            eprintln!(
-                "QueryClient: type mismatch in infinite bucket downcast for {}. \
-                 Replacing with a fresh bucket.",
-                std::any::type_name::<(T, E)>()
-            );
-            *bucket = Box::new(InfiniteQueryBucket::<T, E>::new());
-        }
-        bucket
-            .as_any_mut()
-            .downcast_mut::<InfiniteQueryBucket<T, E>>()
-            .expect("InfiniteQueryBucket downcast succeeds after infinite_bucket_or_recreate")
-    }
-
+    /// Same recovery contract as [`bucket_or_recreate`](Self::bucket_or_recreate),
+    /// for the mutation map's trait type.
     fn mutation_bucket_or_recreate<
         V: Clone + Send + Sync + 'static,
         T: Clone + Send + Sync + 'static,
         E: Clone + Send + Sync + 'static,
     >(
-        bucket: &mut Box<dyn super::erased::ErasedMutationBucket>,
+        bucket: &mut Box<dyn ErasedMutationBucket>,
     ) -> &mut MutationBucket<V, T, E> {
         if bucket
             .as_any_mut()
@@ -216,9 +180,4 @@ impl QueryClient {
             .downcast_mut::<MutationBucket<V, T, E>>()
             .expect("MutationBucket downcast succeeds after mutation_bucket_or_recreate")
     }
-}
-
-enum EitherBucket<'a> {
-    Query(&'a mut dyn crate::client::erased::ErasedBucket),
-    Infinite(&'a mut dyn crate::client::erased::ErasedInfiniteBucket),
 }

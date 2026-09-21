@@ -294,6 +294,79 @@ fn file_persister_cache_file_is_owner_only() {
 }
 
 #[test]
+fn file_persister_non_utf8_json_yields_empty_snapshot() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cache.json");
+    std::fs::write(&path, [0xFF, 0xFE, b'{', b'}']).expect("write non-utf8 bytes");
+
+    let p = FilePersister::json(&path);
+    let loaded = pollster::block_on(p.load()).expect("tolerant load");
+    assert!(loaded.entries.is_empty(), "non-UTF8 cache -> empty snapshot");
+}
+
+#[test]
+fn file_persister_deeply_nested_json_yields_empty_snapshot() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cache.json");
+    let mut deep = Vec::with_capacity(20_091);
+    deep.extend_from_slice(br#"{"entries":{"k":{"value":"#);
+    deep.extend(std::iter::repeat_n(b'[', 10_000));
+    deep.extend(std::iter::repeat_n(b']', 10_000));
+    deep.extend_from_slice(
+        br#","cached_at":0,"cache_policy":"NoCache","meta":null}},"version":1}"#,
+    );
+    std::fs::write(&path, deep).expect("write deep nesting");
+
+    let p = FilePersister::json(&path);
+    let loaded = pollster::block_on(p.load()).expect("tolerant load");
+    assert!(
+        loaded.entries.is_empty(),
+        "10k-deep nesting inside an entry value -> empty snapshot"
+    );
+}
+
+#[test]
+fn file_persister_truncated_bincode_yields_empty_snapshot() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cache.bin");
+    let p = FilePersister::bincode(&path);
+
+    pollster::block_on(p.save(&sample_snapshot())).expect("save");
+    let full = std::fs::read(&path).expect("read saved");
+
+    for cut in [full.len() / 2, full.len() - 1] {
+        std::fs::write(&path, &full[..cut]).expect("write truncated");
+        let loaded = pollster::block_on(p.load()).expect("tolerant load");
+        assert!(
+            loaded.entries.is_empty(),
+            "truncated at {cut} of {} bytes -> empty snapshot",
+            full.len()
+        );
+    }
+}
+
+#[test]
+fn file_persister_hostile_bincode_length_claims_yield_empty_snapshot() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cache.bin");
+
+    let count_claim = u64::MAX.to_le_bytes().to_vec();
+    let mut string_len_claim = 1u64.to_le_bytes().to_vec();
+    string_len_claim.extend_from_slice(&u64::MAX.to_le_bytes());
+
+    for (claim, bytes) in [("map count", count_claim), ("string length", string_len_claim)] {
+        std::fs::write(&path, bytes).expect("write hostile frame");
+
+        let p = FilePersister::bincode(&path);
+        let loaded = pollster::block_on(p.load()).expect("tolerant load");
+        assert!(
+            loaded.entries.is_empty(),
+            "hostile {claim} claim -> empty snapshot without unbounded allocation"
+        );
+    }
+}
+
+#[test]
 fn file_persister_second_instance_overwrite_stays_parseable() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cache.json");

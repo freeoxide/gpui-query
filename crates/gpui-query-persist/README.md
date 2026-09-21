@@ -27,12 +27,13 @@ The crate pulls in [gpui-query](https://crates.io/crates/gpui-query) with the `p
 
 Hand a `FilePersister` to `QueryClient::persist_with` when your app starts. Keep the returned `PersistHandle` alive for as long as you want saves to continue.
 
-```rust
-use gpui::App;
+```rust,no_run
+use gpui::Application;
+# use gpui::BorrowAppContext;
 use gpui_query::client::{PersistOptions, QueryClient};
 use gpui_query_persist::FilePersister;
 
-App::new().run(|cx| {
+Application::new().run(|cx| {
     cx.set_global(QueryClient::new());
 
     // JSON at an explicit path:
@@ -49,7 +50,10 @@ App::new().run(|cx| {
 
 ### Constructors
 
-```rust
+```rust,no_run
+# use gpui_query_persist::{FilePersister, PersistFormat};
+# use gpui_query::client::PersistError;
+# fn doc() -> Result<(), PersistError> {
 // Pick a format explicitly:
 FilePersister::new("path/to/cache.bin", PersistFormat::Bincode);
 
@@ -62,6 +66,8 @@ FilePersister::in_cache_dir("my-app")?; // -> Result<Self, PersistError>
 
 // Inspect the on-disk path:
 FilePersister::json("path/to/cache.json").path(); // -> &Path
+#     Ok(())
+# }
 ```
 
 `PersistFormat` is `Json` (human-readable, the default for `in_cache_dir`) or `Bincode` (compact, not human-readable). `NoopPersister` is re-exported for tests or disabled modes.

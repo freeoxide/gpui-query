@@ -1,5 +1,3 @@
-//! Query resource read-only accessors.
-
 use crate::core::{
     CachePolicy, QueryKey, QuerySignal, QueryStatus, QueryTimestamp, RequestId, RequestPolicy,
     RetryPolicy,

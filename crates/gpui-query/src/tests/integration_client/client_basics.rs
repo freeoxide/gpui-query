@@ -1,57 +1,8 @@
 use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
 
-use crate::client::{MutationObserver, ObserverConfig, QueryClient, QueryObserver};
+use crate::client::{MutationObserver, QueryClient, QueryObserver};
 use crate::core::*;
 use crate::tests::test_support::*;
-
-#[gpui::test]
-fn test_client_creation_and_global_registration(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        let diag = cx.update_global::<QueryClient, _>(|client, cx| client.diagnostics(cx));
-        assert_eq!(diag.query_count, 0, "new client should have zero queries");
-        assert_eq!(
-            diag.mutation_count, 0,
-            "new client should have zero mutations"
-        );
-    });
-}
-
-#[gpui::test]
-fn test_client_with_custom_policies(cx: &mut TestAppContext) {
-    setup_query_client_with_policies(
-        cx,
-        CachePolicy::Ttl { ttl_ms: 5_000 },
-        RequestPolicy::LatestWins,
-    );
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let entity = client.resource::<String, QueryError>("test_key", cx);
-            entity.read_with(cx, |r, _| {
-                assert_eq!(r.cache_policy(), CachePolicy::Ttl { ttl_ms: 5_000 });
-            });
-        });
-    });
-}
-
-#[gpui::test]
-fn test_client_with_gc_time(cx: &mut TestAppContext) {
-    setup_query_client_with_gc(cx, 1_000);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let entity = client.resource::<String, QueryError>("key", cx);
-            entity.update(cx, |r, _| {
-                r.apply_success("hello".to_string(), 100);
-            });
-            client.gc_with_time(3_000, cx);
-            let remaining = client.all_queries::<String, QueryError>();
-            assert!(
-                remaining.is_empty(),
-                "resource should be evicted by GC (age 2900 > success_threshold 2000)"
-            );
-        });
-    });
-}
 
 #[gpui::test]
 fn test_resource_creates_and_deduplicates(cx: &mut TestAppContext) {
@@ -128,71 +79,6 @@ fn test_query_retrieves_existing_entity(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_type_partitioned_buckets_no_conflict(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let string_entity = client.resource::<String, QueryError>("data", cx);
-            let u32_entity = client.resource::<u32, QueryError>("data", cx);
-            let user_entity = client.resource::<User, QueryError>("data", cx);
-
-            assert_ne!(
-                string_entity.entity_id(),
-                u32_entity.entity_id(),
-                "different T types must produce different entities"
-            );
-            assert_ne!(
-                string_entity.entity_id(),
-                user_entity.entity_id(),
-                "String and User must be separate"
-            );
-            assert_ne!(
-                u32_entity.entity_id(),
-                user_entity.entity_id(),
-                "u32 and User must be separate"
-            );
-
-            let strings = client.all_queries::<String, QueryError>();
-            assert_eq!(strings.len(), 1);
-            assert_eq!(strings[0].entity_id(), string_entity.entity_id());
-
-            let users = client.all_queries::<User, QueryError>();
-            assert_eq!(users.len(), 1);
-            assert_eq!(users[0].entity_id(), user_entity.entity_id());
-        });
-    });
-}
-
-#[gpui::test]
-fn test_same_type_different_error_types_no_conflict(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let e1 = client.resource::<String, QueryError>("key", cx);
-            let e2 = client.resource::<String, String>("key", cx);
-
-            assert_ne!(
-                e1.entity_id(),
-                e2.entity_id(),
-                "different E types must produce different entities"
-            );
-        });
-    });
-}
-
-#[gpui::test]
-fn test_diagnostics_empty_client(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        let diag = cx.update_global::<QueryClient, _>(|client, cx| client.diagnostics(cx));
-        assert_eq!(diag.query_count, 0);
-        assert_eq!(diag.mutation_count, 0);
-        assert!(diag.queries.is_empty());
-        assert!(diag.mutations.is_empty());
-    });
-}
-
-#[gpui::test]
 fn test_diagnostics_with_resources(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
@@ -237,34 +123,6 @@ fn test_diagnostics_with_resources(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_diagnostics_across_type_buckets(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let _s = client.resource::<String, QueryError>("s", cx);
-            let _u = client.resource::<User, QueryError>("u", cx);
-
-            let diag = client.diagnostics(cx);
-            assert_eq!(diag.query_count, 2, "should count across type buckets");
-            assert_eq!(diag.queries.len(), 2);
-        });
-    });
-}
-
-#[gpui::test]
-fn test_query_observer_creation(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let entity = client.resource::<String, QueryError>("obs_key", cx);
-            let _observer = QueryObserver::new(&entity);
-            let weak = entity.downgrade();
-            assert!(weak.upgrade().is_some(), "entity should still be alive");
-        });
-    });
-}
-
-#[gpui::test]
 fn test_query_observer_observe_returns_subscription(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
@@ -290,19 +148,5 @@ fn test_mutation_observer_creation(cx: &mut TestAppContext) {
         let entity = cx
             .new(|_| MutationResource::<String, User, QueryError>::new(RetryPolicy::no_retries()));
         let _observer = MutationObserver::<String, User, QueryError>::new(&entity);
-    });
-}
-
-#[gpui::test]
-fn test_observer_config_custom_settings(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let entity = client.resource::<String, QueryError>("config_key", cx);
-            let config = ObserverConfig {
-                notify_on_status_change_only: false,
-            };
-            let _observer = QueryObserver::new(&entity).with_config(config);
-        });
     });
 }

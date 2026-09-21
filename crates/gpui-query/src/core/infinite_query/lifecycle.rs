@@ -1,10 +1,8 @@
-//! Lifecycle methods for [`InfiniteQueryResource`]: fetch, complete, reset,
-//! invalidate, and two-phase protocol.
-
 use std::sync::Arc;
 
 use crate::core::{
-    QuerySignal, QueryStatus, QueryTimestamp, RequestGuard, RequestId, RequestSequencer,
+    QuerySignal, QueryStatus, QueryTimestamp, RequestGuard, RequestId, RequestPolicy,
+    RequestSequencer, request::MaybeRequestId,
 };
 
 use super::FetchDirection;
@@ -17,11 +15,6 @@ use super::InfiniteQueryResource;
 pub(super) enum PageDirection {
     Next,
     Previous,
-}
-
-enum MaybeRequestId<'a> {
-    FromSequencer(&'a mut RequestSequencer),
-    Provided(Option<RequestId>),
 }
 
 impl<T, E> InfiniteQueryResource<T, E> {
@@ -84,7 +77,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
     fn begin_fetch(
         &mut self,
         direction: PageDirection,
-        id_source: MaybeRequestId,
+        mut id_source: MaybeRequestId<'_>,
         now_ms: u64,
     ) -> Option<RequestId> {
         let (has_page, is_fetching_same_direction) = match direction {
@@ -96,9 +89,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
             return None;
         }
 
-        if is_fetching_same_direction
-            && self.request_policy == crate::core::RequestPolicy::IgnoreWhileLoading
-        {
+        if is_fetching_same_direction && self.request_policy == RequestPolicy::IgnoreWhileLoading {
             return None;
         }
 
@@ -112,12 +103,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
 
         self.fetching_direction = Some(direction);
 
-        let request_id = match id_source {
-            MaybeRequestId::FromSequencer(sequencer) => sequencer.next_request(),
-            MaybeRequestId::Provided(maybe_id) => {
-                maybe_id.unwrap_or_else(|| self.transient_sequencer.next_request())
-            }
-        };
+        let request_id = id_source.next(&mut self.transient_sequencer);
         self.active_request_id = Some(request_id);
         self.status = if self.pages.is_empty() {
             QueryStatus::LoadingEmpty
@@ -188,45 +174,22 @@ impl<T, E> InfiniteQueryResource<T, E> {
         is_next: bool,
         now_ms: u64,
     ) -> bool {
-        if self.active_request_id != Some(request_id) {
-            self.ignored_results = self.ignored_results.saturating_add(1);
-            return false;
-        }
-
-        if is_next {
-            self.pages.push_back(Arc::new(page));
-            self.has_next_page = has_more;
-            self.enforce_max_pages_remove_front();
+        if let Some(guard) = self.accept_current_request(request_id) {
+            self.complete_success_with_guard(guard, page, has_more, is_next, now_ms);
+            true
         } else {
-            self.pages.push_front(Arc::new(page));
-            self.has_previous_page = has_more;
-            self.enforce_max_pages_remove_back();
+            false
         }
-
-        self.status = QueryStatus::Success;
-        self.error = None;
-        self.active_request_id = None;
-        self.last_updated_at = Some(QueryTimestamp::from(now_ms));
-        self.fetching_direction = None;
-        self.signal = None;
-
-        true
     }
 
     /// Accept-and-complete in one call; loaded pages are NOT cleared.
     pub fn complete_page_failure(&mut self, request_id: RequestId, error: E) -> bool {
-        if self.active_request_id != Some(request_id) {
-            self.ignored_results = self.ignored_results.saturating_add(1);
-            return false;
+        if let Some(guard) = self.accept_current_request(request_id) {
+            self.complete_failure_with_guard(guard, error);
+            true
+        } else {
+            false
         }
-
-        self.status = QueryStatus::Failure;
-        self.error = Some(error);
-        self.active_request_id = None;
-        self.fetching_direction = None;
-        self.signal = None;
-
-        true
     }
 
     pub fn is_current_request(&self, request_id: RequestId) -> bool {

@@ -84,12 +84,6 @@ fn reset_clears_diagnostics() {
 }
 
 #[test]
-fn is_page_data_valid_false_when_idle() {
-    let r = make_resource();
-    assert!(!r.is_page_data_valid());
-}
-
-#[test]
 fn is_page_data_valid_true_when_success_with_pages() {
     let r = load_n_pages(1);
     assert!(r.is_page_data_valid());

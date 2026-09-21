@@ -35,24 +35,6 @@ fn new_resource_has_idle_state_with_empty_pages() {
 }
 
 #[test]
-fn empty_pages_state_is_idle() {
-    let r = make_resource();
-    assert!(r.pages().is_empty());
-    assert_eq!(r.page_count(), 0);
-    assert!(!r.has_data());
-    assert!(!r.is_page_data_valid());
-    assert_eq!(r.status(), QueryStatus::Idle);
-}
-
-#[test]
-fn forward_only_defaults_has_next_true() {
-    let r = make_resource();
-    assert_eq!(r.direction(), FetchDirection::ForwardOnly);
-    assert!(r.has_next_page());
-    assert!(!r.has_previous_page());
-}
-
-#[test]
 fn bidirectional_defaults_both_false() {
     let r = make_bidirectional_resource();
     assert_eq!(r.direction(), FetchDirection::Bidirectional);

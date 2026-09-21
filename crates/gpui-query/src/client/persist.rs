@@ -252,13 +252,19 @@ impl QueryClient {
         };
         let now_ms = crate::client::time::current_time_ms();
         let max_age_ms = max_age.as_millis() as u64;
+        let collect = crate::client::bucket::shared::PersistCollect::new(
+            registry,
+            filter,
+            now_ms,
+            max_age_ms,
+        );
 
         let mut out: Vec<(QueryKey, PersistedEntry)> = Vec::new();
         for bucket in self.buckets.values() {
-            bucket.collect_persistable_into(cx, registry, now_ms, &mut out);
+            bucket.collect_persistable_into(cx, &collect, &mut out);
         }
         for bucket in self.infinite_buckets.values() {
-            bucket.collect_persistable_into(cx, registry, now_ms, &mut out);
+            bucket.collect_persistable_into(cx, &collect, &mut out);
         }
 
         if let Some(meta_map) = &self.persisted_meta {
@@ -270,15 +276,10 @@ impl QueryClient {
         }
 
         let mut snapshot = PersistSnapshot::new();
-        for (key, entry) in out {
-            if !filter.matches(&key) {
-                continue;
-            }
-            if max_age_ms > 0 && now_ms.saturating_sub(entry.cached_at) > max_age_ms {
-                continue;
-            }
-            snapshot.entries.insert(key.to_path(), entry);
-        }
+        snapshot.entries = out
+            .into_iter()
+            .map(|(key, entry)| (key.to_path(), entry))
+            .collect();
         snapshot
     }
 
@@ -324,9 +325,9 @@ impl QueryClient {
                     };
                     // Collect on the main thread (entity reads), save on background (IO).
                     bg.spawn(async move {
-                        if let Err(err) = persister.save(&snapshot).await {
+                        if let Err(_err) = persister.save(&snapshot).await {
                             #[cfg(debug_assertions)]
-                            eprintln!("persist_with: save failed: {err}");
+                            eprintln!("persist_with: save failed: {_err}");
                         }
                     })
                     .detach();

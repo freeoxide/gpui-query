@@ -183,3 +183,68 @@ fn has_more_propagated_on_prepend() {
 
     assert!(!r.has_previous_page());
 }
+
+#[test]
+fn has_more_true_on_prepend_preserves_has_previous() {
+    let mut r = make_resource();
+    let mut seq = RequestSequencer::new();
+
+    let id1 = r.begin_fetch_next(&mut seq, 1_000).unwrap();
+    r.complete_page_success(id1, vec!["page1"], true, true, 2_000);
+
+    r.set_has_previous_page(true);
+
+    let id2 = r.begin_fetch_previous(&mut seq, 3_000).unwrap();
+    r.complete_page_success(id2, vec!["page0"], true, false, 4_000);
+
+    assert!(
+        r.has_previous_page(),
+        "has_more=true should keep has_previous_page=true"
+    );
+    assert_eq!(r.page_count(), 2);
+    assert_eq!(r.first_page(), Some(&vec!["page0"]));
+}
+
+#[test]
+fn ignore_while_loading_prevents_previous_page_replacement() {
+    let mut r = InfiniteQueryResource::<Vec<&'static str>>::new(
+        QueryKey::from("items"),
+        CachePolicy::Ttl { ttl_ms: 60_000 },
+        RequestPolicy::IgnoreWhileLoading,
+    );
+    let mut seq = RequestSequencer::new();
+    r.set_has_previous_page(true);
+
+    let _id1 = r.begin_fetch_previous(&mut seq, 1_000).unwrap();
+    assert!(r.is_fetching_previous_page());
+
+    let id2 = r.begin_fetch_previous(&mut seq, 2_000);
+    assert!(
+        id2.is_none(),
+        "second begin_fetch_previous should be ignored"
+    );
+    assert_eq!(r.cancelled_count(), 0, "no cancellation on ignore");
+}
+
+#[test]
+fn ignore_while_loading_allows_cross_direction_fetch() {
+    let mut r = InfiniteQueryResource::<Vec<&'static str>>::new_bidirectional(
+        QueryKey::from("items"),
+        CachePolicy::Ttl { ttl_ms: 60_000 },
+        RequestPolicy::IgnoreWhileLoading,
+    );
+    let mut seq = RequestSequencer::new();
+    r.set_has_next_page(true);
+    r.set_has_previous_page(true);
+
+    let _id_next = r.begin_fetch_next(&mut seq, 1_000).unwrap();
+    assert!(r.is_fetching_next_page());
+
+    let id_prev = r.begin_fetch_previous(&mut seq, 2_000);
+    assert!(
+        id_prev.is_some(),
+        "cross-direction should succeed under IgnoreWhileLoading"
+    );
+    assert!(r.is_fetching_previous_page());
+    assert!(!r.is_fetching_next_page());
+}

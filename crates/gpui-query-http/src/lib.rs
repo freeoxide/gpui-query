@@ -64,12 +64,11 @@ pub enum ParseError {
 }
 
 /// Derives a [`CachePolicy`] from response `Cache-Control` headers ("server
-/// wins"): `no-store`/`no-cache` anywhere wins regardless of position (RFC
-/// 9111 §5.2.2); otherwise the first `max-age` sets the TTL, falling back to
-/// `s-maxage` only when absent (private cache; §5.2.2.10), and a
-/// `stale-while-revalidate` alongside yields the SWR policy. Duplicates keep
-/// their first occurrence (§4.2.1); over-large delta-seconds saturate
-/// (§1.2.2); malformed values error as [`ParseError`].
+/// wins"): `no-store`/`no-cache` from any position wins (RFC 9111 §5.2.2),
+/// otherwise the first `max-age` (`s-maxage` as private-cache fallback,
+/// §5.2.2.10) with `stale-while-revalidate` if present; duplicates keep the
+/// first occurrence (§4.2.1), over-large delta-seconds saturate (§1.2.2),
+/// malformed values error as [`ParseError`].
 pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, ParseError> {
     // Option<Result>: first occurrence wins; errors surface only after the scan.
     let mut s_maxage: Option<Result<u64, ParseError>> = None;
@@ -162,6 +161,9 @@ fn split_cache_directives(raw: &str) -> impl Iterator<Item = &str> {
     })
 }
 
+// Errors echo attacker-controlled header bytes; bound them like core's sanitizer.
+const ERROR_VALUE_MAX_BYTES: usize = 512;
+
 fn parse_secs(is_stale: bool, raw: &str) -> Result<u64, ParseError> {
     if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
         return Ok(match raw.parse::<u128>() {
@@ -170,10 +172,19 @@ fn parse_secs(is_stale: bool, raw: &str) -> Result<u64, ParseError> {
             Err(_) => u64::MAX,
         });
     }
-    Err(if is_stale {
-        ParseError::InvalidStaleWhileRevalidate(raw.to_string())
+    let value = if raw.len() <= ERROR_VALUE_MAX_BYTES {
+        raw.to_string()
     } else {
-        ParseError::InvalidMaxAge(raw.to_string())
+        let mut cut = ERROR_VALUE_MAX_BYTES;
+        while !raw.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        format!("{}...[truncated]", &raw[..cut])
+    };
+    Err(if is_stale {
+        ParseError::InvalidStaleWhileRevalidate(value)
+    } else {
+        ParseError::InvalidMaxAge(value)
     })
 }
 
@@ -351,6 +362,78 @@ mod tests {
     }
 
     #[test]
+    fn no_cache_with_field_argument_is_no_cache() {
+        assert_eq!(
+            cache_policy_from_headers(&cc("no-cache=\"Set-Cookie\"")).unwrap(),
+            CachePolicy::NoCache
+        );
+    }
+
+    #[test]
+    fn quoted_argument_cannot_smuggle_no_store() {
+        let policy = cache_policy_from_headers(&cc("private=\"no-store\", max-age=600")).unwrap();
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 600_000 });
+    }
+
+    #[test]
+    fn empty_max_age_value_is_typed_error() {
+        let err = cache_policy_from_headers(&cc("max-age=")).unwrap_err();
+        assert!(matches!(err, ParseError::InvalidMaxAge(s) if s.is_empty()));
+    }
+
+    #[test]
+    fn max_age_overflow_beyond_u128_saturates() {
+        let policy =
+            cache_policy_from_headers(&cc(&format!("max-age={}", "9".repeat(45)))).unwrap();
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: u64::MAX });
+    }
+
+    #[test]
+    fn swr_overflow_beyond_u128_saturates() {
+        let policy = cache_policy_from_headers(&cc(&format!(
+            "max-age=10, stale-while-revalidate={}",
+            "9".repeat(45)
+        )))
+        .unwrap();
+        assert_eq!(
+            policy,
+            CachePolicy::StaleWhileRevalidate {
+                ttl_ms: 10_000,
+                stale_ms: u64::MAX
+            }
+        );
+    }
+
+    #[test]
+    fn tabs_around_equals_are_tolerated() {
+        let policy = cache_policy_from_headers(&cc("max-age\t=\t60")).unwrap();
+        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 60_000 });
+    }
+
+    #[test]
+    fn invalid_value_is_truncated_in_error_text() {
+        let err =
+            cache_policy_from_headers(&cc(&format!("max-age={}", "x".repeat(600)))).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.ends_with("...[truncated]"),
+            "unbounded error text: {} bytes",
+            text.len()
+        );
+        assert!(
+            text.len()
+                <= "invalid max-age value: ".len() + ERROR_VALUE_MAX_BYTES + "...[truncated]".len()
+        );
+    }
+
+    #[test]
+    fn invalid_value_truncation_lands_on_char_boundary() {
+        let raw = format!("{}{}", "x".repeat(511), "é".repeat(60));
+        let err = parse_secs(false, &raw).unwrap_err();
+        assert!(err.to_string().ends_with("...[truncated]"));
+    }
+
+    #[test]
     fn cache_meta_serde_roundtrip() {
         let meta = CacheMeta {
             etag: Some("\"abc\"".to_string()),
@@ -367,4 +450,10 @@ mod tests {
         assert_eq!(back.stale_for, meta.stale_for);
         assert_eq!(back.stored_at, meta.stored_at);
     }
+}
+
+#[cfg(all(doctest, feature = "reqwest"))]
+mod readme_doctests {
+    #[doc = include_str!("../README.md")]
+    struct Readme;
 }

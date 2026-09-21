@@ -1,8 +1,6 @@
-//! Infinite query resource for managing paginated data.
-//!
-//! Pages live in a `VecDeque<Arc<T>>` (O(1) append/prepend); a bounded
-//! `max_pages` (default 50) evicts from the opposite side, and
-//! `set_max_pages(Some(0))` means unbounded.
+//! Infinite query resource for paginated data. Pages live in a
+//! `VecDeque<Arc<T>>` (O(1) append/prepend); `max_pages` (default 50) evicts
+//! from the opposite side, and `set_max_pages(Some(0))` means unbounded.
 
 mod accessors;
 mod lifecycle;

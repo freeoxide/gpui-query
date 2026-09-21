@@ -100,6 +100,25 @@ fn infinite_query_set_retry_policy() {
 }
 
 #[test]
+fn infinite_query_reset_preserves_retry_policy() {
+    let mut r = InfiniteQueryResource::<Vec<String>>::new(
+        QueryKey::from("items"),
+        CachePolicy::Ttl { ttl_ms: 60_000 },
+        RequestPolicy::LatestWins,
+    );
+    let policy = RetryPolicy::new(10)
+        .with_delay(500)
+        .with_exponential_backoff();
+    r.set_retry_policy(policy.clone());
+    r.reset();
+    assert_eq!(
+        r.retry_policy(),
+        &policy,
+        "retry_policy should survive reset"
+    );
+}
+
+#[test]
 fn infinite_query_timestamps_on_lifecycle() {
     let mut r = InfiniteQueryResource::<Vec<String>>::new(
         QueryKey::from("items"),

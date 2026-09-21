@@ -1,36 +1,5 @@
 //! Cached data projected into a derived shape, re-running only when the data
 //! changes; the hook returns a `MappedQueryResource<T, U, E>`.
-//!
-//! # Usage
-//!
-//! ```no_run
-//! use gpui_query::hook::{use_query_select, QueryOptions};
-//! use gpui_query::core::SelectTransform;
-//! # #[derive(Clone, PartialEq)]
-//! # struct User;
-//! # #[derive(Clone, Debug)]
-//! # struct MyError;
-//!
-//! struct UserCountView {
-//!     mapped: gpui::Entity<gpui_query::core::MappedQueryResource<Vec<User>, usize, MyError>>,
-//!     _subs: (gpui::Subscription, gpui::Subscription),
-//! }
-//!
-//! impl UserCountView {
-//!     fn new(cx: &mut gpui::Context<Self>) -> Self {
-//!         let count_transform = SelectTransform::new(|users: &Vec<User>| users.len());
-//!         let (mapped, query_entity, subs) = use_query_select(
-//!             QueryOptions::new("users"),
-//!             count_transform,
-//!             |signal| async move {
-//!                 Ok(vec![])
-//!             },
-//!             cx,
-//!         );
-//!         Self { mapped, _subs: subs }
-//!     }
-//! }
-//! ```
 
 use std::sync::Arc;
 
@@ -55,6 +24,37 @@ pub type QuerySelectResult<T, U, E> = (
 /// let count = mapped.read(cx).data(); // transform runs once; reuse `count`
 /// # }
 /// ```
+///
+/// # Example
+///
+/// ```no_run
+/// use gpui_query::hook::{use_query_select, QueryOptions};
+/// use gpui_query::core::SelectTransform;
+/// # #[derive(Clone, PartialEq)]
+/// # struct User;
+/// # #[derive(Clone, Debug)]
+/// # struct MyError;
+///
+/// struct UserCountView {
+///     mapped: gpui::Entity<gpui_query::core::MappedQueryResource<Vec<User>, usize, MyError>>,
+///     _subs: (gpui::Subscription, gpui::Subscription),
+/// }
+///
+/// impl UserCountView {
+///     fn new(cx: &mut gpui::Context<Self>) -> Self {
+///         let count_transform = SelectTransform::new(|users: &Vec<User>| users.len());
+///         let (mapped, query_entity, subs) = use_query_select(
+///             QueryOptions::new("users"),
+///             count_transform,
+///             |signal| async move {
+///                 Ok(vec![])
+///             },
+///             cx,
+///         );
+///         Self { mapped, _subs: subs }
+///     }
+/// }
+/// ```
 pub fn use_query_select<T, U, E, C, F, Fut>(
     options: impl Into<QueryOptions>,
     transform: SelectTransform<T, U>,
@@ -78,22 +78,26 @@ where
 
     let mapped_weak = mapped_entity.downgrade();
     let mapped_subscription = cx.observe(&query_entity, move |_, entity, cx| {
-        if let Some(mapped) = mapped_weak.upgrade() {
-            let cached: Option<Arc<T>> = mapped.read_with(cx, |m, _| m.source_arc());
+        let Some(mapped) = mapped_weak.upgrade() else {
+            return;
+        };
+        let cached: Option<Arc<T>> = mapped.read_with(cx, |m, _| m.source_arc());
 
-            let changed = entity.read_with(cx, |r, _| match (&cached, r.data()) {
+        // One read computes both the change verdict and the replacement value.
+        let update: Option<Option<Arc<T>>> = entity.read_with(cx, |r, _| {
+            let changed = match (&cached, r.data()) {
                 (Some(c), Some(fresh)) => c.as_ref() != fresh,
                 (None, None) => false,
                 _ => true,
-            });
+            };
+            changed.then(|| r.data().map(|d| Arc::new(d.clone())))
+        });
 
-            if changed {
-                let fresh: Option<Arc<T>> = entity.read(cx).data().map(|d| Arc::new(d.clone()));
-                mapped.update(cx, |m, cx2| {
-                    m.update_source(fresh);
-                    cx2.notify();
-                });
-            }
+        if let Some(fresh) = update {
+            mapped.update(cx, |m, cx| {
+                m.update_source(fresh);
+                cx.notify();
+            });
         }
     });
 

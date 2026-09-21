@@ -1,21 +1,57 @@
-//! Plain-query fetch tasks are deliberately detached: stale writes are guarded
-//! by the two-phase `accept_current_request` protocol, and each task holds
-//! only a `WeakEntity`, so it self-terminates on entity drop.
+//! Fetch tasks are deliberately detached: stale writes are guarded by the
+//! two-phase `accept_current_request` protocol, and each task holds only a
+//! `WeakEntity`, so it self-terminates on entity drop.
 
 use gpui::{BorrowAppContext as _, Context, Entity, Subscription};
+#[cfg(not(debug_assertions))]
+use gpui::AppContext as _;
 
 use crate::client::{QueryClient, QueryObserver};
-use crate::core::{Fetched, QueryFetchMode, QueryKey, QueryResource, QuerySignal, QueryStatus};
+use crate::core::{
+    CachePolicy, Fetched, QueryFetchMode, QueryKey, QueryResource, QuerySignal, QueryStatus,
+    RequestPolicy,
+};
 
-use super::current_time_ms;
+use super::QueryOptions;
 use super::fetch_retry::{
     FetchedLike, begin_request_on_entity, fetch_signal_with_retry, fetch_with_retry,
 };
 
 /// Creates or reuses the resource in the global [`QueryClient`] and spawns a
 /// fetch if it is idle; call it in a constructor, never in `render`.
+///
+/// # Example
+///
+/// ```no_run
+/// use gpui_query::hook::use_query;
+/// use gpui_query::{QueryOptions, CachePolicy, RequestPolicy};
+/// # #[derive(Clone)]
+/// # struct User;
+/// # #[derive(Clone, Debug)]
+/// # struct MyError;
+///
+/// struct MyView {
+///     users: gpui::Entity<gpui_query::QueryResource<Vec<User>, MyError>>,
+///     _subscription: gpui::Subscription,
+/// }
+///
+/// impl MyView {
+///     fn new(cx: &mut gpui::Context<Self>) -> Self {
+///         let (users, _subscription) = use_query(
+///             QueryOptions::new("users")
+///                 .cache_policy(CachePolicy::Ttl { ttl_ms: 60_000 })
+///                 .request_policy(RequestPolicy::LatestWins),
+///             |signal| async move {
+///                 Ok(vec![])
+///             },
+///             cx,
+///         );
+///         Self { users, _subscription }
+///     }
+/// }
+/// ```
 pub fn use_query<T, E, C, F, Fut>(
-    options: impl Into<crate::hook::QueryOptions>,
+    options: impl Into<QueryOptions>,
     fetcher: F,
     cx: &mut Context<C>,
 ) -> (Entity<QueryResource<T, E>>, Subscription)
@@ -32,7 +68,7 @@ where
 /// A fetcher returning [`Fetched::with_policy`](crate::core::Fetched::with_policy)
 /// overrides the resource's stored policy right after success (server wins).
 pub fn use_query_with_policy<T, E, C, F, Fut>(
-    options: impl Into<crate::hook::QueryOptions>,
+    options: impl Into<QueryOptions>,
     fetcher: F,
     cx: &mut Context<C>,
 ) -> (Entity<QueryResource<T, E>>, Subscription)
@@ -47,7 +83,7 @@ where
 }
 
 fn use_query_impl<T, E, C, F, Fut, Out>(
-    options: crate::hook::QueryOptions,
+    options: QueryOptions,
     fetcher: F,
     cx: &mut Context<C>,
 ) -> (Entity<QueryResource<T, E>>, Subscription)
@@ -59,7 +95,7 @@ where
     F: Fn(QuerySignal) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<Out, E>> + Send + 'static,
 {
-    let crate::hook::QueryOptions {
+    let QueryOptions {
         key,
         cache_policy,
         request_policy,
@@ -82,11 +118,11 @@ where
         {
             let signal = signal.unwrap_or_else(QuerySignal::new);
             let weak = entity.downgrade();
-            let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+            cx.spawn(async move |_this, cx| {
                 fetch_signal_with_retry(fetcher, signal, request_id, &retry_policy, &weak, cx)
                     .await;
-            });
-            task.detach();
+            })
+            .detach();
         }
     }
 
@@ -96,8 +132,8 @@ where
 /// Signal-free fetcher variant; prefer the signal-accepting [`use_query`].
 pub fn use_query_unsignalled<T, E, C, F, Fut>(
     key: QueryKey,
-    cache_policy: crate::core::CachePolicy,
-    request_policy: crate::core::RequestPolicy,
+    cache_policy: CachePolicy,
+    request_policy: RequestPolicy,
     fetcher: F,
     cx: &mut Context<C>,
 ) -> (Entity<QueryResource<T, E>>, Subscription)
@@ -108,18 +144,10 @@ where
     F: Fn() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    let (entity, subscription) = use_query_manual(key.clone(), cache_policy, request_policy, cx);
+    let (entity, subscription) = use_query_manual(key, cache_policy, request_policy, cx);
 
-    if entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle)
-        && let (Some(request_id), _signal) =
-            begin_request_on_entity(&entity, cx, QueryFetchMode::Normal, Some(key))
-    {
-        let weak = entity.downgrade();
-        let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-        let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
-            fetch_with_retry(fetcher, request_id, &retry_policy, &weak, cx).await;
-        });
-        task.detach();
+    if entity.read_with(cx, |r, _| r.status() == QueryStatus::Idle) {
+        spawn_retry_fetch(&entity, fetcher, cx);
     }
 
     (entity, subscription)
@@ -128,7 +156,7 @@ where
 /// Consumes only `key`, `cache_policy`, and `request_policy`; use
 /// [`use_query`] to honor the rest.
 pub fn use_query_manual_opts<T, E, C>(
-    options: impl Into<crate::hook::QueryOptions>,
+    options: impl Into<QueryOptions>,
     cx: &mut Context<C>,
 ) -> (Entity<QueryResource<T, E>>, Subscription)
 where
@@ -141,7 +169,7 @@ where
 }
 
 pub fn use_query_unsignalled_opts<T, E, C, F, Fut>(
-    options: impl Into<crate::hook::QueryOptions>,
+    options: impl Into<QueryOptions>,
     fetcher: F,
     cx: &mut Context<C>,
 ) -> (Entity<QueryResource<T, E>>, Subscription)
@@ -165,8 +193,8 @@ where
 /// Entity + observer without starting a fetch; panics in debug builds when no [`QueryClient`] global is set (release falls back to a standalone entity).
 pub fn use_query_manual<T, E, C>(
     key: QueryKey,
-    cache_policy: crate::core::CachePolicy,
-    request_policy: crate::core::RequestPolicy,
+    cache_policy: CachePolicy,
+    request_policy: RequestPolicy,
     cx: &mut Context<C>,
 ) -> (Entity<QueryResource<T, E>>, Subscription)
 where
@@ -181,11 +209,6 @@ where
     } else {
         #[cfg(debug_assertions)]
         {
-            eprintln!(
-                "use_query_manual: no QueryClient set via cx.set_global(). \
-                 Falling back to standalone entity (no shared caching, no GC). \
-                 Call cx.set_global(QueryClient::new()) in your app setup."
-            );
             panic!(
                 "use_query_manual: QueryClient is not initialized. \
                  Call cx.set_global(QueryClient::new()) before using query hooks."
@@ -199,15 +222,11 @@ where
 
     let observer = QueryObserver::new(&entity);
     let Some(subscription) = observer.observe(cx) else {
-        #[cfg(debug_assertions)]
-        panic!(
-            "QueryObserver::observe failed: entity was just created and cannot be dropped. \
-             This indicates a GPUI internal regression."
+        debug_assert!(
+            false,
+            "QueryObserver::observe failed: entity was just created and cannot be dropped"
         );
-        #[cfg(not(debug_assertions))]
-        {
-            return (entity, Subscription::new(|| {}));
-        }
+        return (entity, Subscription::new(|| {}));
     };
 
     (entity, subscription)
@@ -226,7 +245,7 @@ pub fn fetch_query<T, E, C, F, Fut>(
     F: Fn() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
-    fetch_query_impl(entity, fetcher, cx);
+    spawn_retry_fetch(entity, fetcher, cx);
 }
 
 /// [`fetch_query`] whose fetcher may return [`Fetched<T>`](crate::core::Fetched)
@@ -242,10 +261,10 @@ pub fn fetch_query_with_policy<T, E, C, F, Fut>(
     F: Fn() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<Fetched<T>, E>> + Send + 'static,
 {
-    fetch_query_impl(entity, fetcher, cx);
+    spawn_retry_fetch(entity, fetcher, cx);
 }
 
-fn fetch_query_impl<T, E, C, F, Fut, Out>(
+fn spawn_retry_fetch<T, E, C, F, Fut, Out>(
     entity: &Entity<QueryResource<T, E>>,
     fetcher: F,
     cx: &mut Context<C>,
@@ -264,10 +283,10 @@ fn fetch_query_impl<T, E, C, F, Fut, Out>(
     };
     let weak = entity.downgrade();
     let retry_policy = entity.read_with(cx, |r, _| r.retry_policy().clone());
-    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+    cx.spawn(async move |_this, cx| {
         fetch_with_retry(fetcher, request_id, &retry_policy, &weak, cx).await;
-    });
-    task.detach();
+    })
+    .detach();
 }
 
 /// `FnOnce` fetcher, so no retries; staleness is guarded by
@@ -291,31 +310,27 @@ pub fn fetch_query_with_signal<T, E, C, F, Fut>(
     let signal = signal.unwrap_or_else(QuerySignal::new);
     let weak = entity.downgrade();
 
-    let task: gpui::Task<()> = cx.spawn(async move |_this, cx| {
+    cx.spawn(async move |_this, cx| {
         let result = fetcher(signal).await;
 
-        let now_ms = current_time_ms();
+        let now_ms = super::current_time_ms();
         let Some(entity) = weak.upgrade() else { return };
 
         let _ = entity.update(cx, |resource, cx| {
             if let Some(guard) = resource.accept_current_request(request_id) {
                 match result {
                     Ok(data) => {
+                        resource.reset_retry_count();
                         resource.complete_success(guard, data, now_ms);
                     }
                     Err(error) => {
+                        resource.reset_retry_count();
                         resource.complete_failure(guard, error, now_ms);
                     }
                 }
                 cx.notify();
-            } else {
-                #[cfg(debug_assertions)]
-                eprintln!(
-                    "DEBUG: fetch_query_with_signal: request {} no longer active, result discarded",
-                    request_id.label()
-                );
             }
         });
-    });
-    task.detach();
+    })
+    .detach();
 }

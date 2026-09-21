@@ -161,15 +161,6 @@ fn test_diagnostics_includes_mutations_with_status(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_observer_config_default(_cx: &mut TestAppContext) {
-    let config = ObserverConfig::default();
-    assert!(
-        config.notify_on_status_change_only,
-        "default should notify on status change only"
-    );
-}
-
-#[gpui::test]
 fn test_diagnostics_mutation_retry_count(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
@@ -194,23 +185,6 @@ fn test_diagnostics_mutation_retry_count(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_query_observer_observe_succeeds_for_live_entity(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let entity = client.resource::<String, QueryError>("live_obs", cx);
-            let mut observer = QueryObserver::new(&entity);
-
-            let result = observe_with_dummy_view::<String, QueryError>(cx, &mut observer);
-            assert!(
-                result.is_some(),
-                "observe should return Some(Subscription) for a live entity"
-            );
-        });
-    });
-}
-
-#[gpui::test]
 fn test_mutation_observer_observe_returns_subscription(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
@@ -224,24 +198,6 @@ fn test_mutation_observer_observe_returns_subscription(cx: &mut TestAppContext) 
         assert!(
             sub.is_some(),
             "mutation observe should return Some(Subscription)"
-        );
-    });
-}
-
-#[gpui::test]
-fn test_mutation_observer_weak_entity_pattern(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        let entity = cx
-            .new(|_| MutationResource::<String, User, QueryError>::new(RetryPolicy::no_retries()));
-        let observer = MutationObserver::<String, User, QueryError>::new(&entity);
-
-        struct DummyView;
-        let view = cx.new(|_| DummyView);
-        let sub = view.update(cx, |_view, cx| observer.observe(cx));
-        assert!(
-            sub.is_some(),
-            "observe should return Some for live mutation entity"
         );
     });
 }

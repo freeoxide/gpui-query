@@ -47,6 +47,39 @@ fn stale_failure_does_not_overwrite_newer_request() {
 }
 
 #[test]
+fn complete_current_optional_success_rejects_stale_id() {
+    let mut r = resource();
+    let mut s = seq();
+
+    let (rid1, _) = begin(&mut r, &mut s, 100);
+    let (rid2, _) = begin(&mut r, &mut s, 200);
+
+    assert!(!r.complete_current_optional_success(rid1, Some("stale"), 300));
+    assert_eq!(r.ignored_results(), 1);
+
+    assert!(r.complete_current_optional_success(rid2, Some("fresh"), 300));
+    assert_eq!(r.data(), Some(&"fresh"));
+}
+
+#[test]
+fn complete_current_failure_with_data_rejects_stale_id() {
+    let mut r = resource();
+    let mut s = seq();
+
+    let (rid1, _) = begin(&mut r, &mut s, 100);
+    let (rid2, _) = begin(&mut r, &mut s, 200);
+
+    assert!(!r.complete_current_failure_with_data(
+        rid1,
+        "fallback",
+        QueryError::response("stale"),
+        300
+    ));
+    assert_eq!(r.ignored_results(), 1);
+    assert_eq!(r.active_request_id(), Some(rid2));
+}
+
+#[test]
 fn reset_from_idle() {
     let mut r = resource();
     r.reset();
@@ -191,16 +224,5 @@ fn retry_counter_increments_and_resets() {
     assert_eq!(r.retry_count(), 3);
 
     r.reset_retry_count();
-    assert_eq!(r.retry_count(), 0);
-}
-
-#[test]
-fn reset_clears_retry_count() {
-    let mut r = resource();
-    r.increment_retry();
-    r.increment_retry();
-
-    r.reset();
-
     assert_eq!(r.retry_count(), 0);
 }

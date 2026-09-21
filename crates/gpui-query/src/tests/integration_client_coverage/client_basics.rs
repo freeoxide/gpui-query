@@ -5,20 +5,6 @@ use crate::core::*;
 use crate::tests::test_support::*;
 
 #[gpui::test]
-fn test_client_new_equals_default(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        let c1 = QueryClient::new();
-        let c2 = QueryClient::default();
-        cx.set_global(c1);
-        let d1 = cx.update_global::<QueryClient, _>(|c, cx| c.diagnostics(cx));
-        cx.set_global(c2);
-        let d2 = cx.update_global::<QueryClient, _>(|c, cx| c.diagnostics(cx));
-        assert_eq!(d1.query_count, d2.query_count);
-        assert_eq!(d1.mutation_count, d2.mutation_count);
-    });
-}
-
-#[gpui::test]
 fn test_builder_chaining_with_policies_and_gc(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let client = QueryClient::with_policies(

@@ -1,6 +1,6 @@
-//! All entrypoints funnel into [`run_mutation_loop_inner`], whose `Fn(&V)`
-//! mutator borrows the variables from the stored `Arc<V>` (no `V::clone` per
-//! retry); the `Fn(V)` public entrypoints adapt at the call site.
+//! The retry loop's `Fn(&V)` mutator borrows the variables from the stored
+//! `Arc<V>` (no `V::clone` per retry); the `Fn(V)` public entrypoints adapt
+//! at the call site.
 
 use std::sync::Arc;
 
@@ -14,7 +14,7 @@ use crate::hook::read_entity;
 /// a transient Failure between attempts; only exhausted retries produce a
 /// terminal `complete_failure()`. Stops once the mutation leaves Loading
 /// (cancelled or reset); intermediate calls don't notify (observer dedupes).
-async fn run_mutation_loop_inner<V, T, E, F, Fut>(
+pub(super) async fn run_mutation_loop<V, T, E, F, Fut>(
     weak: &gpui::WeakEntity<MutationResource<V, T, E>>,
     variables: Arc<V>,
     mutator: F,
@@ -28,6 +28,8 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
     F: Fn(&V) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
 {
+    let needs_data =
+        |cb: &MutationCallbacks<T, E>| cb.on_success.is_some() || cb.on_settled.is_some();
     let mut attempt: u32 = 0;
 
     loop {
@@ -35,7 +37,10 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
 
         match result {
             Ok(data) => {
-                let data_for_callback = callbacks.is_some().then(|| data.clone());
+                let data_for_callback = callbacks
+                    .as_ref()
+                    .is_some_and(needs_data)
+                    .then(|| data.clone());
 
                 let Some(entity) = weak.upgrade() else {
                     if let Some(ref cb) = callbacks
@@ -47,6 +52,7 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                 };
                 let _ = entity.update(cx, |resource, cx| {
                     resource.complete_success(data);
+                    resource.reset_retry_count();
                     cx.notify();
                     #[cfg(feature = "persist")]
                     cx.default_global::<crate::client::CacheMutation>();
@@ -67,7 +73,10 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                 return;
             }
             Err(error) => {
-                let error_for_callback = callbacks.is_some().then(|| error.clone());
+                let error_for_callback = callbacks
+                    .as_ref()
+                    .is_some_and(|cb| cb.on_error.is_some() || cb.on_settled.is_some())
+                    .then(|| error.clone());
 
                 if retry_policy.should_retry(attempt) {
                     let delay_ms = retry_policy.delay_for_attempt(attempt);
@@ -92,10 +101,6 @@ async fn run_mutation_loop_inner<V, T, E, F, Fut>(
                     };
                     if !read_entity(&entity, cx, |r, _| r.is_loading()).unwrap_or(false) {
                         fire_error_callbacks(&callbacks, &error_for_callback);
-                        #[cfg(debug_assertions)]
-                        eprintln!(
-                            "DEBUG: run_mutation_loop_inner: mutation no longer Loading after retry delay, aborting"
-                        );
                         return;
                     }
 
@@ -138,37 +143,4 @@ fn fire_error_callbacks<T, E>(
             f(None, error_for_callback.as_ref());
         }
     }
-}
-
-pub(super) async fn run_mutation_loop_by_ref<V, T, E, F, Fut>(
-    weak: &gpui::WeakEntity<MutationResource<V, T, E>>,
-    variables: Arc<V>,
-    mutator: F,
-    retry_policy: &RetryPolicy,
-    cx: &mut gpui::AsyncApp,
-) where
-    V: Send + Sync + 'static,
-    T: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + std::fmt::Debug + 'static,
-    F: Fn(&V) -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
-{
-    run_mutation_loop_inner(weak, variables, mutator, retry_policy, None, cx).await;
-}
-
-pub(super) async fn run_mutation_loop_by_ref_with_callbacks<V, T, E, F, Fut>(
-    weak: &gpui::WeakEntity<MutationResource<V, T, E>>,
-    variables: Arc<V>,
-    mutator: F,
-    retry_policy: &RetryPolicy,
-    callbacks: MutationCallbacks<T, E>,
-    cx: &mut gpui::AsyncApp,
-) where
-    V: Send + Sync + 'static,
-    T: Clone + Send + Sync + 'static,
-    E: Clone + Send + Sync + std::fmt::Debug + 'static,
-    F: Fn(&V) -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
-{
-    run_mutation_loop_inner(weak, variables, mutator, retry_policy, Some(callbacks), cx).await;
 }

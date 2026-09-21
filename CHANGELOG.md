@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-09-21
+
+> Audit-driven fixes across all three crates: a release-profile compile break, wider secret redaction, retry counters that match their docs, RFC 9111 cache refresh, and a durability fix in the file persister.
+
+### Fixed
+
+#### `gpui-query` — release-profile compile break
+
+- `cargo build --release` with the `hook` feature failed to compile: a release-only fallback in `use_query` called `cx.new` without the `AppContext` trait in scope. Dev-profile builds were unaffected, which is why the test suite never saw it. CI now builds and lints the release profile on every push and pull request.
+
+#### `gpui-query` — wider secret redaction in error text
+
+- The sanitizer now catches the shapes secrets arrive in: underscore-bearing email local parts (`alice@secret_word@corp.com`), `bearer` and `token` values behind any mix of whitespace and `:`/`=` separators including doubled ones (`bearer ==`), digit-bearing TLDs (`alice@corp.c0m`, `a@b.0rg`), and trailing-dot hostnames (`alice@corp.com.`). Redaction only grows — nothing that was redacted before passes through now.
+
+#### `gpui-query` — `retry_count` behaves the same in every hook
+
+- A fetch result discarded by a newer request no longer clobbers the live entry's retry counter, `use_infinite_query` increments it between attempts, and `use_mutation` resets it when a mutation succeeds.
+
+#### `gpui-query-http` — `304` responses refresh stored entries
+
+- Per RFC 9111 §4.3.4, a validated `304` updates the stored response and its timestamp, unless the 304's own `Cache-Control` blocks caching. Previously the timestamp never moved, so a revalidated entry stayed stale forever after. A late 304 also no longer clobbers a concurrent refresh: the update applies only if the stored metadata is unchanged since the fetch began.
+
+#### `gpui-query-http` — parse errors cap echoed header bytes
+
+- `ParseError` values embed at most 512 bytes of the offending header, suffixed with `...[truncated]`, so hostile `Cache-Control` fields cannot balloon error text.
+
+#### `gpui-query-persist` — parent directory fsynced for bare filenames
+
+- `FilePersister::json("cache.json")` produced an empty parent path, so the post-rename directory fsync silently did nothing. Bare and relative paths now resolve their parent correctly, and the raw `fsync` FFI call is replaced by `File::sync_all`.
+
+### Changed
+
+- READMEs are compiled as doctests, which caught every quick-start calling `App::new()` (never a method on gpui 0.2.2) plus a handful of drifted signatures, all now fixed.
+- Version literals in the skill packs are synced by the release workflow, alongside the READMEs and the docs install page.
+
 ## [0.2.1] - 2026-09-19
 
 > Wasm32 compile support for `core` and `gpui-query-http`, publish fixes for the satellite crates, and real test coverage in CI.

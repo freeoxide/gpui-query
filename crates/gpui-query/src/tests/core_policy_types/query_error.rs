@@ -7,6 +7,14 @@ fn query_error_kinds() {
     assert_eq!(QueryError::response("x").kind(), QueryErrorKind::Response);
     assert_eq!(QueryError::transport("x").kind(), QueryErrorKind::Transport);
     assert_eq!(QueryError::unknown("x").kind(), QueryErrorKind::Unknown);
+    assert_eq!(
+        QueryError::new(QueryErrorKind::Transport, "timeout").kind(),
+        QueryErrorKind::Transport
+    );
+    assert_eq!(
+        QueryError::new(QueryErrorKind::Transport, "timeout").message(),
+        "timeout"
+    );
 }
 
 #[test]

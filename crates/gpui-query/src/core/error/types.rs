@@ -1,5 +1,3 @@
-//! Core error types for query operations.
-
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

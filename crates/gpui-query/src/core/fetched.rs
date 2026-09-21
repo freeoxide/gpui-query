@@ -1,7 +1,6 @@
-//! Fetcher result wrapper for "server wins" cache policy.
-//!
-//! Returned by `*_with_policy` fetchers; a `Some` policy overrides the caller's
-//! per-query policy. `meta` exists only under `persist` so core stays serde_json-free.
+//! Fetcher result wrapper for "server wins" caching: a `Some` policy
+//! overrides the caller's per-query one. `meta` exists only under `persist`
+//! so core stays serde_json-free.
 
 use crate::core::policy::CachePolicy;
 #[cfg(feature = "persist")]
