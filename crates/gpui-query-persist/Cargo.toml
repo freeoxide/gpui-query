@@ -26,6 +26,11 @@ serde_json = { workspace = true }
 [dev-dependencies]
 gpui = { workspace = true }
 pollster = "0.4"
+criterion = { workspace = true }
+
+[[bench]]
+name = "persist_round_trip"
+harness = false
 
 [package.metadata.docs.rs]
 all-features = true

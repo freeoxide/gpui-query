@@ -36,6 +36,23 @@ ahash = { version = "0.8", default-features = false, features = ["std", "compile
 serde_json = { workspace = true }
 gpui = { workspace = true, features = ["test-support"] }
 proptest = "1"
+criterion = { workspace = true }
+
+[[bench]]
+name = "sanitize"
+harness = false
+
+[[bench]]
+name = "key_path"
+harness = false
+
+[[bench]]
+name = "request_policy"
+harness = false
+
+[[bench]]
+name = "request_id"
+harness = false
 
 [package.metadata.docs.rs]
 all-features = true
