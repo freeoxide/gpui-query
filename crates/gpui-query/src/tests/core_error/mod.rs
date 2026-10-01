@@ -172,6 +172,20 @@ fn sanitized_redacts_dotless_domain_email_with_trailing_dot() {
 }
 
 #[test]
+fn sanitized_redacts_version_like_local_at_letter_domain_token() {
+    let clean = QueryError::response("build 1.0@beta failed").sanitized();
+    assert!(!clean.message().contains("1.0@beta"));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_redacts_password_shaped_at_token_without_scheme() {
+    let clean = QueryError::response("admin:P@ssw0rd! refused").sanitized();
+    assert!(!clean.message().contains("P@ssw0rd"));
+    assert_eq!(clean.message(), "admin:[REDACTED_EMAIL]! refused");
+}
+
+#[test]
 fn sanitized_redacts_mongodb_connection_string() {
     let clean = QueryError::transport("connect mongodb://admin:secret@host/db failed").sanitized();
     assert!(clean.message().contains("[REDACTED_CONNECTION]"));
