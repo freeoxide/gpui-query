@@ -251,16 +251,20 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         (entity, request_id)
     }
 
-    /// Scans only the stored mirrors, then confirms the winner with a single
-    /// entity read (the mirror can be stale if a fetch began after the last
-    /// refresh). Each retry marks the stale mirror and re-picks; a collected
-    /// weak ref fails the confirm and is removed in place.
+    /// Collected entries are age-zero candidates so they evict before any
+    /// live entry; the winner gets one confirming entity read (the mirror
+    /// can be stale if a fetch began after the last refresh). Each retry
+    /// marks the stale mirror and re-picks; a dead winner is removed in
+    /// place by the failed confirm.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
             let target = self
                 .entries
                 .iter()
                 .filter_map(|(key, entry)| {
+                    if !entry.entity.is_upgradable() {
+                        return Some((key, 0));
+                    }
                     if entry.loading {
                         return None;
                     }
