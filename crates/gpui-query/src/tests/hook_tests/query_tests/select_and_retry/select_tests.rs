@@ -1,7 +1,9 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use gpui::{AppContext as _, Entity, TestAppContext};
+use gpui::{AppContext as _, BorrowAppContext as _, Entity, TestAppContext};
 
+use crate::client::QueryClient;
 use crate::core::{
     CachePolicy, MappedQueryResource, QueryError, QueryResource, QueryStatus, RetryPolicy,
     SelectTransform,
@@ -301,4 +303,187 @@ fn test_use_query_select_multiple_transforms_same_query(cx: &mut TestAppContext)
         1,
         "only one fetch should have occurred — second select must be a cache hit"
     );
+}
+
+#[gpui::test]
+fn use_query_select_propagates_optimistic_set_query_data(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+
+    struct H {
+        mapped: Entity<MappedQueryResource<String, usize, QueryError>>,
+        _query: Entity<QueryResource<String, QueryError>>,
+        _subs: (gpui::Subscription, gpui::Subscription),
+    }
+
+    let harness = cx.new(|cx| {
+        let (mapped, query, subs) = use_query_select(
+            QueryOptions::new("select-optimistic").cache_policy(CachePolicy::Ttl { ttl_ms: 0 }),
+            SelectTransform::new(|data: &String| data.len()),
+            |_signal| async move { Ok::<_, QueryError>("first".to_string()) },
+            cx,
+        );
+        H {
+            mapped,
+            _query: query,
+            _subs: subs,
+        }
+    });
+
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        assert_eq!(harness.read(cx).mapped.read(cx).data(), Some(5));
+    });
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(
+                "select-optimistic",
+                "second-value".to_string(),
+                cx,
+            );
+        });
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        assert_eq!(
+            harness.read(cx).mapped.read(cx).data(),
+            Some(12),
+            "same-status optimistic write must propagate through the select projection"
+        );
+    });
+}
+
+#[gpui::test]
+fn use_query_select_propagates_equal_value_write_via_data_epoch(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+
+    struct H {
+        mapped: Entity<MappedQueryResource<String, usize, QueryError>>,
+        _query: Entity<QueryResource<String, QueryError>>,
+        _subs: (gpui::Subscription, gpui::Subscription),
+        sub2: Option<gpui::Subscription>,
+        counter: Arc<AtomicUsize>,
+    }
+
+    let harness = cx.new(|cx| {
+        let (mapped, query, subs) = use_query_select(
+            QueryOptions::new("select-equal-write"),
+            SelectTransform::new(|data: &String| data.len()),
+            |_signal| async move { Ok::<_, QueryError>("same".to_string()) },
+            cx,
+        );
+        H {
+            mapped,
+            _query: query,
+            _subs: subs,
+            sub2: None,
+            counter: Arc::new(AtomicUsize::new(0)),
+        }
+    });
+
+    cx.run_until_parked();
+
+    harness.update(cx, |h, cx| {
+        let counter = h.counter.clone();
+        h.sub2 = Some(cx.observe(&h.mapped, move |_, _, _| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }));
+    });
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(
+                "select-equal-write",
+                "same".to_string(),
+                cx,
+            );
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        harness.read_with(cx, |h, _| h.counter.load(Ordering::SeqCst)),
+        1,
+        "an equal-value data write still moves the data epoch and must reach the mapped entity"
+    );
+}
+
+struct CloneCounting {
+    value: u32,
+    clones: Arc<AtomicUsize>,
+}
+
+impl Clone for CloneCounting {
+    fn clone(&self) -> Self {
+        self.clones.fetch_add(1, Ordering::SeqCst);
+        Self {
+            value: self.value,
+            clones: Arc::clone(&self.clones),
+        }
+    }
+}
+
+impl PartialEq for CloneCounting {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+#[gpui::test]
+fn use_query_select_skips_clone_on_notify_without_data_write(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+
+    struct H {
+        mapped: Entity<MappedQueryResource<CloneCounting, u32, QueryError>>,
+        query: Entity<QueryResource<CloneCounting, QueryError>>,
+        _subs: (gpui::Subscription, gpui::Subscription),
+    }
+
+    let clones = Arc::new(AtomicUsize::new(0));
+    let fetched = CloneCounting {
+        value: 7,
+        clones: clones.clone(),
+    };
+
+    let harness = cx.new(|cx| {
+        let (mapped, query, subs) = use_query_select(
+            QueryOptions::new("select-no-clone"),
+            SelectTransform::new(|data: &CloneCounting| data.value),
+            move |_signal| {
+                let fetched = fetched.clone();
+                async move { Ok::<_, QueryError>(fetched) }
+            },
+            cx,
+        );
+        H {
+            mapped,
+            query,
+            _subs: subs,
+        }
+    });
+    cx.run_until_parked();
+
+    let baseline = clones.load(Ordering::SeqCst);
+    assert!(
+        baseline > 0,
+        "the fetch result was cloned into the projection"
+    );
+
+    let query_entity = cx.update(|cx| harness.read(cx).query.clone());
+    for _ in 0..5 {
+        cx.update(|cx| {
+            query_entity.update(cx, |_, cx| cx.notify());
+        });
+    }
+
+    assert_eq!(
+        clones.load(Ordering::SeqCst),
+        baseline,
+        "notifies that carry no data write must not re-clone T into the projection"
+    );
+    cx.update(|cx| {
+        assert_eq!(harness.read(cx).mapped.read(cx).data(), Some(7));
+    });
 }

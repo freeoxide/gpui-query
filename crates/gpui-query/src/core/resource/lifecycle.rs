@@ -18,8 +18,8 @@ impl<T, E> QueryResource<T, E> {
     }
 
     /// `Some(id)` is used as-is (bucket-scoped ids from the hook layer);
-    /// `None` falls back to the resource's own sequencer so ids stay
-    /// monotonic and collision-free.
+    /// `None` falls back to the resource's own sequencer, which mints from a
+    /// reserved scope so fallback ids never alias bucket-minted ones.
     pub fn begin_request_with_id(
         &mut self,
         maybe_request_id: Option<RequestId>,
@@ -145,6 +145,7 @@ impl<T, E> QueryResource<T, E> {
 
         if self.data.is_some() {
             self.previous_data = self.data.take();
+            self.data_epoch = self.data_epoch.saturating_add(1);
         }
 
         if let Some(signal) = self.signal.as_ref() {
@@ -175,6 +176,9 @@ impl<T, E> QueryResource<T, E> {
             signal.cancel();
         }
         self.status = QueryStatus::Idle;
+        if self.data.is_some() {
+            self.data_epoch = self.data_epoch.saturating_add(1);
+        }
         self.data = None;
         self.error = None;
         self.active_request_id = None;
@@ -195,6 +199,7 @@ impl<T, E> QueryResource<T, E> {
             self.data = Some(prev);
             self.status = QueryStatus::Success;
             self.error = None;
+            self.data_epoch = self.data_epoch.saturating_add(1);
             return true;
         }
         false
@@ -203,12 +208,14 @@ impl<T, E> QueryResource<T, E> {
     pub fn set_data(&mut self, data: T) {
         self.previous_data = self.data.take();
         self.data = Some(data);
+        self.data_epoch = self.data_epoch.saturating_add(1);
     }
 
     /// Status drops from `Success` to `Idle` so `Success` keeps implying data
     /// is available.
     pub fn clear_data(&mut self) {
         self.previous_data = self.data.take();
+        self.data_epoch = self.data_epoch.saturating_add(1);
         if self.status == QueryStatus::Success {
             self.status = QueryStatus::Idle;
         }

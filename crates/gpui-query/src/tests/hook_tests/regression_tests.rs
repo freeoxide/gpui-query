@@ -1,7 +1,9 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use gpui::{AppContext as _, Entity, TestAppContext};
+use gpui::{AppContext as _, BorrowAppContext as _, Entity, TestAppContext};
 
+use crate::client::QueryClient;
 use crate::core::{
     CachePolicy, InfiniteQueryResource, MutationResource, MutationStatus, QueryError, QueryKey,
     QueryResource, RequestPolicy, RetryPolicy,
@@ -389,4 +391,120 @@ fn hook_mutation_retry_count_reset_on_success(cx: &mut TestAppContext) {
              query family"
         );
     });
+}
+
+#[gpui::test]
+fn optimistic_set_query_data_reaches_mounted_use_query_observer(cx: &mut TestAppContext) {
+    setup_test(cx);
+
+    struct H {
+        _entity: Entity<QueryResource<String, QueryError>>,
+        _sub: gpui::Subscription,
+    }
+
+    let key = QueryKey::from("optimistic-notify");
+    let harness = cx.new(|cx| {
+        let (entity, sub) = use_query_manual::<String, QueryError, _>(
+            key.clone(),
+            CachePolicy::NoCache,
+            RequestPolicy::LatestWins,
+            cx,
+        );
+        H {
+            _entity: entity,
+            _sub: sub,
+        }
+    });
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_for_observer = hits.clone();
+    let _notified = harness.update(cx, |_, cx| {
+        cx.observe_self(move |_, _| {
+            hits_for_observer.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(key.clone(), "v1".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(key, "v2".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        2,
+        "both optimistic writes must re-render the mounted consumer; the second \
+         is a same-status write that only the data epoch lets through"
+    );
+}
+
+#[gpui::test]
+fn prefetch_completion_reaches_mounted_use_query_observer(cx: &mut TestAppContext) {
+    setup_test(cx);
+
+    struct H {
+        entity: Entity<QueryResource<String, QueryError>>,
+        _sub: gpui::Subscription,
+    }
+
+    let key = QueryKey::from("prefetch-notify");
+    let prepared = cx
+        .update(|cx| {
+            cx.update_global::<QueryClient, _>(|client, cx| {
+                client.prepare_fetch_query::<String, QueryError>(key.clone(), cx)
+            })
+        })
+        .expect("prepare_fetch_query should start");
+
+    let harness = cx.new(|cx| {
+        let (entity, sub) = use_query_manual::<String, QueryError, _>(
+            key.clone(),
+            CachePolicy::NoCache,
+            RequestPolicy::LatestWins,
+            cx,
+        );
+        assert_eq!(entity.entity_id(), prepared.entity.entity_id());
+        H { entity, _sub: sub }
+    });
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_for_observer = hits.clone();
+    let _notified = harness.update(cx, |_, cx| {
+        cx.observe_self(move |_, _| {
+            hits_for_observer.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    cx.update(|cx| {
+        prepared.complete_success("v1".to_string(), cx);
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(key, "v2".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        assert_eq!(
+            harness.read(cx).entity.read(cx).data(),
+            Some(&"v2".to_string())
+        );
+    });
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        2,
+        "prefetch completion and the same-status optimistic write must both \
+         re-render the mounted consumer"
+    );
 }

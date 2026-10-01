@@ -256,21 +256,27 @@ impl QueryClient {
 
         // Only Started and StaleCacheHit mean a fetch is actually wanted.
         let (request_id, signal) = entity.update(cx, |resource, _| {
-            let started = matches!(
-                resource.begin_request_with_id(
-                    Some(request_id),
-                    now_ms,
-                    crate::core::QueryFetchMode::Normal
-                ),
+            let active_before = resource.active_request_id();
+            match resource.begin_request_with_id(
+                Some(request_id),
+                now_ms,
+                crate::core::QueryFetchMode::Normal,
+            ) {
+                // IgnoreWhileLoading handing back the still-active id means a
+                // revalidate is already running; prefetch must not duplicate it.
+                crate::core::QueryBeginResult::StaleCacheHit {
+                    request_id,
+                    replaced_request_id: None,
+                    ..
+                } if Some(request_id) == active_before => None,
                 crate::core::QueryBeginResult::Started { .. }
-                    | crate::core::QueryBeginResult::StaleCacheHit { .. }
-            );
-            if !started {
-                return None;
+                | crate::core::QueryBeginResult::StaleCacheHit { .. } => {
+                    let rid = resource.active_request_id()?;
+                    let signal = resource.signal().cloned()?;
+                    Some((rid, signal))
+                }
+                _ => None,
             }
-            let rid = resource.active_request_id()?;
-            let signal = resource.signal().cloned()?;
-            Some((rid, signal))
         })?;
 
         Some(PreparedFetch {

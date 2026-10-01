@@ -46,7 +46,8 @@ impl<T> FetchedLike<T> for Fetched<T> {
 }
 
 /// Freshness check, `Loading` transition, and signal read in one
-/// `entity.update`; `(None, None)` means `CacheHit`/`IgnoredWhileLoading`.
+/// `entity.update`; `(None, None)` means no fetch: `CacheHit`,
+/// `IgnoredWhileLoading`, or a revalidate already in flight.
 ///
 /// With a [`QueryClient`], the bucket sequencer mints the `RequestId`, shared
 /// with `prepare_fetch_query` so the two never collide for the same key.
@@ -73,7 +74,15 @@ where
     };
 
     entity.update(cx, |resource, _cx| {
+        let active_before = resource.active_request_id();
         match resource.begin_request_with_id(maybe_request_id, now_ms, fetch_mode) {
+            // IgnoreWhileLoading hands back the still-active id unminted;
+            // spawning here would race the original fetcher.
+            QueryBeginResult::StaleCacheHit {
+                request_id,
+                replaced_request_id: None,
+                ..
+            } if Some(request_id) == active_before => (None, None),
             QueryBeginResult::Started { request_id, .. }
             | QueryBeginResult::StaleCacheHit { request_id, .. } => {
                 let signal = resource.signal().cloned();
