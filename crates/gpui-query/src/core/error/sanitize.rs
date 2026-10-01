@@ -74,9 +74,7 @@ fn redact_paths(input: Cow<'_, str>) -> Cow<'_, str> {
     redact_until_whitespace(&input, &lower, &PATH_NEEDLES, "[REDACTED_PATH]").into()
 }
 
-/// Per-needle cursors only ever advance: a `find` returning `None` at some
-/// offset stays `None` for every later offset, so each needle scans the
-/// message at most once in total.
+/// Per-needle cursors only advance: a `find` returning `None` stays `None` for every later offset, so each needle scans the message once in total.
 fn redact_until_whitespace(text: &str, lower: &str, needles: &[&str], replacement: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut offset = 0;
