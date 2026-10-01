@@ -42,6 +42,10 @@ impl<T: 'static, E: 'static> ObservableResource for InfiniteQueryResource<T, E> 
     fn observable_status(&self) -> QueryStatus {
         self.status()
     }
+
+    fn data_epoch(&self) -> u64 {
+        InfiniteQueryResource::data_epoch(self)
+    }
 }
 
 impl<V: 'static, T: 'static, E: 'static> ObservableResource for MutationResource<V, T, E> {
