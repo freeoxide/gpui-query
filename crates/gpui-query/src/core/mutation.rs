@@ -241,14 +241,15 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.retry_count = 0;
     }
 
-    /// No-op unless `Loading`; when effective, sets `Failure` and increments
-    /// `cancelled_count`.
+    /// No-op unless `Loading`; when effective, clears data, sets `Failure`,
+    /// and increments `cancelled_count`.
     pub fn cancel(&mut self, error: E) {
         if self.status != MutationStatus::Loading {
             return;
         }
         self.cancelled_count = self.cancelled_count.saturating_add(1);
         self.status = MutationStatus::Failure;
+        self.data = None;
         self.error = Some(error);
         if let Some(signal) = self.signal.as_ref() {
             signal.cancel();

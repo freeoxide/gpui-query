@@ -58,6 +58,21 @@ fn cancel_on_failure_is_noop() {
 }
 
 #[test]
+fn cancel_clears_data_from_previous_success() {
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
+    m.begin("vars");
+    m.complete_success(42);
+    m.begin("vars2");
+    m.cancel(QueryError::cancelled("x"));
+    assert!(m.is_failure());
+    assert!(
+        m.data().is_none(),
+        "data from previous success must be cleared on cancel"
+    );
+}
+
+#[test]
 fn cancelled_count_increments_across_mutations() {
     let mut m: MutationResource<&'static str, i32> =
         MutationResource::new(RetryPolicy::no_retries());
