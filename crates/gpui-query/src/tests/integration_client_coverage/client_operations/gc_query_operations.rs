@@ -69,6 +69,26 @@ fn test_gc_with_time_explicit_time_value(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn test_gc_with_time_before_entry_baseline_keeps_never_fetched_resource(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc_past_now");
+            let _e = client.resource::<String, QueryError>(key.clone(), cx);
+
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now.saturating_sub(60_000), cx);
+
+            assert!(
+                client.query::<String, QueryError>(&key).is_some(),
+                "a gc time older than the entry baseline must not evict a never-fetched \
+                 resource: age saturates to 0, below the gc_threshold"
+            );
+        });
+    });
+}
+
+#[gpui::test]
 fn test_gc_runs_across_all_bucket_types(cx: &mut TestAppContext) {
     setup_query_client_with_gc(cx, 1_000);
     cx.update(|cx| {

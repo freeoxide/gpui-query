@@ -438,3 +438,48 @@ fn test_evict_oldest_with_only_dead_entries_keeps_bucket_bounded(cx: &mut TestAp
         );
     });
 }
+
+#[gpui::test]
+fn test_evict_oldest_prefers_dead_entry_with_newest_mirror_at_capacity(cx: &mut TestAppContext) {
+    let mut bucket = QueryBucket::<String, QueryError>::new();
+    bucket.inner.max_entries = 2;
+
+    let live = cx.update(|cx| {
+        let live = create_evict_entry(&mut bucket, "evict_live_older", cx);
+        stamp_and_refresh(&mut bucket, &live, "evict_live_older", 1_000, cx);
+        live
+    });
+
+    cx.update(|cx| {
+        let dead = create_evict_entry(&mut bucket, "evict_dead_newest", cx);
+        stamp_and_refresh(&mut bucket, &dead, "evict_dead_newest", 2_000, cx);
+        drop(dead);
+    });
+
+    cx.update(|cx| {
+        create_evict_entry(&mut bucket, "evict_after_dead", cx);
+
+        assert!(
+            !bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_dead_newest")),
+            "collected entry must be evicted first even when its mirror age is \
+             the newest in the bucket"
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_live_older")),
+            "older live entry must survive while a collected entry can go"
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_after_dead"))
+        );
+    });
+    drop(live);
+}
