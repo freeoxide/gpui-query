@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use gpui::{AppContext as _, BorrowAppContext as _, Entity, TestAppContext};
@@ -9,7 +10,8 @@ use crate::client::{
     PersistSnapshot, PersistedEntry, Persister, QueryClient, hydrate,
 };
 use crate::core::{
-    InfiniteQueryResource, MutationResource, QueryError, QueryKey, QueryResource, QueryStatus,
+    InfiniteQueryResource, MutationResource, QueryError, QueryKey, QueryKeyFilter, QueryResource,
+    QueryStatus,
 };
 use crate::hook::{
     InfiniteQueryOptions, fetch_query, mutate, use_infinite_query, use_mutation, use_query_manual,
@@ -100,7 +102,8 @@ fn test_collect_persist_snapshot_skips_unregistered_types(cx: &mut TestAppContex
                 r.apply_success("data".to_string(), crate::client::current_time_ms())
             });
 
-            let snap = client.collect_persist_snapshot(&PersistFilter::All, Duration::from_secs(3600), cx);
+            let snap =
+                client.collect_persist_snapshot(&PersistFilter::All, Duration::from_secs(3600), cx);
             assert!(
                 snap.entries.is_empty(),
                 "unregistered type -> no value-carrying entry"
@@ -289,7 +292,11 @@ fn test_hydrate_rebuilds_multi_segment_keys(cx: &mut TestAppContext) {
             block_on_ready(hydrate(client, &persister, &prefix, DAY, cx))
         })
     });
-    assert!(outcome.is_ok(), "hydrate should succeed: {:?}", outcome.err());
+    assert!(
+        outcome.is_ok(),
+        "hydrate should succeed: {:?}",
+        outcome.err()
+    );
 
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
@@ -313,7 +320,11 @@ fn test_hydrate_rebuilds_multi_segment_keys(cx: &mut TestAppContext) {
             block_on_ready(hydrate(client, &persister, &exact, DAY, cx))
         })
     });
-    assert!(outcome.is_ok(), "hydrate should succeed: {:?}", outcome.err());
+    assert!(
+        outcome.is_ok(),
+        "hydrate should succeed: {:?}",
+        outcome.err()
+    );
 
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
@@ -779,4 +790,453 @@ fn block_on_ready<R>(fut: impl std::future::Future<Output = R>) -> R {
             Poll::Pending => std::hint::spin_loop(),
         }
     }
+}
+
+#[gpui::test]
+fn hydrate_primed_value_reaches_mounted_use_query_observer(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+
+    let mut snap = PersistSnapshot {
+        entries: Default::default(),
+        version: crate::client::PERSIST_VERSION,
+    };
+    snap.entries.insert(
+        "hydrate-notify".to_string(),
+        PersistedEntry {
+            value: serde_json::json!("hydrated"),
+            cached_at: crate::client::current_time_ms(),
+            cache_policy: crate::core::CachePolicy::default(),
+            meta: None,
+        },
+    );
+    *persister.load_value.lock().unwrap() = Some(snap);
+
+    struct H {
+        _entity: Entity<QueryResource<String, QueryError>>,
+        _sub: gpui::Subscription,
+    }
+    let harness = cx.new(|cx| {
+        cx.update_global::<QueryClient, _>(|client, _cx| {
+            client
+                .register_deserializer::<String, QueryError>(|v| v.as_str().map(|s| s.to_string()));
+        });
+        let (entity, sub) = use_query_manual::<String, QueryError, _>(
+            QueryKey::from("hydrate-notify"),
+            crate::core::CachePolicy::NoCache,
+            crate::core::RequestPolicy::LatestWins,
+            cx,
+        );
+        H {
+            _entity: entity,
+            _sub: sub,
+        }
+    });
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_for_observer = hits.clone();
+    let _notified = harness.update(cx, |_, cx| {
+        cx.observe_self(move |_, _| {
+            hits_for_observer.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    let outcome = cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            block_on_ready(hydrate(client, &persister, &PersistFilter::All, DAY, cx))
+        })
+    });
+    assert!(
+        outcome.is_ok(),
+        "hydrate should succeed: {:?}",
+        outcome.err()
+    );
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let data =
+                client.get_query_data::<String, QueryError>(&QueryKey::from("hydrate-notify"), cx);
+            assert_eq!(
+                data,
+                Some("hydrated".to_string()),
+                "hydrate should have primed the value"
+            );
+        });
+    });
+    assert!(
+        hits.load(Ordering::SeqCst) >= 1,
+        "hydrate priming via set_query_data must re-render a mounted use_query consumer"
+    );
+}
+
+#[gpui::test]
+fn flush_serializes_only_dirty_entries(cx: &mut TestAppContext) {
+    static SERIALIZATIONS: AtomicUsize = AtomicUsize::new(0);
+
+    fn counting_serialize(value: &String) -> serde_json::Value {
+        SERIALIZATIONS.fetch_add(1, Ordering::SeqCst);
+        serde_json::to_value(value).expect("serialize")
+    }
+
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let captured = persister.last_saved.clone();
+
+    struct H {
+        dirty_a: Entity<QueryResource<String, QueryError>>,
+        dirty_b: Entity<QueryResource<String, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let (handle, dirty_a, dirty_b) = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(counting_serialize);
+            let handle = client.persist_with(persister.clone(), zero_debounce(), cx);
+            let dirty_a = client.resource::<String, QueryError>(QueryKey::from("dirty_a"), cx);
+            let dirty_b = client.resource::<String, QueryError>(QueryKey::from("dirty_b"), cx);
+            (handle, dirty_a, dirty_b)
+        });
+        H {
+            dirty_a,
+            dirty_b,
+            _handle: handle,
+        }
+    });
+    cx.update(|cx| {
+        let (dirty_a, dirty_b) =
+            harness.read_with(cx, |h, _| (h.dirty_a.clone(), h.dirty_b.clone()));
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            for entity in [dirty_a, dirty_b] {
+                entity.update(cx, |r, _| {
+                    r.apply_success("v1".to_string(), crate::client::current_time_ms())
+                });
+            }
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        SERIALIZATIONS.load(Ordering::SeqCst),
+        2,
+        "the first flush serializes both live entries"
+    );
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>("dirty_b", "v2".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        SERIALIZATIONS.load(Ordering::SeqCst),
+        3,
+        "unchanged dirty_a must not be re-serialized"
+    );
+    let saved = captured.lock().unwrap().clone().expect("flush 2 saved");
+    assert_eq!(
+        saved.entries.get("dirty_b").map(|e| &e.value),
+        Some(&serde_json::json!("v2"))
+    );
+    assert_eq!(
+        saved.entries.get("dirty_a").map(|e| &e.value),
+        Some(&serde_json::json!("v1")),
+        "the unchanged entry stays in the saved store"
+    );
+    let _ = harness;
+}
+
+#[gpui::test]
+fn unchanged_cache_flushes_nothing(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let save_count = persister.save_count.clone();
+
+    struct H {
+        steady: Entity<QueryResource<String, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let (handle, steady) = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(ser_string);
+            let handle = client.persist_with(persister.clone(), zero_debounce(), cx);
+            let steady = client.resource::<String, QueryError>(QueryKey::from("steady"), cx);
+            (handle, steady)
+        });
+        H {
+            steady,
+            _handle: handle,
+        }
+    });
+    cx.update(|cx| {
+        let entity = harness.read(cx).steady.clone();
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            entity.update(cx, |r, _| {
+                r.apply_success("v".to_string(), crate::client::current_time_ms())
+            });
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        *save_count.lock().unwrap(),
+        1,
+        "the data write flushed exactly once"
+    );
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        *save_count.lock().unwrap(),
+        1,
+        "a bump without a data write must not save"
+    );
+    let _ = harness;
+}
+
+#[gpui::test]
+fn set_query_data_write_flushes_without_touching_timestamp(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let captured = persister.last_saved.clone();
+    let save_count = persister.save_count.clone();
+
+    struct H {
+        epoch_key: Entity<QueryResource<String, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let (handle, epoch_key) = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(ser_string);
+            let handle = client.persist_with(persister.clone(), zero_debounce(), cx);
+            let epoch_key = client.resource::<String, QueryError>(QueryKey::from("epoch_key"), cx);
+            (handle, epoch_key)
+        });
+        H {
+            epoch_key,
+            _handle: handle,
+        }
+    });
+    cx.update(|cx| {
+        let entity = harness.read(cx).epoch_key.clone();
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            entity.update(cx, |r, _| {
+                r.apply_success("v1".to_string(), crate::client::current_time_ms())
+            });
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    let first_cached_at = captured
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|s| s.entries.get("epoch_key"))
+        .map(|e| e.cached_at)
+        .expect("the first flush stored epoch_key");
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>("epoch_key", "v2".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(*save_count.lock().unwrap(), 2);
+    let saved = captured.lock().unwrap().clone().expect("flush 2 saved");
+    let entry = saved.entries.get("epoch_key").expect("epoch_key persisted");
+    assert_eq!(entry.value, serde_json::json!("v2"));
+    assert_eq!(
+        entry.cached_at, first_cached_at,
+        "set_data leaves last_updated_at untouched; the data epoch is the flush signal"
+    );
+    let _ = harness;
+}
+
+#[gpui::test]
+fn removed_key_is_pruned_from_the_saved_store(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let captured = persister.last_saved.clone();
+
+    struct H {
+        pruned_out: Entity<QueryResource<String, QueryError>>,
+        pruned_stay: Entity<QueryResource<String, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let (handle, pruned_out, pruned_stay) = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(ser_string);
+            let handle = client.persist_with(persister.clone(), zero_debounce(), cx);
+            let pruned_out =
+                client.resource::<String, QueryError>(QueryKey::from("pruned_out"), cx);
+            let pruned_stay =
+                client.resource::<String, QueryError>(QueryKey::from("pruned_stay"), cx);
+            (handle, pruned_out, pruned_stay)
+        });
+        H {
+            pruned_out,
+            pruned_stay,
+            _handle: handle,
+        }
+    });
+    cx.update(|cx| {
+        let (out, stay) =
+            harness.read_with(cx, |h, _| (h.pruned_out.clone(), h.pruned_stay.clone()));
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            for entity in [out, stay] {
+                entity.update(cx, |r, _| {
+                    r.apply_success("v1".to_string(), crate::client::current_time_ms())
+                });
+            }
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    let first = captured.lock().unwrap().clone().expect("flush 1 saved");
+    assert!(first.entries.contains_key("pruned_out"));
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.remove_queries(&QueryKeyFilter::Exact(&QueryKey::from("pruned_out")));
+            client.set_query_data::<String, QueryError>("pruned_stay", "v2".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+
+    let saved = captured.lock().unwrap().clone().expect("flush 2 saved");
+    assert!(
+        !saved.entries.contains_key("pruned_out"),
+        "a removed key must not resurrect in the saved store: {:?}",
+        saved.entries.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        saved.entries.get("pruned_stay").map(|e| &e.value),
+        Some(&serde_json::json!("v2"))
+    );
+    let _ = harness;
+}
+
+#[gpui::test]
+fn colon_collision_keys_persist_distinct_and_hydrate_exact(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let key_a = QueryKey::from(["a::", ""]);
+    let key_b = QueryKey::from(["a", "::"]);
+
+    let snapshot = cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(ser_string);
+            for (key, value) in [(&key_a, "alpha"), (&key_b, "beta")] {
+                let e = client.resource::<String, QueryError>(key.clone(), cx);
+                e.update(cx, |r, _| {
+                    r.apply_success(value.to_string(), crate::client::current_time_ms())
+                });
+            }
+            client.collect_persist_snapshot(&PersistFilter::All, DAY, cx)
+        })
+    });
+    assert_ne!(key_a.to_path(), key_b.to_path());
+    assert_eq!(
+        snapshot.entries.len(),
+        2,
+        "the collision pair must map to distinct paths: {:?}",
+        snapshot.entries.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        snapshot.entries.get(&key_a.to_path()).map(|e| &e.value),
+        Some(&serde_json::json!("alpha"))
+    );
+    assert_eq!(
+        snapshot.entries.get(&key_b.to_path()).map(|e| &e.value),
+        Some(&serde_json::json!("beta"))
+    );
+    *persister.load_value.lock().unwrap() = Some(snapshot);
+
+    for (filter_key, expected, other) in [
+        (key_a.clone(), "alpha", &key_b),
+        (key_b.clone(), "beta", &key_a),
+    ] {
+        let mut fresh = QueryClient::new();
+        fresh.register_deserializer::<String, QueryError>(|v| v.as_str().map(|s| s.to_string()));
+        let held = cx.update(|cx| {
+            vec![
+                fresh.resource::<String, QueryError>(key_a.clone(), cx),
+                fresh.resource::<String, QueryError>(key_b.clone(), cx),
+            ]
+        });
+        let outcome = cx.update(|cx| {
+            block_on_ready(hydrate(
+                &mut fresh,
+                &persister,
+                &PersistFilter::Exact(filter_key.clone()),
+                DAY,
+                cx,
+            ))
+        });
+        assert!(
+            outcome.is_ok(),
+            "hydrate should succeed: {:?}",
+            outcome.err()
+        );
+        cx.update(|cx| {
+            assert_eq!(
+                fresh.get_query_data::<String, QueryError>(&filter_key, cx),
+                Some(expected.to_string()),
+                "Exact must match the reconstructed segments"
+            );
+            assert_eq!(
+                fresh.get_query_data::<String, QueryError>(other, cx),
+                None,
+                "the other collision key must not be primed by this Exact filter"
+            );
+        });
+        drop(held);
+    }
+}
+
+#[gpui::test]
+fn hydrate_discards_previous_format_version(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let mut stale = PersistSnapshot {
+        entries: Default::default(),
+        version: crate::client::PERSIST_VERSION - 1,
+    };
+    stale.entries.insert(
+        "old_format_key".to_string(),
+        PersistedEntry {
+            value: serde_json::json!("stale"),
+            cached_at: crate::client::current_time_ms(),
+            cache_policy: crate::core::CachePolicy::default(),
+            meta: None,
+        },
+    );
+    *persister.load_value.lock().unwrap() = Some(stale);
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, _cx| {
+            client
+                .register_deserializer::<String, QueryError>(|v| v.as_str().map(|s| s.to_string()));
+        });
+        let outcome = cx.update_global::<QueryClient, _>(|client, cx| {
+            block_on_ready(hydrate(client, &persister, &PersistFilter::All, DAY, cx))
+        });
+        match outcome {
+            Err(PersistError::VersionMismatch { expected, found }) => {
+                assert_eq!(expected, crate::client::PERSIST_VERSION);
+                assert_eq!(found, crate::client::PERSIST_VERSION - 1);
+            }
+            other => panic!("expected VersionMismatch, got {other:?}"),
+        }
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            assert_eq!(
+                client.get_query_data::<String, QueryError>(&QueryKey::from("old_format_key"), cx),
+                None,
+                "a previous-format snapshot must not prime any value"
+            );
+        });
+    });
 }

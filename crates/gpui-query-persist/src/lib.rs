@@ -136,9 +136,10 @@ impl FilePersister {
         file.read_to_end(&mut buf)?;
 
         let (label, parsed): (&str, Result<PersistSnapshot, String>) = match self.format {
-            PersistFormat::Json => {
-                ("JSON", serde_json::from_slice(&buf).map_err(|e| e.to_string()))
-            }
+            PersistFormat::Json => (
+                "JSON",
+                serde_json::from_slice(&buf).map_err(|e| e.to_string()),
+            ),
             PersistFormat::Bincode => ("bincode", bincode_load(&buf)),
         };
         let snapshot = match parsed {
@@ -200,11 +201,7 @@ impl BincodeSnapshot {
                     value_json: serde_json::to_string(&e.value)?,
                     cached_at: e.cached_at,
                     cache_policy: e.cache_policy,
-                    meta_json: e
-                        .meta
-                        .as_ref()
-                        .map(serde_json::to_string)
-                        .transpose()?,
+                    meta_json: e.meta.as_ref().map(serde_json::to_string).transpose()?,
                 },
             );
         }

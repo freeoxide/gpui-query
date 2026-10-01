@@ -59,19 +59,60 @@ impl QueryKey {
         }
     }
 
-    /// Joins with `"::"` so segments containing forward slashes stay unambiguous.
+    /// Joins with `"::"`, escaping `\` and `:` inside segments so distinct
+    /// keys never map to one path; `from_path` inverts it.
     pub fn to_path(&self) -> String {
         const SEP: &str = "::";
+        let escapes: usize = self
+            .0
+            .iter()
+            .map(|s| s.chars().filter(|c| matches!(c, '\\' | ':')).count())
+            .sum();
         let len = self.0.iter().map(|s| s.len()).sum::<usize>()
+            + escapes
             + SEP.len() * self.0.len().saturating_sub(1);
         let mut path = String::with_capacity(len);
         for (i, segment) in self.0.iter().enumerate() {
             if i > 0 {
                 path.push_str(SEP);
             }
-            path.push_str(segment);
+            for ch in segment.chars() {
+                if matches!(ch, '\\' | ':') {
+                    path.push('\\');
+                }
+                path.push(ch);
+            }
         }
         path
+    }
+
+    /// Inverse of [`to_path`](Self::to_path); any input yields at least one
+    /// segment and never panics.
+    pub(crate) fn from_path(path: &str) -> Self {
+        let mut segments: Vec<String> = Vec::new();
+        let mut current = String::new();
+        let mut escaped = false;
+        let mut chars = path.chars();
+        while let Some(ch) = chars.next() {
+            if escaped {
+                current.push(ch);
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == ':' {
+                segments.push(std::mem::take(&mut current));
+                match chars.next() {
+                    Some(':') => {}
+                    Some('\\') => escaped = true,
+                    Some(other) => current.push(other),
+                    None => {}
+                }
+            } else {
+                current.push(ch);
+            }
+        }
+        segments.push(current);
+        Self::new(segments)
     }
 
     /// An empty `prefix` matches every valid key; an empty `self` never matches.
@@ -263,5 +304,45 @@ mod tests {
     fn to_path_disambiguates_empty_string_segments() {
         let key = QueryKey::from(["", ""]);
         assert_eq!(key.to_path(), "::");
+    }
+
+    #[test]
+    fn to_path_escapes_colon_and_backslash_in_segments() {
+        let key = QueryKey::from(["a\\b", "c:d"]);
+        assert_eq!(key.to_path(), "a\\\\b::c\\:d");
+    }
+
+    #[test]
+    fn to_path_collision_pair_maps_to_distinct_paths() {
+        let first = QueryKey::from(["a::", ""]);
+        let second = QueryKey::from(["a", "::"]);
+        assert_ne!(first.to_path(), second.to_path());
+        assert_eq!(first.to_path(), "a\\:\\:::");
+        assert_eq!(second.to_path(), "a::\\:\\:");
+    }
+
+    #[test]
+    fn from_path_inverts_to_path_for_escaped_segments() {
+        for parts in [
+            vec!["a::", ""],
+            vec!["a", "::"],
+            vec!["a\\b", "c:d"],
+            vec!["::"],
+            vec![""],
+            vec!["\\"],
+        ] {
+            let key = QueryKey::from(parts);
+            assert_eq!(QueryKey::from_path(&key.to_path()), key);
+        }
+    }
+
+    #[test]
+    fn from_path_hostile_input_yields_at_least_one_segment() {
+        for path in ["", "::", "\\", "a\\", "a:b", "a:::b", "a:::", ":\\:"] {
+            assert!(
+                !QueryKey::from_path(path).parts().is_empty(),
+                "from_path({path:?}) must yield at least one segment"
+            );
+        }
     }
 }

@@ -301,7 +301,10 @@ fn file_persister_non_utf8_json_yields_empty_snapshot() {
 
     let p = FilePersister::json(&path);
     let loaded = pollster::block_on(p.load()).expect("tolerant load");
-    assert!(loaded.entries.is_empty(), "non-UTF8 cache -> empty snapshot");
+    assert!(
+        loaded.entries.is_empty(),
+        "non-UTF8 cache -> empty snapshot"
+    );
 }
 
 #[test]
@@ -354,7 +357,10 @@ fn file_persister_hostile_bincode_length_claims_yield_empty_snapshot() {
     let mut string_len_claim = 1u64.to_le_bytes().to_vec();
     string_len_claim.extend_from_slice(&u64::MAX.to_le_bytes());
 
-    for (claim, bytes) in [("map count", count_claim), ("string length", string_len_claim)] {
+    for (claim, bytes) in [
+        ("map count", count_claim),
+        ("string length", string_len_claim),
+    ] {
         std::fs::write(&path, bytes).expect("write hostile frame");
 
         let p = FilePersister::bincode(&path);

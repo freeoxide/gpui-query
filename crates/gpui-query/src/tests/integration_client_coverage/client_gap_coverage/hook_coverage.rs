@@ -5,8 +5,7 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 use crate::core::*;
 use crate::hook::{
     InfiniteQueryOptions, MutationOptions, QueryOptions, fetch_next_page_infinite, fetch_query,
-    fetch_query_with_signal, use_infinite_query, use_mutation, use_query_manual,
-    use_query_select,
+    fetch_query_with_signal, use_infinite_query, use_mutation, use_query_manual, use_query_select,
 };
 use crate::tests::test_support::*;
 
