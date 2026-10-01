@@ -508,3 +508,53 @@ fn prefetch_completion_reaches_mounted_use_query_observer(cx: &mut TestAppContex
          re-render the mounted consumer"
     );
 }
+
+#[gpui::test]
+fn manual_append_page_reaches_mounted_use_infinite_query_observer(cx: &mut TestAppContext) {
+    setup_test(cx);
+
+    struct H {
+        entity: Entity<InfiniteQueryResource<Vec<u32>, QueryError>>,
+        _sub: gpui::Subscription,
+    }
+
+    let harness = cx.new(|cx| {
+        let (entity, sub) = use_infinite_query(
+            InfiniteQueryOptions::new("infinite-append-notify"),
+            |_last: Option<&Vec<u32>>| async move { Ok::<_, QueryError>((vec![1], false)) },
+            cx,
+        );
+        H { entity, _sub: sub }
+    });
+
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        assert_eq!(
+            harness.read(cx).entity.read(cx).status(),
+            crate::core::QueryStatus::Success
+        );
+    });
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_for_observer = hits.clone();
+    let _notified = harness.update(cx, |_, cx| {
+        cx.observe_self(move |_, _| {
+            hits_for_observer.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    harness.update(cx, |h, cx| {
+        h.entity.update(cx, |r, cx| {
+            r.append_page(vec![2]);
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "a same-status manual page write must re-render the mounted infinite consumer"
+    );
+}
