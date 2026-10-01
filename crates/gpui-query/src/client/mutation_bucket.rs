@@ -44,7 +44,8 @@ impl<
 
     /// Skips loading entries; the winner gets one confirming entity read
     /// (the mirror can be stale if a fetch began after the last refresh),
-    /// and each stale re-check marks the mirror and re-picks.
+    /// and each stale re-check marks the mirror and re-picks. A collected
+    /// weak ref fails the confirm and is removed in place.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
             let target = self
@@ -54,7 +55,6 @@ impl<
                     if entry.loading {
                         return None;
                     }
-                    entry.entity.upgrade()?;
                     Some((*id, entry.last_updated_ms.unwrap_or(entry.updated_at)))
                 })
                 .min_by_key(|&(_, age)| age);

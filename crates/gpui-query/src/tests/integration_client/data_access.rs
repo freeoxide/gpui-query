@@ -343,6 +343,58 @@ fn test_prepare_prefetch_query_starts_for_stale_resource(cx: &mut TestAppContext
     });
 }
 
+#[gpui::test]
+fn remove_queries_with_fetch_in_flight_keeps_bucket_and_fallback_ids_disjoint(
+    cx: &mut TestAppContext,
+) {
+    setup_query_client(cx);
+    let (in_flight_id, entity) = cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("request_id_alias");
+            let prepared = client
+                .prepare_fetch_query::<String, QueryError>(key, cx)
+                .expect("prepare_fetch_query should start");
+            let in_flight_id = prepared.request_id;
+            let entity = prepared.entity.clone();
+            client.remove_queries(&QueryKeyFilter::All);
+            (in_flight_id, entity)
+        })
+    });
+
+    let (fallback_id, stale_rejected, fallback_accepted, ignored) = cx.update(|cx| {
+        entity.update(cx, |resource, _| {
+            let fallback_id =
+                match resource.begin_request_with_id(None, 1_000, QueryFetchMode::Force) {
+                    QueryBeginResult::Started { request_id, .. } => request_id,
+                    other => panic!("expected Started after remove_queries, got {other:?}"),
+                };
+            let stale_rejected = resource.accept_current_request(in_flight_id).is_none();
+            let fallback_accepted = resource.accept_current_request(fallback_id).is_some();
+            (
+                fallback_id,
+                stale_rejected,
+                fallback_accepted,
+                resource.ignored_results(),
+            )
+        })
+    });
+
+    assert_ne!(
+        in_flight_id, fallback_id,
+        "bucket-sequencer id and fallback id aliased: the stale in-flight \
+         result would be accepted as fresh"
+    );
+    assert!(
+        stale_rejected,
+        "the stale in-flight completion must be discarded as ignored"
+    );
+    assert_eq!(ignored, 1);
+    assert!(
+        fallback_accepted,
+        "the fallback request must still be accepted"
+    );
+}
+
 #[cfg(feature = "persist")]
 #[gpui::test]
 fn test_persist_and_restore_cycle(cx: &mut TestAppContext) {
