@@ -2,9 +2,9 @@
 //! two-phase `accept_current_request` protocol, and each task holds only a
 //! `WeakEntity`, so it self-terminates on entity drop.
 
-use gpui::{BorrowAppContext as _, Context, Entity, Subscription};
 #[cfg(not(debug_assertions))]
 use gpui::AppContext as _;
+use gpui::{BorrowAppContext as _, Context, Entity, Subscription};
 
 use crate::client::{QueryClient, QueryObserver};
 use crate::core::{

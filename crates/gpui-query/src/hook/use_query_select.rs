@@ -1,6 +1,7 @@
 //! Cached data projected into a derived shape, re-running only when the data
 //! changes; the hook returns a `MappedQueryResource<T, U, E>`.
 
+use std::cell::Cell;
 use std::sync::Arc;
 
 use gpui::{AppContext as _, Context, Entity, Subscription};
@@ -71,26 +72,27 @@ where
 {
     let (query_entity, query_subscription) = use_query(options, fetcher, cx);
 
-    let initial_data: Option<Arc<T>> =
-        query_entity.read_with(cx, |r, _| r.data().map(|d| Arc::new(d.clone())));
+    let (initial_data, initial_epoch) = query_entity.read_with(cx, |r, _| {
+        (r.data().map(|d| Arc::new(d.clone())), r.data_epoch())
+    });
     let mapped = MappedQueryResource::new(initial_data, transform);
     let mapped_entity = cx.new(|_| mapped);
 
     let mapped_weak = mapped_entity.downgrade();
+    let last_epoch = Cell::new(initial_epoch);
     let mapped_subscription = cx.observe(&query_entity, move |_, entity, cx| {
         let Some(mapped) = mapped_weak.upgrade() else {
             return;
         };
-        let cached: Option<Arc<T>> = mapped.read_with(cx, |m, _| m.source_arc());
 
-        // One read computes both the change verdict and the replacement value.
+        // The data epoch is the change verdict: no deep-compare of `T` here,
+        // and `T` is cloned only when a write actually moved the epoch.
         let update: Option<Option<Arc<T>>> = entity.read_with(cx, |r, _| {
-            let changed = match (&cached, r.data()) {
-                (Some(c), Some(fresh)) => c.as_ref() != fresh,
-                (None, None) => false,
-                _ => true,
-            };
-            changed.then(|| r.data().map(|d| Arc::new(d.clone())))
+            let epoch = r.data_epoch();
+            (epoch != last_epoch.get()).then(|| {
+                last_epoch.set(epoch);
+                r.data().map(|d| Arc::new(d.clone()))
+            })
         });
 
         if let Some(fresh) = update {

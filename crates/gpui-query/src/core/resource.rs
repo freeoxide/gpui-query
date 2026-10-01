@@ -30,6 +30,10 @@ pub struct QueryResource<T, E = QueryError> {
     retry_count: u32,
     retry_policy: RetryPolicy,
     previous_data: Option<T>,
+    /// Counts data writes, not value changes; runtime only, so change
+    /// detection never deep-compares `T`.
+    #[serde(skip)]
+    data_epoch: u64,
     /// Runtime state, not persisted; supplies monotonic ids when no external
     /// sequencer is provided.
     #[serde(skip)]
@@ -60,6 +64,7 @@ impl<T, E> QueryResource<T, E> {
             retry_count: 0,
             retry_policy: RetryPolicy::no_retries(),
             previous_data: None,
+            data_epoch: 0,
             transient_sequencer: RequestSequencer::new(),
             signal: None,
         }

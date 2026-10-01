@@ -16,6 +16,12 @@ pub trait ObservableResource {
     type Status: PartialEq + Copy + 'static;
 
     fn observable_status(&self) -> Self::Status;
+
+    /// Lets the status-dedup pass same-status data writes through;
+    /// a constant value means "data never changes".
+    fn data_epoch(&self) -> u64 {
+        0
+    }
 }
 
 impl<T: 'static, E: 'static> ObservableResource for QueryResource<T, E> {
@@ -23,6 +29,10 @@ impl<T: 'static, E: 'static> ObservableResource for QueryResource<T, E> {
 
     fn observable_status(&self) -> QueryStatus {
         self.status()
+    }
+
+    fn data_epoch(&self) -> u64 {
+        QueryResource::data_epoch(self)
     }
 }
 
@@ -55,9 +65,9 @@ impl Default for ObserverConfig {
     }
 }
 
-/// With the default config, `cx.notify()` fires only when the status
-/// actually changes, so same-status updates (retry count increments,
-/// `prepare_retry`) do not re-render.
+/// With the default config, `cx.notify()` fires only when the status or the
+/// resource's data epoch changes, so same-status no-op updates (retry count
+/// increments, `prepare_retry`) do not re-render.
 pub struct Observer<R> {
     entity: gpui::WeakEntity<R>,
     config: ObserverConfig,
@@ -82,13 +92,18 @@ impl<R: ObservableResource + 'static> Observer<R> {
         let upgraded = self.entity.upgrade()?;
         let notify_on_change = self.config.notify_on_status_change_only;
         let last_status: Cell<Option<R::Status>> = Cell::new(None);
+        let last_epoch: Cell<Option<u64>> = Cell::new(None);
 
         let subscription = cx.observe(&upgraded, move |_, entity, cx| {
-            let current_status = entity.read(cx).observable_status();
+            let resource = entity.read(cx);
+            let current_status = resource.observable_status();
+            let current_epoch = resource.data_epoch();
             if notify_on_change {
-                let previous = last_status.get();
-                if previous != Some(current_status) {
+                let status_changed = last_status.get() != Some(current_status);
+                let data_changed = last_epoch.get() != Some(current_epoch);
+                if status_changed || data_changed {
                     last_status.set(Some(current_status));
+                    last_epoch.set(Some(current_epoch));
                     cx.notify();
                 }
             } else {
