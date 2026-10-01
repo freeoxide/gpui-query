@@ -264,7 +264,7 @@ impl QueryClient {
         &self,
         filter: &PersistFilter,
         max_age: Duration,
-        flushed: &HashMap<String, u64>,
+        flushed: &HashMap<String, (gpui::EntityId, u64)>,
         cx: &App,
     ) -> crate::client::bucket::shared::PersistCollectOut {
         let Some(ref registry) = self.serializers else {
@@ -363,10 +363,10 @@ impl QueryClient {
                         return;
                     }
                     // Clone-on-write only while a previous save is still in flight.
-                    let fresh_epochs: Vec<(String, u64)> = delta
+                    let fresh_epochs: Vec<(String, (gpui::EntityId, u64))> = delta
                         .fresh
                         .iter()
-                        .map(|c| (c.path.clone(), c.epoch))
+                        .map(|c| (c.path.clone(), (c.entity_id, c.epoch)))
                         .collect();
                     {
                         let snapshot = Arc::make_mut(&mut state.store);
@@ -385,9 +385,8 @@ impl QueryClient {
                     drop(state);
                     // Collect on the main thread (entity reads), save on background (IO).
                     bg.spawn(async move {
-                        if let Err(_err) = persister.save(&out).await {
-                            #[cfg(debug_assertions)]
-                            eprintln!("persist_with: save failed: {_err}");
+                        if let Err(err) = persister.save(&out).await {
+                            eprintln!("persist_with: save failed: {err}");
                         }
                     })
                     .detach();
@@ -402,11 +401,11 @@ impl QueryClient {
     }
 }
 
-/// Per-driver flush state: the data epoch each path was last flushed at and
-/// the full store as of the last save. Main-thread only; the mutex guards
-/// the handoff of an in-flight save's snapshot.
+/// Per-driver flush state: the owning entity id and data epoch each path was
+/// last flushed at, plus the full store as of the last save. Main-thread
+/// only; the mutex guards the handoff of an in-flight save's snapshot.
 struct PersistFlushState {
-    flushed: HashMap<String, u64>,
+    flushed: HashMap<String, (gpui::EntityId, u64)>,
     store: Arc<PersistSnapshot>,
 }
 

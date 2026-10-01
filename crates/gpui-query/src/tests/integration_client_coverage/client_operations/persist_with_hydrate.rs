@@ -1240,3 +1240,220 @@ fn hydrate_discards_previous_format_version(cx: &mut TestAppContext) {
         });
     });
 }
+
+#[gpui::test]
+fn infinite_first_page_reuses_flushed_payload_until_pages_change(cx: &mut TestAppContext) {
+    static SERIALIZATIONS: AtomicUsize = AtomicUsize::new(0);
+
+    fn counting_serialize(value: &Vec<String>) -> serde_json::Value {
+        SERIALIZATIONS.fetch_add(1, Ordering::SeqCst);
+        serde_json::to_value(value).expect("serialize")
+    }
+
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let save_count = persister.save_count.clone();
+
+    struct H {
+        feed: Entity<InfiniteQueryResource<Vec<String>, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let (handle, feed) = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<Vec<String>, QueryError>(counting_serialize);
+            let handle = client.persist_with(persister.clone(), zero_debounce(), cx);
+            let feed = client
+                .infinite_resource::<Vec<String>, QueryError>(QueryKey::from("inf-flush"), cx);
+            (handle, feed)
+        });
+        H {
+            feed,
+            _handle: handle,
+        }
+    });
+    cx.update(|cx| {
+        let feed = harness.read_with(cx, |h, _| h.feed.clone());
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            feed.update(cx, |r, _| {
+                let mut seq = crate::core::RequestSequencer::new();
+                let now = crate::client::current_time_ms();
+                let id = r.begin_fetch_next(&mut seq, now).expect("fetch starts");
+                assert!(r.complete_page_success(id, vec!["page-0".to_string()], true, true, now));
+            });
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        SERIALIZATIONS.load(Ordering::SeqCst),
+        1,
+        "the first flush serializes the fresh first page"
+    );
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        SERIALIZATIONS.load(Ordering::SeqCst),
+        1,
+        "an unchanged first page must not be re-serialized"
+    );
+    assert_eq!(
+        *save_count.lock().unwrap(),
+        1,
+        "nothing dirty means no save"
+    );
+
+    cx.update(|cx| {
+        let feed = harness.read_with(cx, |h, _| h.feed.clone());
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            feed.update(cx, |r, _| {
+                let mut seq = crate::core::RequestSequencer::new();
+                let now = crate::client::current_time_ms();
+                r.set_has_previous_page(true);
+                let id = r
+                    .begin_fetch_previous(&mut seq, now)
+                    .expect("previous fetch starts");
+                assert!(r.complete_page_success(id, vec!["page-1".to_string()], false, false, now));
+            });
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        SERIALIZATIONS.load(Ordering::SeqCst),
+        2,
+        "a page write must re-serialize"
+    );
+    assert_eq!(*save_count.lock().unwrap(), 2);
+    let saved = persister
+        .last_saved
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("flush 2 saved");
+    assert_eq!(
+        saved.entries.get("inf-flush").map(|e| &e.value),
+        Some(&serde_json::json!(["page-1"])),
+        "the re-serialized payload must carry the new first page"
+    );
+    let _ = harness;
+}
+
+#[gpui::test]
+#[ignore = "probe: quantitative, run with --ignored"]
+fn integration_persist_collect_delta_vs_full_cost(cx: &mut TestAppContext) {
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    setup_query_client(cx);
+    let held: Vec<Entity<QueryResource<String, QueryError>>> = cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(ser_string);
+            (0..2_000usize)
+                .map(|i| {
+                    let e = client
+                        .resource::<String, QueryError>(QueryKey::from(format!("probe/{i}")), cx);
+                    e.update(cx, |r, _| {
+                        r.apply_success(format!("value-{i}"), crate::client::current_time_ms())
+                    });
+                    e
+                })
+                .collect()
+        })
+    });
+
+    let (full, delta, reused, flushed) = cx.update(|cx| {
+        let filter = PersistFilter::All;
+        let day = DAY;
+        let mut flushed: HashMap<String, (gpui::EntityId, u64)> = HashMap::new();
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let first = client.collect_persist_delta(&filter, day, &flushed, cx);
+            for c in &first.fresh {
+                flushed.insert(c.path.clone(), (c.entity_id, c.epoch));
+            }
+            let full_start = Instant::now();
+            for _ in 0..100 {
+                std::hint::black_box(client.collect_persist_snapshot(&filter, day, cx));
+            }
+            let full = full_start.elapsed() / 100;
+            let delta_start = Instant::now();
+            let mut reused_count = 0usize;
+            for _ in 0..100 {
+                let out = client.collect_persist_delta(&filter, day, &flushed, cx);
+                reused_count = out.reused.len();
+                std::hint::black_box(out);
+            }
+            let delta = delta_start.elapsed() / 100;
+            (full, delta, reused_count, flushed.len())
+        })
+    });
+    println!(
+        "probe persist-collect over 2000 live Success entries, 100 sweeps: full-collect {full:?}/sweep, delta-collect {delta:?}/sweep (reused={reused}, flushed={flushed})"
+    );
+    let _ = held;
+}
+
+#[gpui::test]
+fn evicted_and_recreated_entry_reserializes_at_matching_write_count(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let persister = MemPersister::default();
+    let captured = persister.last_saved.clone();
+    let save_count = persister.save_count.clone();
+
+    struct H {
+        _first: Entity<QueryResource<String, QueryError>>,
+        second: Option<Entity<QueryResource<String, QueryError>>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let (first, handle) = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(ser_string);
+            let first = client.resource::<String, QueryError>(QueryKey::from("recreated"), cx);
+            let handle = client.persist_with(persister.clone(), zero_debounce(), cx);
+            (first, handle)
+        });
+        H {
+            _first: first,
+            second: None,
+            _handle: handle,
+        }
+    });
+
+    cx.update(|cx| {
+        let first = harness.read_with(cx, |h, _| h._first.clone());
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            first.update(cx, |r, _| {
+                r.apply_success("v1".to_string(), crate::client::current_time_ms())
+            });
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(*save_count.lock().unwrap(), 1);
+
+    harness.update(cx, |h, cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.remove_queries(&QueryKeyFilter::Exact(&QueryKey::from("recreated")));
+            let second = client.resource::<String, QueryError>(QueryKey::from("recreated"), cx);
+            second.update(cx, |r, _| {
+                r.apply_success("v2".to_string(), crate::client::current_time_ms())
+            });
+            cx.default_global::<CacheMutation>();
+            h.second = Some(second);
+        });
+    });
+    cx.run_until_parked();
+
+    let saved = captured.lock().unwrap().clone().expect("flush 2 saved");
+    assert_eq!(
+        saved.entries.get("recreated").map(|e| &e.value),
+        Some(&serde_json::json!("v2")),
+        "a recreated entry whose write count matches its pre-eviction flushed \
+         epoch must still re-serialize; the flushed gate needs entity identity"
+    );
+    let _ = harness;
+}
