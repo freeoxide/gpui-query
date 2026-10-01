@@ -148,6 +148,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
             self.has_previous_page = has_more;
             self.enforce_max_pages_remove_back();
         }
+        self.data_epoch = self.data_epoch.saturating_add(1);
 
         self.status = QueryStatus::Success;
         self.error = None;
@@ -202,6 +203,9 @@ impl<T, E> InfiniteQueryResource<T, E> {
     pub fn reset(&mut self) {
         if let Some(signal) = self.signal.as_ref() {
             signal.cancel();
+        }
+        if !self.pages.is_empty() {
+            self.data_epoch = self.data_epoch.saturating_add(1);
         }
         self.pages.clear();
         self.status = QueryStatus::Idle;
