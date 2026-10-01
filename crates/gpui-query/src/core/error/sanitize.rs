@@ -5,9 +5,29 @@ use std::borrow::Cow;
 
 pub const SANITIZE_MAX_LEN: usize = 512;
 
-const SCHEME_NEEDLES: [&str; 4] = ["postgres://", "mysql://", "mongodb://", "redis://"];
+const SCHEME_NEEDLES: [&str; 10] = [
+    "postgres://",
+    "postgresql://",
+    "mysql://",
+    "mysql2://",
+    "mongodb://",
+    "mongodb+srv://",
+    "redis://",
+    "rediss://",
+    "amqp://",
+    "mssql://",
+];
 
-const PATH_NEEDLES: [&str; 4] = ["/home/", "/users/", "/etc/", "/var/"];
+const PATH_NEEDLES: [&str; 8] = [
+    "/home/",
+    "/users/",
+    "/etc/",
+    "/var/",
+    "\\home\\",
+    "\\users\\",
+    "\\etc\\",
+    "\\var\\",
+];
 
 pub(crate) fn sanitize_message(msg: &str) -> String {
     let out = redact_connections(Cow::Borrowed(msg));
@@ -54,19 +74,15 @@ fn redact_paths(input: Cow<'_, str>) -> Cow<'_, str> {
     redact_until_whitespace(&input, &lower, &PATH_NEEDLES, "[REDACTED_PATH]").into()
 }
 
-fn redact_until_whitespace(
-    text: &str,
-    lower: &str,
-    needles: &[&str],
-    replacement: &str,
-) -> String {
+/// Per-needle cursors only ever advance: a `find` returning `None` at some
+/// offset stays `None` for every later offset, so each needle scans the
+/// message at most once in total.
+fn redact_until_whitespace(text: &str, lower: &str, needles: &[&str], replacement: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut offset = 0;
+    let mut next_match: Vec<Option<usize>> = needles.iter().map(|n| lower.find(n)).collect();
     loop {
-        let earliest = needles
-            .iter()
-            .filter_map(|n| lower[offset..].find(n).map(|rel| offset + rel))
-            .min();
+        let earliest = next_match.iter().flatten().copied().min();
         match earliest {
             Some(start) => {
                 let end = text[start..]
@@ -77,6 +93,11 @@ fn redact_until_whitespace(
                 offset = end;
                 if offset >= text.len() {
                     break;
+                }
+                for (needle, next) in needles.iter().zip(next_match.iter_mut()) {
+                    if next.is_some_and(|pos| pos < offset) {
+                        *next = lower[offset..].find(needle).map(|rel| offset + rel);
+                    }
                 }
             }
             None => {
@@ -183,7 +204,7 @@ fn redact_emails(input: Cow<'_, str>) -> Cow<'_, str> {
     result.into()
 }
 
-/// TLD contract: >= 2 chars, all-alphanumeric, letter-first or >= 2 letters (`c0m`/`c0`/`0rg` redact; `2x`, `1.2.10` pass); a trailing FQDN dot is trimmed for the slice but stays inside the redaction.
+/// TLD contract: >= 2 chars, all-alphanumeric, letter-first or >= 2 letters (`c0m`/`c0`/`0rg` redact; `2x`, `1.2.10` pass); the TLD slice is bounded by the last domain dot, falling back to `@` for dotless domains (`user@intranet` redacts), and a trailing FQDN dot is trimmed for the slice but stays inside the redaction.
 fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
     let len = chars.len();
     if start >= len {
@@ -200,6 +221,7 @@ fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
     if i >= len || chars[i] != '@' {
         return None;
     }
+    let at = i;
     i += 1;
 
     if i >= len || !chars[i].is_alphanumeric() {
@@ -218,7 +240,10 @@ fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
     if domain_end <= start + 2 {
         return None;
     }
-    let dot_pos = (start..domain_end).rev().find(|&j| chars[j] == '.')?;
+    let dot_pos = (at + 1..domain_end)
+        .rev()
+        .find(|&j| chars[j] == '.')
+        .unwrap_or(at);
     let tld = &chars[dot_pos + 1..domain_end];
     let letters = tld.iter().filter(|c| c.is_alphabetic()).count();
     if tld.len() >= 2
@@ -356,5 +381,88 @@ mod tests {
         let out = sanitize_message(&msg);
         assert!(out.ends_with("...[truncated]"));
         assert!(out.len() <= SANITIZE_MAX_LEN + "...[truncated]".len());
+    }
+
+    #[test]
+    fn sanitize_message_redacts_canonical_and_tls_scheme_variants() {
+        for scheme in [
+            "postgresql://",
+            "rediss://",
+            "mongodb+srv://",
+            "mysql2://",
+            "amqp://",
+            "mssql://",
+        ] {
+            let out = sanitize_message(&format!("connect {scheme}user:pass@host/db failed"));
+            assert!(out.contains("[REDACTED_CONNECTION]"), "{scheme}");
+            assert!(!out.contains("user:pass@host"), "{scheme}");
+            assert!(!out.contains(scheme), "{scheme}");
+        }
+    }
+
+    #[test]
+    fn sanitize_message_redacts_uppercase_scheme_spellings() {
+        for scheme in [
+            "POSTGRES://",
+            "POSTGRESQL://",
+            "REDISS://",
+            "MONGODB+SRV://",
+        ] {
+            let out = sanitize_message(&format!("CONNECT {scheme}user:pass@host/db FAILED"));
+            assert!(out.contains("[REDACTED_CONNECTION]"), "{scheme}");
+            assert!(!out.contains("user:pass@host"), "{scheme}");
+        }
+    }
+
+    #[test]
+    fn sanitize_message_redacts_windows_style_paths() {
+        for (path, secret) in [
+            (r"C:\Users\alice\.env", "alice"),
+            (r"C:\home\dev\.aws", ".aws"),
+            (r"copied C:\etc\secrets.conf", "secrets"),
+            (r"C:\var\log\app.log", "app.log"),
+        ] {
+            let out = sanitize_message(path);
+            assert!(out.contains("[REDACTED_PATH]"), "{path}");
+            assert!(!out.contains(secret), "{path}");
+        }
+    }
+
+    #[test]
+    fn sanitize_message_redacts_connection_password_without_partial_leak() {
+        let out = sanitize_message("rediss://admin:P@ssw0rd!@cache.internal:6379/0 refused");
+        assert_eq!(out, "[REDACTED_CONNECTION] refused");
+    }
+
+    #[test]
+    fn redact_until_whitespace_redacts_each_needle_match_once() {
+        let text = "a /etc/x b /var/y c";
+        let lower = text.to_ascii_lowercase();
+        let out = redact_until_whitespace(text, &lower, &PATH_NEEDLES, "[REDACTED_PATH]");
+        assert_eq!(out, "a [REDACTED_PATH] b [REDACTED_PATH] c");
+    }
+
+    #[test]
+    fn redact_until_whitespace_consumes_matches_inside_redacted_span() {
+        let text = "x /var//home y";
+        let lower = text.to_ascii_lowercase();
+        let out = redact_until_whitespace(text, &lower, &PATH_NEEDLES, "[REDACTED_PATH]");
+        assert_eq!(out, "x [REDACTED_PATH] y");
+    }
+
+    #[test]
+    fn sanitize_message_stays_linear_on_large_pathological_input() {
+        let unit = "postgres://u:p@h/db /home/alice/.env rejected. ";
+        let msg = unit.repeat(256 * 1024 / unit.len());
+        assert!(msg.len() >= 256 * 1024 - unit.len());
+        let start = std::time::Instant::now();
+        let out = sanitize_message(&msg);
+        assert!(
+            start.elapsed().as_secs_f64() < 1.0,
+            "sanitizing 256KiB took {:?}",
+            start.elapsed()
+        );
+        assert!(out.contains("[REDACTED_CONNECTION]"));
+        assert!(out.contains("[REDACTED_PATH]"));
     }
 }

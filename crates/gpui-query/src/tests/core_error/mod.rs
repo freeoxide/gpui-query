@@ -143,11 +143,32 @@ fn sanitized_redacts_email_with_digit_tld_and_trailing_dot() {
 }
 
 #[test]
-fn sanitized_leaves_trailing_dot_notation_untouched() {
+fn sanitized_redacts_trailing_dot_hostname_but_keeps_short_digit_tld() {
     let clean = QueryError::response("seen user@2x. and host foo@bar.").sanitized();
     assert!(clean.message().contains("user@2x."));
-    assert!(clean.message().contains("foo@bar."));
-    assert!(!clean.message().contains("[REDACTED_EMAIL]"));
+    assert!(clean.message().contains("host [REDACTED_EMAIL]"));
+    assert!(!clean.message().contains("foo@bar."));
+}
+
+#[test]
+fn sanitized_redacts_dotted_local_part_with_dotless_domain() {
+    let clean = QueryError::response("login failed for j.smith@intranet").sanitized();
+    assert!(!clean.message().contains("j.smith@intranet"));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_redacts_dotless_domain_email() {
+    let clean = QueryError::response("user user@intranet not found").sanitized();
+    assert!(!clean.message().contains("user@intranet"));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
+}
+
+#[test]
+fn sanitized_redacts_dotless_domain_email_with_trailing_dot() {
+    let clean = QueryError::response("contact user@host. now").sanitized();
+    assert!(!clean.message().contains("user@host"));
+    assert!(clean.message().contains("[REDACTED_EMAIL]"));
 }
 
 #[test]
