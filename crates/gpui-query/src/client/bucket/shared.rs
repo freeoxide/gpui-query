@@ -38,9 +38,9 @@ pub(crate) trait BucketResource {
     fn resource_cache_age_ms(&self, now_ms: u64) -> Option<u64>;
     fn resource_cache_hits(&self) -> u64;
     fn resource_retry_count(&self) -> u32;
-    /// `None` means the resource has no data-write epoch, so persistence
-    /// collection always treats it as dirty.
-    fn resource_data_epoch(&self) -> Option<u64>;
+    /// Counts data writes; persistence collection skips entries whose epoch
+    /// is unchanged since the last flush.
+    fn resource_data_epoch(&self) -> u64;
     fn resource_invalidate(&mut self);
     fn resource_reset(&mut self);
     fn resource_cancel_inflight(&mut self);
@@ -84,8 +84,8 @@ impl<T: 'static, E: 'static> BucketResource for QueryResource<T, E> {
     fn resource_retry_count(&self) -> u32 {
         self.retry_count()
     }
-    fn resource_data_epoch(&self) -> Option<u64> {
-        Some(self.data_epoch())
+    fn resource_data_epoch(&self) -> u64 {
+        self.data_epoch()
     }
     fn resource_invalidate(&mut self) {
         self.invalidate();
@@ -139,8 +139,8 @@ impl<T: 'static, E: 'static> BucketResource for InfiniteQueryResource<T, E> {
     fn resource_retry_count(&self) -> u32 {
         self.retry_count()
     }
-    fn resource_data_epoch(&self) -> Option<u64> {
-        None
+    fn resource_data_epoch(&self) -> u64 {
+        self.data_epoch()
     }
     fn resource_invalidate(&mut self) {
         self.invalidate();
@@ -486,10 +486,10 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
                 continue;
             };
             let path = key.to_path();
-            let epoch = resource.resource_data_epoch();
-            if let Some(epoch) = epoch
-                && collect.flushed.get(&path) == Some(&epoch)
-            {
+            // Epochs restart at 0 on a recreated entry, so identity rides
+            // alongside the epoch in the flush gate.
+            let identity = (entity.entity_id(), resource.resource_data_epoch());
+            if collect.flushed.get(&path) == Some(&identity) {
                 out.reused.push(path);
                 continue;
             }
@@ -500,7 +500,8 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             out.fresh.push(PersistCollected {
                 key: key.clone(),
                 path,
-                epoch: epoch.unwrap_or(PERSIST_NO_DATA_EPOCH),
+                entity_id: identity.0,
+                epoch: identity.1,
                 entry: PersistedEntry {
                     value,
                     cached_at,
@@ -512,17 +513,13 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
     }
 }
 
-/// Epoch sentinel for resources that cannot report a data epoch; no real
-/// resource reaches it, so such entries are always treated as dirty.
-#[cfg(feature = "persist")]
-pub(crate) const PERSIST_NO_DATA_EPOCH: u64 = u64::MAX;
-
 /// One live persistable entry produced by
 /// [`ResourceBucket::collect_persistable_into`].
 #[cfg(feature = "persist")]
 pub(crate) struct PersistCollected {
     pub(crate) key: QueryKey,
     pub(crate) path: String,
+    pub(crate) entity_id: gpui::EntityId,
     pub(crate) epoch: u64,
     pub(crate) entry: PersistedEntry,
 }
@@ -537,14 +534,15 @@ pub(crate) struct PersistCollectOut {
 }
 
 /// Per-sweep inputs for [`ResourceBucket::collect_persistable_into`];
-/// `flushed` maps paths to the data epoch at their last flush.
+/// `flushed` maps paths to the owning entity id and data epoch at their
+/// last flush.
 #[cfg(feature = "persist")]
 pub(crate) struct PersistCollect<'a> {
     serializers: &'a SerializerRegistry,
     filter: &'a PersistFilter,
     now_ms: u64,
     max_age_ms: u64,
-    flushed: &'a std::collections::HashMap<String, u64>,
+    flushed: &'a std::collections::HashMap<String, (gpui::EntityId, u64)>,
 }
 
 #[cfg(feature = "persist")]
@@ -554,7 +552,7 @@ impl<'a> PersistCollect<'a> {
         filter: &'a PersistFilter,
         now_ms: u64,
         max_age_ms: u64,
-        flushed: &'a std::collections::HashMap<String, u64>,
+        flushed: &'a std::collections::HashMap<String, (gpui::EntityId, u64)>,
     ) -> Self {
         Self {
             serializers,
