@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-02
+
+> A campaign pass over the query lifecycle: direct cache writes now reach the UI, GC and eviction stop dropping live entries, request ids survive bucket churn, error redaction covers the connection strings it missed, and persistence gains dirty tracking, ordered saves, and collision-free key paths.
+
+### Fixed
+
+#### `gpui-query` — direct cache writes reach mounted observers
+
+- `set_query_data`, `PreparedFetch::complete`, and `hydrate` mutated resources without `cx.notify()`, so mounted `use_query`/`use_query_select` consumers never re-rendered on the documented optimistic-update and prefetch flows. They notify now, the observer dedup wakes on data-only writes to an already-`Success` entry, and `reset_queries` wakes its observers too.
+
+#### `gpui-query` — GC and eviction keep live entries
+
+- GC aged every resource without a completion timestamp as fully expired, so live never-fetched entries and `set_query_data`/hydrate-primed keys were dropped at the next sweep and a later `resource()` call minted a divergent second entity for the same key. Entries carry an insertion baseline now, and `invalidate`/`reset` refresh it. `evict_oldest` no longer pays a weak-upgrade scan per insert at the 10,000-entry cap (about 900x the normal insert cost before) and evicts dead entries first. Cancelled mutations are GC-stamped.
+- After `remove_queries` dropped a bucket entry while a fetch was in flight, the resource's transient sequencer minted fallback ids in the same space as bucket ids, so a stale completion could pass `accept_current_request` and discard the fresh result. Fallback ids draw from a reserved scope now. Under StaleWhileRevalidate + `IgnoreWhileLoading`, revalidation also spawned a duplicate fetcher racing the original for one request id; that case is ignored at the hook, prefetch, and prepared-fetch sites.
+
+#### `gpui-query` — mutation cancel is a terminal transition
+
+- `MutationResource::cancel` clears stale success data beside the `Failure` status, matching what `complete_failure` always documented, and a late `Ok` from the mutation future can no longer overwrite a terminal `Failure`.
+
+#### `gpui-query` — redaction covers the schemes and shapes it missed
+
+- `sanitized()` matched only four exact scheme spellings, so `postgresql://`, `rediss://`, `mongodb+srv://`, `mysql2://`, `amqp://`, and `mssql://` connection strings leaked credentials verbatim; `PATH_NEEDLES` used forward slashes only, so Windows-style paths leaked entirely; and dotted-local-part + dotless-domain emails (`j.smith@intranet`) escaped the email pass. All three are covered, and the connection and email passes are linear on adversarial input (the email path measured ~895 ms at 32 KiB before; output is byte-identical on all prior inputs).
+
+#### `gpui-query` — persistence
+
+- `QueryKey::to_path` was not injective: `["a::", ""]` and `["a", "::"]` both produced `"a::::"`, so two live queries silently overwrote each other in the snapshot and re-hydrated as a key matching neither origin. The path format escapes the separator and `PERSIST_VERSION` is bumped: old snapshots are discarded rather than misread, so expect one cold cache after upgrading if you persist.
+- Every debounce flush re-serialized the entire cache on the UI thread regardless of what changed. Flushes are dirty-tracked by a data epoch, unchanged entries reuse their stored payloads, removals are pruned, saves run strictly in order, and `Persister::save` still receives the full accumulated store.
+
+### Changed
+
+- `QueryResource` exposes an additive `data_epoch()`; `use_query_select` compares epochs instead of deep-comparing `T` on every notification and clones only on real change (the compare was ~93% of per-notify cost on a 1.6 MB payload). The `T: PartialEq` hook bound is unchanged.
+- Criterion benches (sanitize, key path, request policy, request id, persist round-trip) land as dev-dependency tooling with a recorded baseline for regression gating; nothing ships to consumers.
+- The docs match the shipped API: the rollback guides use the real `set_query_data` capture/restore pattern instead of the nonexistent `rollback_query_data`, and the mutations page documents this crate's `MutationResource` instead of the deprecated legacy crate's.
+
 ## [0.2.2] - 2026-09-21
 
 > Audit-driven fixes across all three crates: a release-profile compile break, wider secret redaction, retry counters that match their docs, RFC 9111 cache refresh, and a durability fix in the file persister.
