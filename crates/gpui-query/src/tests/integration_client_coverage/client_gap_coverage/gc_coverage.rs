@@ -483,3 +483,40 @@ fn test_evict_oldest_prefers_dead_entry_with_newest_mirror_at_capacity(cx: &mut 
     });
     drop(live);
 }
+
+#[gpui::test]
+fn test_gc_drops_dead_mutation_with_stale_loading_mirror(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let entity = cx.new(|_| {
+                MutationResource::<String, String, QueryError>::new(RetryPolicy::no_retries())
+            });
+            client.register_mutation::<String, String, QueryError>(&entity, cx);
+
+            entity.update(cx, |m, _| m.begin("vars".to_string()));
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 1_000_000, cx);
+
+            assert_eq!(
+                client.diagnostics(cx).mutation_count,
+                1,
+                "loading mutation must survive GC while its entity is alive"
+            );
+            drop(entity);
+        });
+    });
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 1_000_000, cx);
+
+            assert_eq!(
+                client.diagnostics(cx).mutation_count,
+                0,
+                "a dead mutation with a stale loading mirror must be dropped by GC"
+            );
+        });
+    });
+}

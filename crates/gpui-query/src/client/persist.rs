@@ -386,7 +386,7 @@ impl QueryClient {
                     // Collect on the main thread (entity reads), save on background (IO).
                     bg.spawn(async move {
                         if let Err(err) = persister.save(&out).await {
-                            eprintln!("persist_with: save failed: {err}");
+                            eprintln!("persist_with: save failed: {}", save_failure_log_text(&err));
                         }
                     })
                     .detach();
@@ -407,6 +407,12 @@ impl QueryClient {
 struct PersistFlushState {
     flushed: HashMap<String, (gpui::EntityId, u64)>,
     store: Arc<PersistSnapshot>,
+}
+
+/// Persister errors can embed payload or path detail (custom `Deserialize`
+/// strings, `Permission` text), so log output passes the shared redactor.
+pub(crate) fn save_failure_log_text(err: &PersistError) -> String {
+    crate::core::error::sanitize::sanitize_message(&err.to_string())
 }
 
 /// Persists nothing; loads an empty snapshot.
@@ -468,4 +474,33 @@ pub async fn hydrate<P: Persister>(
     }
 
     Ok(snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_failure_log_text_redacts_hostile_detail_and_keeps_benign() {
+        let hostile =
+            PersistError::Permission("cache write denied for token= supersecretvalue".to_string());
+        let logged = save_failure_log_text(&hostile);
+        assert!(logged.contains("[REDACTED_TOKEN]"), "{logged}");
+        assert!(!logged.contains("supersecretvalue"));
+
+        let path = PersistError::BadPath("no cache dir for /home/alice/app".to_string());
+        let logged = save_failure_log_text(&path);
+        assert!(logged.contains("[REDACTED_PATH]"), "{logged}");
+        assert!(!logged.contains("/home/alice/app"));
+
+        let benign = PersistError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "cache file missing",
+        ));
+        assert_eq!(
+            save_failure_log_text(&benign),
+            benign.to_string(),
+            "benign io diagnostics must pass through unredacted"
+        );
+    }
 }
