@@ -40,6 +40,7 @@ pub(crate) trait BucketResource {
     fn resource_retry_count(&self) -> u32;
     /// Counts data writes; persistence collection skips entries whose epoch
     /// is unchanged since the last flush.
+    #[cfg(feature = "persist")]
     fn resource_data_epoch(&self) -> u64;
     fn resource_invalidate(&mut self);
     fn resource_reset(&mut self);
@@ -84,6 +85,7 @@ impl<T: 'static, E: 'static> BucketResource for QueryResource<T, E> {
     fn resource_retry_count(&self) -> u32 {
         self.retry_count()
     }
+    #[cfg(feature = "persist")]
     fn resource_data_epoch(&self) -> u64 {
         self.data_epoch()
     }
@@ -139,6 +141,7 @@ impl<T: 'static, E: 'static> BucketResource for InfiniteQueryResource<T, E> {
     fn resource_retry_count(&self) -> u32 {
         self.retry_count()
     }
+    #[cfg(feature = "persist")]
     fn resource_data_epoch(&self) -> u64 {
         self.data_epoch()
     }
@@ -333,8 +336,9 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         }
     }
 
-    /// `entity.update` notifies observers even when the closure mutates
-    /// nothing, so bulk ops gate on authoritative reads.
+    /// Observers fire only from `cx.notify()` inside the update closure, so
+    /// mutating bulk ops notify and the observer dedup suppresses no-change
+    /// wakes.
     pub(crate) fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_matching_entry(filter, cx, |entity, cx| {
             // invalidate() only clears last_updated_at; skip the no-op update.
@@ -348,7 +352,10 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
 
     pub(crate) fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_matching_entry(filter, cx, |entity, cx| {
-            entity.update(cx, |resource, _| resource.resource_reset());
+            entity.update(cx, |resource, cx| {
+                resource.resource_reset();
+                cx.notify();
+            });
         });
         self.touch_matching(filter);
     }

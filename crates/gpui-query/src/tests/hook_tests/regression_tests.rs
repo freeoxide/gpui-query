@@ -6,7 +6,7 @@ use gpui::{AppContext as _, BorrowAppContext as _, Entity, TestAppContext};
 use crate::client::QueryClient;
 use crate::core::{
     CachePolicy, InfiniteQueryResource, MutationResource, MutationStatus, QueryError, QueryKey,
-    QueryResource, RequestPolicy, RetryPolicy,
+    QueryKeyFilter, QueryResource, QueryStatus, RequestPolicy, RetryPolicy,
 };
 use crate::hook::*;
 use crate::tests::test_support::*;
@@ -556,5 +556,129 @@ fn manual_append_page_reaches_mounted_use_infinite_query_observer(cx: &mut TestA
         hits.load(Ordering::SeqCst),
         1,
         "a same-status manual page write must re-render the mounted infinite consumer"
+    );
+}
+
+#[gpui::test]
+fn test_reset_queries_wakes_mounted_observer(cx: &mut TestAppContext) {
+    setup_test(cx);
+
+    struct H {
+        entity: Entity<QueryResource<String, QueryError>>,
+        _sub: gpui::Subscription,
+    }
+
+    let key = QueryKey::from("reset-queries-notify");
+    let harness = cx.new(|cx| {
+        let (entity, sub) = use_query_manual::<String, QueryError, _>(
+            key.clone(),
+            CachePolicy::NoCache,
+            RequestPolicy::LatestWins,
+            cx,
+        );
+        H { entity, _sub: sub }
+    });
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(key.clone(), "v1".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_for_observer = hits.clone();
+    let _notified = harness.update(cx, |_, cx| {
+        cx.observe_self(move |_, _| {
+            hits_for_observer.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.reset_queries(&QueryKeyFilter::Exact(&key), cx);
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "reset_queries must wake the mounted consumer: it clears data and \
+         drops status to Idle, so the observer dedup passes"
+    );
+    cx.update(|cx| {
+        let resource = harness.read(cx).entity.read(cx);
+        assert_eq!(resource.status(), QueryStatus::Idle);
+        assert!(resource.data().is_none(), "reset must clear the data");
+    });
+}
+
+#[gpui::test]
+fn test_observer_stays_silent_on_retry_count_only_change(cx: &mut TestAppContext) {
+    setup_test(cx);
+
+    struct H {
+        entity: Entity<QueryResource<String, QueryError>>,
+        _sub: gpui::Subscription,
+    }
+
+    let key = QueryKey::from("observer-retry-silence");
+    let harness = cx.new(|cx| {
+        let (entity, sub) = use_query_manual::<String, QueryError, _>(
+            key.clone(),
+            CachePolicy::NoCache,
+            RequestPolicy::LatestWins,
+            cx,
+        );
+        H { entity, _sub: sub }
+    });
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_for_observer = hits.clone();
+    let _notified = harness.update(cx, |_, cx| {
+        cx.observe_self(move |_, _| {
+            hits_for_observer.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(key.clone(), "v1".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "precondition: the seeded data change woke the consumer once"
+    );
+
+    harness.update(cx, |h, cx| {
+        h.entity.update(cx, |r, cx| {
+            r.increment_retry();
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "a retry-count-only change bumps neither status nor data epoch, so \
+         the observer dedup must suppress the wake"
+    );
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.set_query_data::<String, QueryError>(key, "v2".to_string(), cx);
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        2,
+        "a data-epoch change must still wake the mounted consumer"
     );
 }
