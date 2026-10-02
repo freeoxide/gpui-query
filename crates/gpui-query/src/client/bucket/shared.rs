@@ -251,11 +251,8 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         (entity, request_id)
     }
 
-    /// Collected entries are age-zero candidates so they evict before any
-    /// live entry; the winner gets one confirming entity read (the mirror
-    /// can be stale if a fetch began after the last refresh). Each retry
-    /// marks the stale mirror and re-picks; a dead winner is removed in
-    /// place by the failed confirm.
+    /// Dead entries are age-zero candidates; the mirror can be stale, so the
+    /// winner is confirmed with one entity read.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
             let target = self
@@ -346,12 +343,25 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
                 entity.update(cx, |resource, _| resource.resource_invalidate());
             }
         });
+        self.touch_matching(filter);
     }
 
     pub(crate) fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_matching_entry(filter, cx, |entity, cx| {
             entity.update(cx, |resource, _| resource.resource_reset());
         });
+        self.touch_matching(filter);
+    }
+
+    /// Invalidated/reset resources lose their own `last_updated_at`, so the
+    /// user action must restart the GC age baseline or live entries are evicted.
+    fn touch_matching(&mut self, filter: &QueryKeyFilter) {
+        let now_ms = current_time_ms();
+        for (key, entry) in self.entries.iter_mut() {
+            if filter.matches(key) {
+                entry.updated_at = now_ms;
+            }
+        }
     }
 
     /// Gates on the authoritative `is_loading()` read: the entry mirror

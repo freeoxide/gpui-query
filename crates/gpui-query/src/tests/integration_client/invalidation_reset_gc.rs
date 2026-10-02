@@ -456,3 +456,67 @@ fn test_gc_boundary_success_threshold_exact(cx: &mut TestAppContext) {
         });
     });
 }
+
+#[gpui::test]
+fn test_gc_preserves_invalidated_entry_with_fresh_baseline(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc/invalidated_baseline");
+            let held = client.resource::<String, QueryError>(key.clone(), cx);
+            held.update(cx, |r, _| r.apply_success("v".to_string(), 1_000));
+
+            let type_id = std::any::TypeId::of::<(String, QueryError)>();
+            let bucket = client.buckets.get_mut(&type_id).unwrap();
+            let typed = bucket
+                .as_any_mut()
+                .downcast_mut::<crate::client::QueryBucket<String, QueryError>>()
+                .unwrap();
+            typed.inner.entries.get_mut(&key).unwrap().updated_at = 1_000;
+
+            client.invalidate_queries(&QueryKeyFilter::Exact(&key), cx);
+
+            client.gc_with_time(3_000, cx);
+
+            assert!(
+                client.query::<String, QueryError>(&key).is_some(),
+                "invalidated entry held by a live component must survive GC on a fresh baseline"
+            );
+            let again = client.resource::<String, QueryError>(key, cx);
+            assert_eq!(
+                again, held,
+                "resource() must not mint a second entity after GC"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_preserves_reset_entry_with_fresh_baseline(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc/reset_baseline");
+            let held = client.resource::<String, QueryError>(key.clone(), cx);
+            held.update(cx, |r, _| r.apply_success("v".to_string(), 1_000));
+
+            let type_id = std::any::TypeId::of::<(String, QueryError)>();
+            let bucket = client.buckets.get_mut(&type_id).unwrap();
+            let typed = bucket
+                .as_any_mut()
+                .downcast_mut::<crate::client::QueryBucket<String, QueryError>>()
+                .unwrap();
+            typed.inner.entries.get_mut(&key).unwrap().updated_at = 1_000;
+
+            client.reset_queries(&QueryKeyFilter::Exact(&key), cx);
+
+            client.gc_with_time(3_000, cx);
+
+            assert!(
+                client.query::<String, QueryError>(&key).is_some(),
+                "reset entry held by a live component must survive GC on a fresh baseline"
+            );
+            assert_eq!(held.read(cx).status(), QueryStatus::Idle);
+        });
+    });
+}
