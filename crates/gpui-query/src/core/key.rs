@@ -88,7 +88,7 @@ impl QueryKey {
 
     /// Inverse of [`to_path`](Self::to_path); any input yields at least one
     /// segment and never panics.
-    #[cfg(any(feature = "client", test))]
+    #[cfg(any(feature = "persist", test))]
     pub(crate) fn from_path(path: &str) -> Self {
         let mut segments: Vec<String> = Vec::new();
         let mut current = String::new();
