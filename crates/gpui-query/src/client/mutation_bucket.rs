@@ -42,16 +42,20 @@ impl<
         }
     }
 
-    /// Skips loading entries; the winner gets one confirming entity read
-    /// (the mirror can be stale if a fetch began after the last refresh),
-    /// and each stale re-check marks the mirror and re-picks. A collected
-    /// weak ref fails the confirm and is removed in place.
+    /// Collected entries are age-zero candidates so they evict before any
+    /// live entry; the winner gets one confirming entity read (the mirror
+    /// can be stale if a fetch began after the last refresh), and each
+    /// stale re-check marks the mirror and re-picks. A dead winner is
+    /// removed in place by the failed confirm.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
             let target = self
                 .resources
                 .iter()
                 .filter_map(|(id, entry)| {
+                    if !entry.entity.is_upgradable() {
+                        return Some((*id, 0));
+                    }
                     if entry.loading {
                         return None;
                     }
@@ -133,17 +137,13 @@ impl<
 
     /// Loading always survives; `Success` survives
     /// `SUCCESS_GC_MULTIPLIER * gc_time_ms`, `Idle`/`Failure` survive
-    /// `gc_time_ms`. The `loading` mirror is checked first so a mid-flight
-    /// mutation whose weak ref cannot upgrade survives one cycle.
+    /// `gc_time_ms`. Dead weak refs are dropped regardless of the loading
+    /// mirror.
     fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_threshold = gc_time_ms.max(MIN_GC_TIME_MS);
         let success_threshold = gc_threshold.saturating_mul(SUCCESS_GC_MULTIPLIER as u64);
 
         self.resources.retain(|_id, entry| {
-            if entry.loading {
-                return true;
-            }
-
             let Some(entity) = entry.entity.upgrade() else {
                 return false;
             };
