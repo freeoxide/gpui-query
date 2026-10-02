@@ -54,13 +54,7 @@ fn fetch_previous_page_prepends_page() {
     let id2 = r.begin_fetch_previous(&mut seq, 3_000).unwrap();
     assert!(r.is_fetching_previous_page());
 
-    let accepted = r.complete_page_success(
-        id2,
-        vec!["page0"],
-        false,
-        false,
-        4_000,
-    );
+    let accepted = r.complete_page_success(id2, vec!["page0"], false, false, 4_000);
     assert!(accepted);
     assert_eq!(r.page_count(), 2);
     assert_eq!(r.first_page(), Some(&vec!["page0"]));
@@ -247,4 +241,51 @@ fn ignore_while_loading_allows_cross_direction_fetch() {
     );
     assert!(r.is_fetching_previous_page());
     assert!(!r.is_fetching_next_page());
+}
+
+#[test]
+fn data_epoch_counts_page_writes_not_value_reads() {
+    let mut r = make_resource();
+    let mut seq = RequestSequencer::new();
+    assert_eq!(r.data_epoch(), 0);
+
+    let id = r.begin_fetch_next(&mut seq, 1_000).unwrap();
+    assert!(r.complete_page_success(id, vec!["a"], true, true, 2_000));
+    assert_eq!(r.data_epoch(), 1);
+
+    r.append_page(vec!["b"]);
+    assert_eq!(r.data_epoch(), 2);
+    r.prepend_page(vec!["c"]);
+    assert_eq!(r.data_epoch(), 3);
+
+    r.invalidate();
+    assert_eq!(r.data_epoch(), 3, "invalidate is not a data write");
+
+    r.set_max_pages(Some(1));
+    assert_eq!(r.data_epoch(), 4, "evicting pages is a data change");
+    r.set_max_pages(Some(10));
+    assert_eq!(r.data_epoch(), 4, "no eviction is not a data write");
+
+    r.reset();
+    assert_eq!(r.data_epoch(), 5);
+    r.reset();
+    assert_eq!(r.data_epoch(), 5, "reset without pages is not a data write");
+}
+
+#[test]
+fn equality_ignores_the_data_epoch() {
+    let mut a = make_resource();
+    a.set_max_pages(Some(1));
+    a.append_page(vec!["a"]);
+    let mut b = a.clone();
+    assert_eq!(a, b);
+
+    a.append_page(vec!["a"]);
+    assert_eq!(
+        a, b,
+        "a page write that lands the same observable state must not split equality"
+    );
+
+    b.append_page(vec!["b"]);
+    assert_ne!(a, b);
 }

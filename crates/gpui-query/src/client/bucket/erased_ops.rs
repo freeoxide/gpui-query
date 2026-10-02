@@ -60,11 +60,9 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
         &self,
         cx: &App,
         collect: &crate::client::bucket::shared::PersistCollect<'_>,
-        out: &mut Vec<(
-            crate::core::QueryKey,
-            crate::client::persist::PersistedEntry,
-        )>,
+        out: &mut crate::client::bucket::shared::PersistCollectOut,
     ) {
-        self.inner.collect_persistable_into(cx, collect, out, |r| r.data());
+        self.inner
+            .collect_persistable_into(cx, collect, out, |r| r.data());
     }
 }

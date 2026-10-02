@@ -54,8 +54,10 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Prepare
                     resource.complete_current_failure(self.request_id, error, self.now_ms)
                 }
             };
-            // Wake the persistence driver only when accepted; a stale no-op must not schedule a save.
+            // Wake observers and the persistence driver only when accepted; a
+            // stale no-op must not re-render or schedule a save.
             if accepted {
+                cx.notify();
                 #[cfg(feature = "persist")]
                 cx.default_global::<crate::client::CacheMutation>();
             }

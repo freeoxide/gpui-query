@@ -3,10 +3,10 @@
 //! [`hydrate`], and the typed serializer/deserializer registries.
 
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{App, Subscription};
@@ -18,8 +18,9 @@ use crate::core::{CachePolicy, QueryKey};
 use super::QueryClient;
 
 /// Bumped when the serialized shape changes incompatibly; loaders reject
-/// mismatches with [`PersistError::VersionMismatch`].
-pub const PERSIST_VERSION: u32 = 1;
+/// mismatches with [`PersistError::VersionMismatch`]. Version 2 made
+/// [`QueryKey::to_path`] injective by escaping segments.
+pub const PERSIST_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum PersistError {
@@ -32,10 +33,7 @@ pub enum PersistError {
     #[error("persistence deserialize error: {0}")]
     Deserialize(String),
     #[error("persistence version mismatch: expected {expected}, found {found}")]
-    VersionMismatch {
-        expected: u32,
-        found: u32,
-    },
+    VersionMismatch { expected: u32, found: u32 },
     #[error("persistence bad path: {0}")]
     BadPath(String),
     /// A required resource could not be acquired (e.g. a file lock).
@@ -247,19 +245,38 @@ impl QueryClient {
         max_age: Duration,
         cx: &App,
     ) -> PersistSnapshot {
+        let flushed = HashMap::new();
+        let mut out = self.collect_persist_delta(filter, max_age, &flushed, cx);
+        let mut snapshot = PersistSnapshot::new();
+        snapshot.entries = out
+            .fresh
+            .drain(..)
+            .map(|collected| (collected.path, collected.entry))
+            .collect();
+        snapshot
+    }
+
+    /// Walks the query buckets once, serializing only entries whose data
+    /// epoch differs from `flushed` (their last-flushed value). Live entries
+    /// already flushed come back as reused paths; the caller merges fresh
+    /// and reused entries over its accumulated store.
+    pub(crate) fn collect_persist_delta(
+        &self,
+        filter: &PersistFilter,
+        max_age: Duration,
+        flushed: &HashMap<String, (gpui::EntityId, u64)>,
+        cx: &App,
+    ) -> crate::client::bucket::shared::PersistCollectOut {
         let Some(ref registry) = self.serializers else {
-            return PersistSnapshot::new();
+            return crate::client::bucket::shared::PersistCollectOut::default();
         };
         let now_ms = crate::client::time::current_time_ms();
         let max_age_ms = max_age.as_millis() as u64;
         let collect = crate::client::bucket::shared::PersistCollect::new(
-            registry,
-            filter,
-            now_ms,
-            max_age_ms,
+            registry, filter, now_ms, max_age_ms, flushed,
         );
 
-        let mut out: Vec<(QueryKey, PersistedEntry)> = Vec::new();
+        let mut out = crate::client::bucket::shared::PersistCollectOut::default();
         for bucket in self.buckets.values() {
             bucket.collect_persistable_into(cx, &collect, &mut out);
         }
@@ -268,24 +285,25 @@ impl QueryClient {
         }
 
         if let Some(meta_map) = &self.persisted_meta {
-            for (key, entry) in &mut out {
-                if let Some(m) = meta_map.get(key) {
-                    entry.meta = Some(m.clone());
+            for collected in &mut out.fresh {
+                if let Some(m) = meta_map.get(&collected.key) {
+                    collected.entry.meta = Some(m.clone());
                 }
             }
         }
-
-        let mut snapshot = PersistSnapshot::new();
-        snapshot.entries = out
-            .into_iter()
-            .map(|(key, entry)| (key.to_path(), entry))
-            .collect();
-        snapshot
+        out
     }
 
     /// Debounced [`Persister`] driver on the [`CacheMutation`](super::CacheMutation)
     /// dirty signal: collection happens at drain time, so a burst of bumps
     /// coalesces into one save of the latest state.
+    ///
+    /// Saves carry the full accumulated store, but only dirty entries (data
+    /// epoch changed since the last flush) are re-serialized; entries
+    /// removed from the cache are pruned. A flush with no dirty entries and
+    /// no prunes does not save at all. Saves run one at a time: a flush
+    /// landing while a save is in flight queues a follow-up flush, so
+    /// snapshots reach the persister in flush order.
     pub fn persist_with<P: Persister>(
         &self,
         persister: P,
@@ -296,6 +314,12 @@ impl QueryClient {
         let debounce = opts.debounce;
         let bg = cx.background_executor().clone();
         let armed = Arc::new(AtomicBool::new(false));
+        let flush_state = Arc::new(Mutex::new(PersistFlushState {
+            flushed: HashMap::new(),
+            store: Arc::new(PersistSnapshot::new()),
+            save_in_flight: false,
+            save_queued: false,
+        }));
 
         let _ = cx.default_global::<super::CacheMutation>();
 
@@ -304,6 +328,7 @@ impl QueryClient {
             let armed = armed.clone();
             let filter = opts.filter;
             let max_age = opts.max_age;
+            let flush_state = flush_state.clone();
             cx.observe_global::<super::CacheMutation>(move |cx| {
                 if armed.swap(true, Ordering::AcqRel) {
                     return;
@@ -311,6 +336,7 @@ impl QueryClient {
                 let persister = persister.clone();
                 let filter = filter.clone();
                 let armed = armed.clone();
+                let flush_state = flush_state.clone();
                 let bg = bg.clone();
                 cx.spawn(async move |cx| {
                     if !debounce.is_zero() {
@@ -318,19 +344,71 @@ impl QueryClient {
                     }
                     // Disarm before collecting: a bump landing now arms a fresh task.
                     armed.store(false, Ordering::Release);
-                    let Ok(snapshot) = cx.update_global::<QueryClient, _>(|client, cx| {
-                        client.collect_persist_snapshot(&filter, max_age, cx)
-                    }) else {
-                        return;
-                    };
-                    // Collect on the main thread (entity reads), save on background (IO).
-                    bg.spawn(async move {
-                        if let Err(_err) = persister.save(&snapshot).await {
-                            #[cfg(debug_assertions)]
-                            eprintln!("persist_with: save failed: {_err}");
+                    loop {
+                        let delta = cx.update_global::<QueryClient, _>(|client, cx| {
+                            let Ok(state) = flush_state.lock() else {
+                                return None;
+                            };
+                            Some(client.collect_persist_delta(&filter, max_age, &state.flushed, cx))
+                        });
+                        let Some(delta) = delta.ok().flatten() else {
+                            return;
+                        };
+                        // Collect on the main thread (entity reads), save on background (IO).
+                        let out = {
+                            let Ok(mut state) = flush_state.lock() else {
+                                return;
+                            };
+                            let live: HashSet<String> = delta
+                                .fresh
+                                .iter()
+                                .map(|c| c.path.clone())
+                                .chain(delta.reused.iter().cloned())
+                                .collect();
+                            let prune = state.store.entries.keys().any(|path| !live.contains(path));
+                            if delta.fresh.is_empty() && !prune {
+                                return;
+                            }
+                            if state.save_in_flight {
+                                // The in-flight owner re-collects after its save, keeping saves ordered.
+                                state.save_queued = true;
+                                return;
+                            }
+                            let fresh_epochs: Vec<(String, (gpui::EntityId, u64))> = delta
+                                .fresh
+                                .iter()
+                                .map(|c| (c.path.clone(), (c.entity_id, c.epoch)))
+                                .collect();
+                            {
+                                let snapshot = Arc::make_mut(&mut state.store);
+                                if prune {
+                                    snapshot.entries.retain(|path, _| live.contains(path));
+                                }
+                                for collected in delta.fresh {
+                                    snapshot.entries.insert(collected.path, collected.entry);
+                                }
+                            }
+                            if prune {
+                                state.flushed.retain(|path, _| live.contains(path));
+                            }
+                            state.flushed.extend(fresh_epochs);
+                            state.save_in_flight = true;
+                            state.store.clone()
+                        };
+                        let persister = persister.clone();
+                        let result = bg.spawn(async move { persister.save(&out).await }).await;
+                        let Ok(mut state) = flush_state.lock() else {
+                            return;
+                        };
+                        state.save_in_flight = false;
+                        if let Err(err) = result {
+                            eprintln!("persist_with: save failed: {}", save_failure_log_text(&err));
                         }
-                    })
-                    .detach();
+                        if !state.save_queued {
+                            return;
+                        }
+                        state.save_queued = false;
+                    }
                 })
                 .detach();
             })
@@ -340,6 +418,23 @@ impl QueryClient {
             _subscription: Some(subscription),
         }
     }
+}
+
+/// Per-driver flush state: the owning entity id and data epoch each path was
+/// last flushed at, plus the full store as of the last save. Main-thread
+/// only; the mutex guards the save handoff and the in-flight/queued pair
+/// that keeps saves ordered.
+struct PersistFlushState {
+    flushed: HashMap<String, (gpui::EntityId, u64)>,
+    store: Arc<PersistSnapshot>,
+    save_in_flight: bool,
+    save_queued: bool,
+}
+
+/// Persister errors can embed payload or path detail (custom `Deserialize`
+/// strings, `Permission` text), so log output passes the shared redactor.
+pub(crate) fn save_failure_log_text(err: &PersistError) -> String {
+    crate::core::error::sanitize::sanitize_message(&err.to_string())
 }
 
 /// Persists nothing; loads an empty snapshot.
@@ -358,13 +453,11 @@ impl Persister for NoopPersister {
 /// Load a snapshot and re-prime the live cache with it: the value-carrying
 /// counterpart to the metadata-only
 /// [`QueryClient::hydrate`](super::QueryClient::hydrate). Stored `to_path()`
-/// keys are split back on `"::"` so `Exact`/`Prefix` filters match live
-/// multi-segment keys; the split is lossy (a segment containing `"::"`
-/// hydrates as multiple segments, and escaping it needs a `PERSIST_VERSION`
-/// bump). Returns the post-filter snapshot so callers can inspect entries or
-/// prime types with no registered deserializer. The persister's output is
-/// trusted beyond the version check: one reading untrusted storage must
-/// validate payloads itself.
+/// keys are decoded with `QueryKey::from_path` so `Exact`/`Prefix` filters
+/// match live multi-segment keys. Returns the post-filter snapshot so
+/// callers can inspect entries or prime types with no registered
+/// deserializer. The persister's output is trusted beyond the version
+/// check: one reading untrusted storage must validate payloads itself.
 pub async fn hydrate<P: Persister>(
     client: &mut QueryClient,
     persister: &P,
@@ -390,7 +483,7 @@ pub async fn hydrate<P: Persister>(
     let steps: Vec<HydrateStep> = deserializers.iter().cloned().collect();
 
     for (key_path, entry) in &snapshot.entries {
-        let key = QueryKey::new(key_path.split("::"));
+        let key = QueryKey::from_path(key_path);
         if !filter.matches(&key) {
             continue;
         }
@@ -403,4 +496,33 @@ pub async fn hydrate<P: Persister>(
     }
 
     Ok(snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_failure_log_text_redacts_hostile_detail_and_keeps_benign() {
+        let hostile =
+            PersistError::Permission("cache write denied for token= supersecretvalue".to_string());
+        let logged = save_failure_log_text(&hostile);
+        assert!(logged.contains("[REDACTED_TOKEN]"), "{logged}");
+        assert!(!logged.contains("supersecretvalue"));
+
+        let path = PersistError::BadPath("no cache dir for /home/alice/app".to_string());
+        let logged = save_failure_log_text(&path);
+        assert!(logged.contains("[REDACTED_PATH]"), "{logged}");
+        assert!(!logged.contains("/home/alice/app"));
+
+        let benign = PersistError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "cache file missing",
+        ));
+        assert_eq!(
+            save_failure_log_text(&benign),
+            benign.to_string(),
+            "benign io diagnostics must pass through unredacted"
+        );
+    }
 }

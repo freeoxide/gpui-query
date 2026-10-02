@@ -1,6 +1,6 @@
 use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
 
-use crate::client::QueryClient;
+use crate::client::{QueryBucket, QueryClient};
 use crate::core::*;
 use crate::tests::test_support::*;
 
@@ -99,7 +99,8 @@ fn test_gc_evicts_idle_infinite_query_with_realistic_timing(cx: &mut TestAppCont
             let key = QueryKey::from("inf_gc_idle");
             let _entity = client.infinite_resource::<String, QueryError>(key.clone(), cx);
 
-            client.gc_with_time(100_000, cx);
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 100_000, cx);
 
             assert!(
                 client.infinite_query::<String, QueryError>(&key).is_none(),
@@ -290,6 +291,232 @@ fn test_mutation_bucket_evict_oldest_keeps_count_bounded(cx: &mut TestAppContext
             );
 
             drop(live);
+        });
+    });
+}
+
+fn create_evict_entry(
+    bucket: &mut QueryBucket<String, QueryError>,
+    key: &str,
+    cx: &mut gpui::App,
+) -> gpui::Entity<QueryResource<String, QueryError>> {
+    bucket.get_or_create(
+        QueryKey::from(key),
+        CachePolicy::Ttl { ttl_ms: 60_000 },
+        RequestPolicy::LatestWins,
+        cx,
+    )
+}
+
+fn stamp_and_refresh(
+    bucket: &mut QueryBucket<String, QueryError>,
+    entity: &gpui::Entity<QueryResource<String, QueryError>>,
+    key: &str,
+    updated_at_ms: u64,
+    cx: &mut gpui::App,
+) {
+    entity.update(cx, |r, _| r.apply_success(key.to_string(), updated_at_ms));
+    bucket.get_or_create(
+        QueryKey::from(key),
+        CachePolicy::Ttl { ttl_ms: 60_000 },
+        RequestPolicy::LatestWins,
+        cx,
+    );
+}
+
+#[gpui::test]
+fn test_evict_oldest_removes_oldest_live_entry_at_capacity(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        let mut bucket = QueryBucket::<String, QueryError>::new();
+        bucket.inner.max_entries = 3;
+
+        let a = create_evict_entry(&mut bucket, "evict_a", cx);
+        stamp_and_refresh(&mut bucket, &a, "evict_a", 1_000, cx);
+        let b = create_evict_entry(&mut bucket, "evict_b", cx);
+        stamp_and_refresh(&mut bucket, &b, "evict_b", 2_000, cx);
+        let c = create_evict_entry(&mut bucket, "evict_c", cx);
+        stamp_and_refresh(&mut bucket, &c, "evict_c", 3_000, cx);
+
+        let _d = create_evict_entry(&mut bucket, "evict_d", cx);
+
+        assert!(
+            !bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_a")),
+            "oldest live entry should be evicted at capacity"
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_b"))
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_c"))
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_d"))
+        );
+    });
+}
+
+#[gpui::test]
+fn test_evict_oldest_prefers_dead_entry_over_live_at_capacity(cx: &mut TestAppContext) {
+    let mut bucket = QueryBucket::<String, QueryError>::new();
+    bucket.inner.max_entries = 2;
+
+    let live = cx.update(|cx| {
+        let dead = create_evict_entry(&mut bucket, "evict_dead", cx);
+        stamp_and_refresh(&mut bucket, &dead, "evict_dead", 1_000, cx);
+        drop(dead);
+
+        let live = create_evict_entry(&mut bucket, "evict_live", cx);
+        stamp_and_refresh(&mut bucket, &live, "evict_live", 2_000, cx);
+        live
+    });
+
+    cx.update(|cx| {
+        create_evict_entry(&mut bucket, "evict_new", cx);
+
+        assert!(
+            !bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_dead")),
+            "collected entry should be evicted before any live entry"
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_live")),
+            "older live entry should be kept while a collected entry can go"
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_new"))
+        );
+    });
+    drop(live);
+}
+
+#[gpui::test]
+fn test_evict_oldest_with_only_dead_entries_keeps_bucket_bounded(cx: &mut TestAppContext) {
+    let mut bucket = QueryBucket::<String, QueryError>::new();
+    bucket.inner.max_entries = 3;
+
+    cx.update(|cx| {
+        for i in 0..3 {
+            create_evict_entry(&mut bucket, &format!("evict_dead_{i}"), cx);
+        }
+        assert_eq!(bucket.inner.entries.len(), 3);
+    });
+
+    cx.update(|cx| {
+        create_evict_entry(&mut bucket, "evict_live_key", cx);
+
+        assert_eq!(
+            bucket.inner.entries.len(),
+            3,
+            "a bucket of collected entries must still evict on insert instead of \
+             growing past max_entries"
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_live_key"))
+        );
+    });
+}
+
+#[gpui::test]
+fn test_evict_oldest_prefers_dead_entry_with_newest_mirror_at_capacity(cx: &mut TestAppContext) {
+    let mut bucket = QueryBucket::<String, QueryError>::new();
+    bucket.inner.max_entries = 2;
+
+    let live = cx.update(|cx| {
+        let live = create_evict_entry(&mut bucket, "evict_live_older", cx);
+        stamp_and_refresh(&mut bucket, &live, "evict_live_older", 1_000, cx);
+        live
+    });
+
+    cx.update(|cx| {
+        let dead = create_evict_entry(&mut bucket, "evict_dead_newest", cx);
+        stamp_and_refresh(&mut bucket, &dead, "evict_dead_newest", 2_000, cx);
+        drop(dead);
+    });
+
+    cx.update(|cx| {
+        create_evict_entry(&mut bucket, "evict_after_dead", cx);
+
+        assert!(
+            !bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_dead_newest")),
+            "collected entry must be evicted first even when its mirror age is \
+             the newest in the bucket"
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_live_older")),
+            "older live entry must survive while a collected entry can go"
+        );
+        assert!(
+            bucket
+                .inner
+                .entries
+                .contains_key(&QueryKey::from("evict_after_dead"))
+        );
+    });
+    drop(live);
+}
+
+#[gpui::test]
+fn test_gc_drops_dead_mutation_with_stale_loading_mirror(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let entity = cx.new(|_| {
+                MutationResource::<String, String, QueryError>::new(RetryPolicy::no_retries())
+            });
+            client.register_mutation::<String, String, QueryError>(&entity, cx);
+
+            entity.update(cx, |m, _| m.begin("vars".to_string()));
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 1_000_000, cx);
+
+            assert_eq!(
+                client.diagnostics(cx).mutation_count,
+                1,
+                "loading mutation must survive GC while its entity is alive"
+            );
+            drop(entity);
+        });
+    });
+
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 1_000_000, cx);
+
+            assert_eq!(
+                client.diagnostics(cx).mutation_count,
+                0,
+                "a dead mutation with a stale loading mirror must be dropped by GC"
+            );
         });
     });
 }

@@ -11,9 +11,8 @@ use super::ErasedMutationBucket;
 use super::bucket::types::{DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
 use super::devtools::MutationDiagnostic;
 
-/// `last_updated_ms` / `loading` mirror the entity, refreshed wherever the
-/// bucket already reads it, so `evict_oldest` scans cheap fields and
-/// confirms its winner with a single entity read.
+/// Mirrors refreshed wherever the bucket already reads the entity, so
+/// eviction scans cheap fields and confirms its winner with one entity read.
 struct MutationEntry<V, T, E> {
     entity: WeakEntity<MutationResource<V, T, E>>,
     updated_at: u64,
@@ -42,19 +41,20 @@ impl<
         }
     }
 
-    /// Skips loading entries; the winner gets one confirming entity read
-    /// (the mirror can be stale if a fetch began after the last refresh),
-    /// and each stale re-check marks the mirror and re-picks.
+    /// Dead entries are age-zero candidates; the mirror can be stale, so the
+    /// winner is confirmed with one entity read.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
             let target = self
                 .resources
                 .iter()
                 .filter_map(|(id, entry)| {
+                    if !entry.entity.is_upgradable() {
+                        return Some((*id, 0));
+                    }
                     if entry.loading {
                         return None;
                     }
-                    entry.entity.upgrade()?;
                     Some((*id, entry.last_updated_ms.unwrap_or(entry.updated_at)))
                 })
                 .min_by_key(|&(_, age)| age);
@@ -133,17 +133,13 @@ impl<
 
     /// Loading always survives; `Success` survives
     /// `SUCCESS_GC_MULTIPLIER * gc_time_ms`, `Idle`/`Failure` survive
-    /// `gc_time_ms`. The `loading` mirror is checked first so a mid-flight
-    /// mutation whose weak ref cannot upgrade survives one cycle.
+    /// `gc_time_ms`. Dead weak refs are dropped regardless of the loading
+    /// mirror.
     fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_threshold = gc_time_ms.max(MIN_GC_TIME_MS);
         let success_threshold = gc_threshold.saturating_mul(SUCCESS_GC_MULTIPLIER as u64);
 
         self.resources.retain(|_id, entry| {
-            if entry.loading {
-                return true;
-            }
-
             let Some(entity) = entry.entity.upgrade() else {
                 return false;
             };
@@ -195,5 +191,36 @@ impl<
             let resource = entity.read(cx);
             out.push((resource.key().map(|k| k.to_path()), resource.status()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{AppContext as _, TestAppContext};
+
+    use crate::core::{MutationResource, QueryError, RetryPolicy};
+
+    use super::{ErasedMutationBucket, MutationBucket};
+
+    #[gpui::test]
+    fn gc_keeps_just_cancelled_entry_with_stale_insertion(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let mut bucket = MutationBucket::<String, String, QueryError>::new();
+            let entity = cx.new(|_| {
+                MutationResource::<String, String, QueryError>::new(RetryPolicy::no_retries())
+            });
+            entity.update(cx, |m, _| m.begin("vars".to_string()));
+            bucket.insert(&entity, 1_000, cx);
+
+            entity.update(cx, |m, _| m.cancel(QueryError::cancelled("user aborted")));
+
+            bucket.gc(1_001_000, 500_000, cx);
+            assert_eq!(
+                bucket.count(),
+                1,
+                "GC must age a cancelled mutation from its completion time, \
+                 not the insertion baseline"
+            );
+        });
     }
 }

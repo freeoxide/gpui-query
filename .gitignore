@@ -21,9 +21,13 @@ Thumbs.db
 # z-proflow state
 .z-proflow/
 
+# z-flow state
+.zflow/
+
 # Local Playwright/MCP artifacts
 .playwright-mcp/
 
 .wrangler/cache
 
 .astro
+.zcode/

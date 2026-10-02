@@ -33,6 +33,48 @@ fn test_prepare_fetch_query_uses_force_mode_always_starts(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn test_prepare_fetch_query_ignored_while_loading_returns_none(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(QueryClient::with_policies(
+            CachePolicy::NoCache,
+            RequestPolicy::IgnoreWhileLoading,
+        ));
+    });
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("pf_ignore_foreign");
+            let entity = client.resource::<String, QueryError>(key.clone(), cx);
+            let rid = client
+                .next_request_id_for_key::<String, QueryError>(&key)
+                .expect("rid");
+            entity.update(cx, |r, _| {
+                let _ = r.begin_request_with_id(Some(rid), 1_000, QueryFetchMode::Normal);
+            });
+
+            let prepared = client.prepare_fetch_query::<String, QueryError>(key.clone(), cx);
+            assert!(
+                prepared.is_none(),
+                "IgnoreWhileLoading with a request in flight must not hand out a prepared fetch"
+            );
+            assert!(
+                entity.read(cx).is_current_request(rid),
+                "the original in-flight request must still own the resource"
+            );
+
+            let accepted = entity.update(cx, |r, _| {
+                r.complete_current_success(rid, "original".to_string(), 2_000)
+            });
+            assert!(
+                accepted,
+                "the original fetcher's completion must still be accepted"
+            );
+            let data = client.get_query_data::<String, QueryError>(&key, cx);
+            assert_eq!(data, Some("original".to_string()));
+        });
+    });
+}
+
+#[gpui::test]
 fn test_prepare_fetch_query_refetch_after_ttl(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_global(QueryClient::with_policies(
@@ -92,6 +134,60 @@ fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
                 result.is_none(),
                 "prefetch should return None for fresh data \
                  (age ~0ms, well within 60s TTL)"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn test_prepare_prefetch_query_returns_none_while_revalidate_in_flight(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("prefetch_stale_active");
+            let cache_policy = CachePolicy::StaleWhileRevalidate {
+                ttl_ms: 1_000,
+                stale_ms: 60_000,
+            };
+            let now = crate::client::current_time_ms();
+            let cached_at = now.saturating_sub(31_000);
+            let entity = client.resource_with_policies::<String, QueryError>(
+                key.clone(),
+                cache_policy,
+                RequestPolicy::IgnoreWhileLoading,
+                cx,
+            );
+            entity.update(cx, |r, _| r.apply_success("stale".to_string(), cached_at));
+
+            let rid = client
+                .next_request_id_for_key::<String, QueryError>(&key)
+                .expect("rid");
+            entity.update(cx, |r, _| {
+                let _ = r.begin_request_with_id(Some(rid), now, QueryFetchMode::Normal);
+            });
+            assert!(
+                entity.read(cx).is_current_request(rid),
+                "precondition: a revalidate must be in flight over the stale data"
+            );
+
+            let prepared = client.prepare_prefetch_query::<String, QueryError>(
+                key.clone(),
+                cache_policy,
+                RequestPolicy::IgnoreWhileLoading,
+                cx,
+            );
+            assert!(
+                prepared.is_none(),
+                "IgnoreWhileLoading handing back the still-active id means a \
+                 revalidate is already running; prefetch must return None"
+            );
+            assert!(
+                entity.read(cx).is_current_request(rid),
+                "the in-flight revalidate must still own the resource"
+            );
+            assert!(
+                !entity.read(cx).signal().unwrap().is_cancelled(),
+                "the duplicate prefetch must not cancel the active revalidate"
             );
         });
     });

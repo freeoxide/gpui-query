@@ -14,6 +14,7 @@ use crate::core::{
 };
 
 use super::types::{BucketEntry, DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
+use crate::client::time::current_time_ms;
 
 /// Runs GC every this many resource operations, so it fires in production
 /// without anyone calling `gc()` by hand.
@@ -22,8 +23,11 @@ pub(crate) const GC_INTERVAL: usize = 64;
 /// The resource surface `ResourceBucket` needs for both query kinds;
 /// prefixed names keep the delegating impls unambiguous.
 pub(crate) trait BucketResource {
-    fn new_resource(key: QueryKey, cache_policy: CachePolicy, request_policy: RequestPolicy)
-    -> Self;
+    fn new_resource(
+        key: QueryKey,
+        cache_policy: CachePolicy,
+        request_policy: RequestPolicy,
+    ) -> Self;
     fn resource_status(&self) -> QueryStatus;
     fn resource_is_loading(&self) -> bool;
     fn resource_last_updated(&self) -> Option<u64>;
@@ -34,6 +38,10 @@ pub(crate) trait BucketResource {
     fn resource_cache_age_ms(&self, now_ms: u64) -> Option<u64>;
     fn resource_cache_hits(&self) -> u64;
     fn resource_retry_count(&self) -> u32;
+    /// Counts data writes; persistence collection skips entries whose epoch
+    /// is unchanged since the last flush.
+    #[cfg(feature = "persist")]
+    fn resource_data_epoch(&self) -> u64;
     fn resource_invalidate(&mut self);
     fn resource_reset(&mut self);
     fn resource_cancel_inflight(&mut self);
@@ -76,6 +84,10 @@ impl<T: 'static, E: 'static> BucketResource for QueryResource<T, E> {
     }
     fn resource_retry_count(&self) -> u32 {
         self.retry_count()
+    }
+    #[cfg(feature = "persist")]
+    fn resource_data_epoch(&self) -> u64 {
+        self.data_epoch()
     }
     fn resource_invalidate(&mut self) {
         self.invalidate();
@@ -129,6 +141,10 @@ impl<T: 'static, E: 'static> BucketResource for InfiniteQueryResource<T, E> {
     fn resource_retry_count(&self) -> u32 {
         self.retry_count()
     }
+    #[cfg(feature = "persist")]
+    fn resource_data_epoch(&self) -> u64 {
+        self.data_epoch()
+    }
     fn resource_invalidate(&mut self) {
         self.invalidate();
     }
@@ -178,7 +194,10 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
     ) -> (Entity<R>, RequestId) {
         let (entity, request_id) =
             self.get_or_create_impl(key, cache_policy, request_policy, cx, true);
-        (entity, request_id.expect("impl inserts the entry before returning"))
+        (
+            entity,
+            request_id.expect("impl inserts the entry before returning"),
+        )
     }
 
     /// Live entries refresh differing policies in place; a dead weak
@@ -194,18 +213,18 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
     ) -> (Entity<R>, Option<RequestId>) {
         if let Some(entry) = self.entries.get_mut(&key) {
             if let Some(entity) = entry.entity.upgrade() {
-                let (needs_update, last_updated, loading) =
-                    entity.read_with(cx, |resource, _| {
-                        let needs_update = resource.resource_cache_policy() != cache_policy
-                            || resource.resource_request_policy() != request_policy;
-                        (
-                            needs_update,
-                            resource.resource_last_updated(),
-                            resource.resource_is_loading(),
-                        )
-                    });
+                let (needs_update, last_updated, loading) = entity.read_with(cx, |resource, _| {
+                    let needs_update = resource.resource_cache_policy() != cache_policy
+                        || resource.resource_request_policy() != request_policy;
+                    (
+                        needs_update,
+                        resource.resource_last_updated(),
+                        resource.resource_is_loading(),
+                    )
+                });
                 entry.last_updated_ms = last_updated;
                 entry.loading = loading;
+                entry.updated_at = current_time_ms();
                 if needs_update {
                     entity.update(cx, |resource, _| {
                         resource.set_resource_cache_policy(cache_policy);
@@ -227,6 +246,7 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             BucketEntry {
                 entity: entity.downgrade(),
                 sequencer,
+                updated_at: current_time_ms(),
                 last_updated_ms: None,
                 loading: false,
             },
@@ -234,26 +254,26 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         (entity, request_id)
     }
 
-    /// Scans only the mirrors plus weak-ref liveness, then confirms
-    /// `!is_loading()` on the winner with one entity read (the mirror can be
-    /// stale if a fetch began after the last refresh). Each retry marks the
-    /// stale mirror and re-picks, so the candidate set strictly shrinks.
+    /// Dead entries are age-zero candidates; the mirror can be stale, so the
+    /// winner is confirmed with one entity read.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
             let target = self
                 .entries
                 .iter()
                 .filter_map(|(key, entry)| {
+                    if !entry.entity.is_upgradable() {
+                        return Some((key, 0));
+                    }
                     if entry.loading {
                         return None;
                     }
-                    entry.entity.upgrade()?;
-                    Some((key, entry.last_updated_ms.unwrap_or(0)))
+                    Some((key, entry.last_updated_ms.unwrap_or(entry.updated_at)))
                 })
                 .min_by_key(|&(_, age)| age);
 
             let Some((key, _)) = target else {
-                return; // every live entry is loading: nothing safe to evict
+                return; // only reachable when every entry is loading
             };
 
             let key = key.clone();
@@ -281,7 +301,10 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         self.entries.get(key).and_then(|e| e.entity.upgrade())
     }
 
-    pub(crate) fn sequencer_mut(&mut self, key: &QueryKey) -> Option<&mut crate::core::RequestSequencer> {
+    pub(crate) fn sequencer_mut(
+        &mut self,
+        key: &QueryKey,
+    ) -> Option<&mut crate::core::RequestSequencer> {
         self.entries.get_mut(key).map(|e| &mut e.sequencer)
     }
 
@@ -313,8 +336,9 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         }
     }
 
-    /// `entity.update` notifies observers even when the closure mutates
-    /// nothing, so bulk ops gate on authoritative reads.
+    /// Observers fire only from `cx.notify()` inside the update closure, so
+    /// mutating bulk ops notify and the observer dedup suppresses no-change
+    /// wakes.
     pub(crate) fn invalidate_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_matching_entry(filter, cx, |entity, cx| {
             // invalidate() only clears last_updated_at; skip the no-op update.
@@ -323,12 +347,28 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
                 entity.update(cx, |resource, _| resource.resource_invalidate());
             }
         });
+        self.touch_matching(filter);
     }
 
     pub(crate) fn reset_matching(&mut self, filter: &QueryKeyFilter, cx: &mut App) {
         self.for_each_matching_entry(filter, cx, |entity, cx| {
-            entity.update(cx, |resource, _| resource.resource_reset());
+            entity.update(cx, |resource, cx| {
+                resource.resource_reset();
+                cx.notify();
+            });
         });
+        self.touch_matching(filter);
+    }
+
+    /// Invalidated/reset resources lose their own `last_updated_at`, so the
+    /// user action must restart the GC age baseline or live entries are evicted.
+    fn touch_matching(&mut self, filter: &QueryKeyFilter) {
+        let now_ms = current_time_ms();
+        for (key, entry) in self.entries.iter_mut() {
+            if filter.matches(key) {
+                entry.updated_at = now_ms;
+            }
+        }
     }
 
     /// Gates on the authoritative `is_loading()` read: the entry mirror
@@ -348,7 +388,7 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
     /// Loading always survives; `Success` survives while its cache policy
     /// can still serve it and until `SUCCESS_GC_MULTIPLIER * gc_time_ms`;
     /// `Idle`/`Failure`/`Cancelled` survive `gc_time_ms`. Entries without a
-    /// completion timestamp count as fully aged.
+    /// completion timestamp age from the entry's `updated_at` baseline.
     pub(crate) fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_threshold = gc_time_ms.max(MIN_GC_TIME_MS);
         let success_threshold = gc_threshold.saturating_mul(SUCCESS_GC_MULTIPLIER as u64);
@@ -370,7 +410,7 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             let status = resource.resource_status();
             let age_ms = last_updated
                 .map(|updated| now_ms.saturating_sub(updated))
-                .unwrap_or(gc_threshold);
+                .unwrap_or_else(|| now_ms.saturating_sub(entry.updated_at));
 
             if status == QueryStatus::Success {
                 let cache_policy = resource.resource_cache_policy();
@@ -426,14 +466,16 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         }
     }
 
-    /// Filter and max-age run before the serializer so skipped entries cost
-    /// nothing. Only `Success` entries are pushed.
+    /// Filter, max-age, and the caller's last-flushed data epochs all run
+    /// before the serializer so skipped entries cost nothing. Only `Success`
+    /// entries are collected; entries whose epoch matches `flushed` are
+    /// reported as reused paths instead of re-serialized.
     #[cfg(feature = "persist")]
     pub(crate) fn collect_persistable_into<S>(
         &self,
         cx: &App,
         collect: &PersistCollect<'_>,
-        out: &mut Vec<(QueryKey, PersistedEntry)>,
+        out: &mut PersistCollectOut,
         value_of: impl Fn(&R) -> Option<&S>,
     ) where
         S: 'static,
@@ -464,30 +506,64 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
             let Some(value_ref) = value_of(resource) else {
                 continue;
             };
+            let path = key.to_path();
+            // Epochs restart at 0 on a recreated entry, so identity rides
+            // alongside the epoch in the flush gate.
+            let identity = (entity.entity_id(), resource.resource_data_epoch());
+            if collect.flushed.get(&path) == Some(&identity) {
+                out.reused.push(path);
+                continue;
+            }
             // Downcast failure is unreachable by construction; skip rather than persist junk.
             let Some(value) = serialize_fn(value_ref as &dyn std::any::Any) else {
                 continue;
             };
-            out.push((
-                key.clone(),
-                PersistedEntry {
+            out.fresh.push(PersistCollected {
+                key: key.clone(),
+                path,
+                entity_id: identity.0,
+                epoch: identity.1,
+                entry: PersistedEntry {
                     value,
                     cached_at,
                     cache_policy: resource.resource_cache_policy(),
                     meta: None,
                 },
-            ));
+            });
         }
     }
 }
 
-/// Per-sweep inputs for [`ResourceBucket::collect_persistable_into`].
+/// One live persistable entry produced by
+/// [`ResourceBucket::collect_persistable_into`].
+#[cfg(feature = "persist")]
+pub(crate) struct PersistCollected {
+    pub(crate) key: QueryKey,
+    pub(crate) path: String,
+    pub(crate) entity_id: gpui::EntityId,
+    pub(crate) epoch: u64,
+    pub(crate) entry: PersistedEntry,
+}
+
+/// Per-sweep output: freshly serialized entries plus the paths of live
+/// entries reused from the persist driver's store.
+#[cfg(feature = "persist")]
+#[derive(Default)]
+pub(crate) struct PersistCollectOut {
+    pub(crate) fresh: Vec<PersistCollected>,
+    pub(crate) reused: Vec<String>,
+}
+
+/// Per-sweep inputs for [`ResourceBucket::collect_persistable_into`];
+/// `flushed` maps paths to the owning entity id and data epoch at their
+/// last flush.
 #[cfg(feature = "persist")]
 pub(crate) struct PersistCollect<'a> {
     serializers: &'a SerializerRegistry,
     filter: &'a PersistFilter,
     now_ms: u64,
     max_age_ms: u64,
+    flushed: &'a std::collections::HashMap<String, (gpui::EntityId, u64)>,
 }
 
 #[cfg(feature = "persist")]
@@ -497,12 +573,14 @@ impl<'a> PersistCollect<'a> {
         filter: &'a PersistFilter,
         now_ms: u64,
         max_age_ms: u64,
+        flushed: &'a std::collections::HashMap<String, (gpui::EntityId, u64)>,
     ) -> Self {
         Self {
             serializers,
             filter,
             now_ms,
             max_age_ms,
+            flushed,
         }
     }
 }

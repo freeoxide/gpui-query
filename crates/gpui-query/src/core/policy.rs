@@ -9,12 +9,17 @@ pub enum CachePolicy {
     NoCache,
     /// `ttl_ms = 0` behaves like `NoCache` (data is only "fresh" at the
     /// instant it is stored); only `debug_assert`ed, not validated in release.
-    Ttl { ttl_ms: u64 },
+    Ttl {
+        ttl_ms: u64,
+    },
     /// Fresh within `ttl_ms`; between `ttl_ms` and `ttl_ms + stale_ms` the
     /// stale data is served and a background revalidation is triggered; past
     /// that, a normal fetch runs. Zero values degenerate as in [`Ttl`](Self::Ttl);
     /// only `debug_assert`ed, not validated in release.
-    StaleWhileRevalidate { ttl_ms: u64, stale_ms: u64 },
+    StaleWhileRevalidate {
+        ttl_ms: u64,
+        stale_ms: u64,
+    },
 }
 
 impl Default for CachePolicy {
@@ -166,7 +171,9 @@ pub enum QueryBeginResult {
         status: QueryStatus,
         replaced_request_id: Option<RequestId>,
     },
-    IgnoredWhileLoading { active_request_id: RequestId },
+    IgnoredWhileLoading {
+        active_request_id: RequestId,
+    },
 }
 
 #[cfg(test)]

@@ -134,11 +134,16 @@ proptest! {
     #![proptest_config(test_config())]
 
     #[test]
-    fn key_to_path_format(segments in arb_key()) {
+    fn key_to_path_roundtrips_through_from_path(segments in arb_key()) {
         let key = make_key(&segments);
         let path = key.to_path();
-        let expected = segments.join("::");
-        prop_assert_eq!(path, expected);
+        prop_assert_eq!(QueryKey::from_path(&path), key);
+    }
+
+    #[test]
+    fn key_to_path_distinct_for_distinct_keys(a in arb_key(), b in arb_key()) {
+        prop_assume!(a != b);
+        prop_assert_ne!(make_key(&a).to_path(), make_key(&b).to_path());
     }
 }
 

@@ -178,7 +178,8 @@ impl QueryClient {
 
     /// Imperative fetch (TanStack `fetchQuery`): no observer is attached;
     /// the caller runs the fetcher and completes the request via
-    /// `complete_success` / `complete_failure`.
+    /// `complete_success` / `complete_failure`. Returns `None` when the
+    /// request policy ignored the start, leaving the in-flight fetcher in place.
     ///
     /// # Example
     ///
@@ -218,14 +219,20 @@ impl QueryClient {
         );
 
         let (request_id, signal) = entity.update(cx, |resource, _| {
-            let _ = resource.begin_request_with_id(
+            match resource.begin_request_with_id(
                 Some(request_id),
                 now_ms,
                 crate::core::QueryFetchMode::Force,
-            );
-            let rid = resource.active_request_id()?;
-            let signal = resource.signal().cloned()?;
-            Some((rid, signal))
+            ) {
+                // Force still defers to IgnoreWhileLoading: the still-active id
+                // belongs to a foreign fetcher, so binding would duplicate its completion.
+                crate::core::QueryBeginResult::Started { .. } => {
+                    let rid = resource.active_request_id()?;
+                    let signal = resource.signal().cloned()?;
+                    Some((rid, signal))
+                }
+                _ => None,
+            }
         })?;
 
         Some(PreparedFetch {
@@ -256,21 +263,27 @@ impl QueryClient {
 
         // Only Started and StaleCacheHit mean a fetch is actually wanted.
         let (request_id, signal) = entity.update(cx, |resource, _| {
-            let started = matches!(
-                resource.begin_request_with_id(
-                    Some(request_id),
-                    now_ms,
-                    crate::core::QueryFetchMode::Normal
-                ),
+            let active_before = resource.active_request_id();
+            match resource.begin_request_with_id(
+                Some(request_id),
+                now_ms,
+                crate::core::QueryFetchMode::Normal,
+            ) {
+                // IgnoreWhileLoading handing back the still-active id means a
+                // revalidate is already running; prefetch must not duplicate it.
+                crate::core::QueryBeginResult::StaleCacheHit {
+                    request_id,
+                    replaced_request_id: None,
+                    ..
+                } if Some(request_id) == active_before => None,
                 crate::core::QueryBeginResult::Started { .. }
-                    | crate::core::QueryBeginResult::StaleCacheHit { .. }
-            );
-            if !started {
-                return None;
+                | crate::core::QueryBeginResult::StaleCacheHit { .. } => {
+                    let rid = resource.active_request_id()?;
+                    let signal = resource.signal().cloned()?;
+                    Some((rid, signal))
+                }
+                _ => None,
             }
-            let rid = resource.active_request_id()?;
-            let signal = resource.signal().cloned()?;
-            Some((rid, signal))
         })?;
 
         Some(PreparedFetch {

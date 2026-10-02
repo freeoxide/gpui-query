@@ -221,7 +221,11 @@ fn begin_request_with_id_none_uses_transient_sequencer() {
 
     match result {
         QueryBeginResult::Started { request_id, .. } => {
-            assert_eq!(request_id, RequestId::scoped(NonZero::new(1).unwrap(), 1));
+            assert_eq!(
+                request_id.scope_id(),
+                RequestSequencer::RESERVED_FALLBACK_SCOPE
+            );
+            assert_eq!(request_id.value(), 1);
         }
         _ => panic!("expected Started"),
     }

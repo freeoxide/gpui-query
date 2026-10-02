@@ -52,7 +52,8 @@ impl std::fmt::Display for RequestId {
 /// The sequence increments from 1; at `u64::MAX` the scope advances and the
 /// sequence resets. If the scope itself overflows it wraps to 1, so a fresh
 /// id could theoretically collide with a very old one still held by a
-/// long-running future.
+/// long-running future. Fallback mints via `next_fallback`
+/// stay in a reserved top scope, disjoint from ids minted from 1.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestSequencer {
     pub(crate) scope_id: NonZero<u64>,
@@ -76,17 +77,31 @@ impl MaybeRequestId<'_> {
     pub(crate) fn next(&mut self, fallback: &mut RequestSequencer) -> RequestId {
         match self {
             Self::FromSequencer(sequencer) => sequencer.next_request(),
-            Self::Provided(maybe_id) => maybe_id.unwrap_or_else(|| fallback.next_request()),
+            Self::Provided(maybe_id) => maybe_id.unwrap_or_else(|| fallback.next_fallback()),
         }
     }
 }
 
 impl RequestSequencer {
+    /// Reserved scope for resource-local fallback ids; `new()` sequencers
+    /// start at 1, so the two id spaces stay disjoint.
+    pub(crate) const RESERVED_FALLBACK_SCOPE: NonZero<u64> = NonZero::<u64>::MAX;
+
     pub fn new() -> Self {
         Self {
             scope_id: NonZero::<u64>::MIN,
             next_request_id: 1,
         }
+    }
+
+    /// Mints in the reserved fallback scope, re-scoping sequencers that start
+    /// in the shared space (fresh or deserialized resources).
+    pub(crate) fn next_fallback(&mut self) -> RequestId {
+        if self.scope_id != Self::RESERVED_FALLBACK_SCOPE {
+            self.scope_id = Self::RESERVED_FALLBACK_SCOPE;
+            self.next_request_id = 1;
+        }
+        self.next_request()
     }
 
     pub fn next_request(&mut self) -> RequestId {

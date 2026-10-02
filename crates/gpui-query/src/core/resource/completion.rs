@@ -91,6 +91,7 @@ impl<T, E> QueryResource<T, E> {
         self.error = None;
         self.active_request_id = None;
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
+        self.data_epoch = self.data_epoch.saturating_add(1);
     }
 
     pub(crate) fn apply_failure(&mut self, error: impl Into<E>, now_ms: u64) {
@@ -111,6 +112,7 @@ impl<T, E> QueryResource<T, E> {
         self.error = None;
         self.active_request_id = None;
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
+        self.data_epoch = self.data_epoch.saturating_add(1);
     }
 
     pub(crate) fn apply_failure_with_data(&mut self, data: T, error: impl Into<E>, now_ms: u64) {
@@ -119,6 +121,7 @@ impl<T, E> QueryResource<T, E> {
         self.error = Some(error.into());
         self.active_request_id = None;
         self.last_updated_at = Some(QueryTimestamp::from(now_ms));
+        self.data_epoch = self.data_epoch.saturating_add(1);
     }
 
     /// `accept_current_request` clears `active_request_id`, so a `Some` here

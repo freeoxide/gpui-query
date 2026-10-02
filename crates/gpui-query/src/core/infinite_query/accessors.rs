@@ -118,6 +118,12 @@ impl<T, E> InfiniteQueryResource<T, E> {
         self.last_updated_at.map(QueryTimestamp::as_millis)
     }
 
+    /// Counts page writes, not value changes; compare instead of
+    /// deep-comparing page contents.
+    pub fn data_epoch(&self) -> u64 {
+        self.data_epoch
+    }
+
     /// `None` when nothing was recorded or on clock skew (`checked_sub`).
     pub fn cache_age_ms(&self, now_ms: u64) -> Option<u64> {
         QueryTimestamp::from(now_ms).elapsed_since(self.last_updated_at?)

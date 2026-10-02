@@ -1,6 +1,6 @@
 use crate::core::{
     CachePolicy, QueryBeginResult, QueryFetchMode, QueryResource, QueryStatus, RequestId,
-    RequestPolicy,
+    RequestPolicy, RequestSequencer,
 };
 use crate::tests::test_support::{
     TEST_NOW_MS, assert_status, begin_request_id, test_resource_with_policies, test_sequencer,
@@ -127,7 +127,7 @@ fn begin_request_with_id_uses_provided_id() {
 }
 
 #[test]
-fn begin_request_with_id_none_falls_back_to_transient_sequencer() {
+fn begin_request_with_id_none_mints_in_reserved_fallback_scope() {
     let mut resource: QueryResource<&str> =
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
 
@@ -136,8 +136,32 @@ fn begin_request_with_id_none_falls_back_to_transient_sequencer() {
         QueryBeginResult::Started { request_id, .. } => request_id,
         other => panic!("expected Started, got {:?}", other),
     };
-    assert_eq!(rid.scope_id(), NonZero::new(1).unwrap());
+    assert_eq!(rid.scope_id(), RequestSequencer::RESERVED_FALLBACK_SCOPE);
     assert_eq!(rid.value(), 1);
+}
+
+#[test]
+fn fallback_ids_stay_in_reserved_scope_across_mints() {
+    let mut resource: QueryResource<&str> =
+        test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
+
+    let first = match resource.begin_request_with_id(None, TEST_NOW_MS, QueryFetchMode::Normal) {
+        QueryBeginResult::Started { request_id, .. } => request_id,
+        other => panic!("expected Started, got {:?}", other),
+    };
+    let _ = resource.accept_current_request(first).unwrap();
+    let second = match resource.begin_request_with_id(None, TEST_NOW_MS, QueryFetchMode::Normal) {
+        QueryBeginResult::Started { request_id, .. } => request_id,
+        other => panic!("expected Started, got {:?}", other),
+    };
+
+    assert_eq!(
+        second.scope_id(),
+        RequestSequencer::RESERVED_FALLBACK_SCOPE,
+        "successive fallback mints must stay in the reserved scope"
+    );
+    assert_eq!(second.value(), 2);
+    assert_ne!(first, second);
 }
 
 #[test]

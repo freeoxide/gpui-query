@@ -74,7 +74,10 @@ impl<B: HttpBackend> HttpCache<B> {
 
         // checked_add: an extreme serde-hydrated stored_at must not panic.
         if let Some(meta) = cached_meta.as_ref()
-            && meta.stored_at.checked_add(meta.fresh_for).is_none_or(|t| t > SystemTime::now())
+            && meta
+                .stored_at
+                .checked_add(meta.fresh_for)
+                .is_none_or(|t| t > SystemTime::now())
             && let Some(body) = self.cached_body(url)?
         {
             let policy = policy_from_meta(meta);
@@ -133,9 +136,7 @@ impl<B: HttpBackend> HttpCache<B> {
         url: &str,
         resp: BackendResponse,
     ) -> Result<(Bytes, CachePolicy, Option<CacheMeta>), HttpError> {
-        let BackendResponse {
-            headers, body, ..
-        } = resp;
+        let BackendResponse { headers, body, .. } = resp;
         let Ok(policy) = cache_policy_from_headers(&headers) else {
             return Ok((body, CachePolicy::NoCache, None));
         };
@@ -396,11 +397,19 @@ mod tests {
         assert_eq!(policy1, CachePolicy::Ttl { ttl_ms: 600_000 });
 
         let (body2, policy2, _) = cache.fetch("https://example.test/b").await.unwrap();
-        assert_eq!(body2, Bytes::from_static(b"first"), "fresh hit serves cached body");
+        assert_eq!(
+            body2,
+            Bytes::from_static(b"first"),
+            "fresh hit serves cached body"
+        );
         assert_eq!(policy2, CachePolicy::Ttl { ttl_ms: 600_000 });
 
         assert_eq!(cache.backend.calls(), 1);
-        assert_eq!(cache.backend.remaining(), 1, "second canned response untouched");
+        assert_eq!(
+            cache.backend.remaining(),
+            1,
+            "second canned response untouched"
+        );
     }
 
     #[tokio::test]
@@ -415,7 +424,11 @@ mod tests {
         assert_eq!(body1, Bytes::from_static(b"payload"));
 
         let (body2, _, meta2) = cache.fetch("https://example.test/c").await.unwrap();
-        assert_eq!(body2, Bytes::from_static(b"payload"), "304 served cached body");
+        assert_eq!(
+            body2,
+            Bytes::from_static(b"payload"),
+            "304 served cached body"
+        );
         assert!(meta2.is_some(), "304 still yields cached meta");
     }
 

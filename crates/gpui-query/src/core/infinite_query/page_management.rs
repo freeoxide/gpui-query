@@ -23,18 +23,24 @@ impl<T, E> InfiniteQueryResource<T, E> {
             Some(0) => None,
             other => other,
         };
-        self.enforce_max_pages_remove_front()
+        let evicted = self.enforce_max_pages_remove_front();
+        if !evicted.is_empty() {
+            self.data_epoch = self.data_epoch.saturating_add(1);
+        }
+        evicted
     }
 
     /// Returns evicted pages (if any) as `Arc` handles.
     pub fn append_page(&mut self, page: T) -> Vec<Arc<T>> {
         self.pages.push_back(Arc::new(page));
+        self.data_epoch = self.data_epoch.saturating_add(1);
         self.enforce_max_pages_remove_front()
     }
 
     /// Returns evicted pages (if any) as `Arc` handles.
     pub fn prepend_page(&mut self, page: T) -> Vec<Arc<T>> {
         self.pages.push_front(Arc::new(page));
+        self.data_epoch = self.data_epoch.saturating_add(1);
         self.enforce_max_pages_remove_back()
     }
 

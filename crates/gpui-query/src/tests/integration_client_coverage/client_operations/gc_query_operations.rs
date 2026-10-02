@@ -12,12 +12,13 @@ fn test_gc_with_zero_time_clamped_evicts_idle(cx: &mut TestAppContext) {
             let _entity = client.resource::<String, QueryError>("gc_zero", cx);
             assert_eq!(client.all_queries::<String, QueryError>().len(), 1);
 
-            client.gc_with_time(0, cx);
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 2_000, cx);
             assert_eq!(
                 client.all_queries::<String, QueryError>().len(),
                 0,
-                "Idle resource with no snapshot timestamp should be evicted \
-                 even at gc_with_time(0) because its age defaults to the clamped gc_threshold"
+                "Idle resource with no snapshot timestamp should be evicted once \
+                 its age (2000ms) exceeds the clamped gc_threshold (1000ms)"
             );
         });
     });
@@ -32,28 +33,56 @@ fn test_gc_with_time_explicit_time_value(cx: &mut TestAppContext) {
             let _e2 = client.resource::<String, QueryError>("gc_evict2", cx);
             assert_eq!(client.all_queries::<String, QueryError>().len(), 2);
 
-            client.gc_with_time(500, cx);
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 500, cx);
+            assert_eq!(
+                client.all_queries::<String, QueryError>().len(),
+                2,
+                "never-fetched resources should survive gc_with_time(now+500): \
+                 their age (500ms) is below the clamped gc_threshold (1000ms)"
+            );
+
+            client.gc_with_time(now + 100_000, cx);
             assert_eq!(
                 client.all_queries::<String, QueryError>().len(),
                 0,
-                "Idle resources with no snapshot timestamp should be evicted \
-                 at gc_with_time(500) — their age defaults to the clamped gc_threshold"
+                "Idle resources should be evicted at gc_with_time(now+100_000)"
             );
 
             let _e3 = client.resource::<String, QueryError>("gc_big_time", cx);
             assert_eq!(client.all_queries::<String, QueryError>().len(), 1);
 
-            client.gc_with_time(100_000, cx);
+            client.gc_with_time(now + 100_000, cx);
             assert_eq!(
                 client.all_queries::<String, QueryError>().len(),
                 0,
-                "Idle resource should also be evicted at gc_with_time(100_000)"
+                "Idle resource should also be evicted at gc_with_time(now+100_000)"
             );
 
             let diag = client.diagnostics(cx);
             assert_eq!(
                 diag.query_count, 0,
                 "diagnostics should report 0 queries after all were evicted"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_with_time_before_entry_baseline_keeps_never_fetched_resource(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc_past_now");
+            let _e = client.resource::<String, QueryError>(key.clone(), cx);
+
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now.saturating_sub(60_000), cx);
+
+            assert!(
+                client.query::<String, QueryError>(&key).is_some(),
+                "a gc time older than the entry baseline must not evict a never-fetched \
+                 resource: age saturates to 0, below the gc_threshold"
             );
         });
     });
@@ -83,22 +112,25 @@ fn test_gc_runs_across_all_bucket_types(cx: &mut TestAppContext) {
             assert_eq!(client.all_infinite_queries::<String, QueryError>().len(), 1);
             assert_eq!(client.all_mutations::<String, User, QueryError>().len(), 2);
 
-            client.gc_with_time(100_000, cx);
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 100_000, cx);
 
             assert!(
                 client.all_queries::<String, QueryError>().is_empty(),
                 "idle query with no snapshot should be evicted by GC"
             );
             assert!(
-                client.all_infinite_queries::<String, QueryError>().is_empty(),
+                client
+                    .all_infinite_queries::<String, QueryError>()
+                    .is_empty(),
                 "idle infinite query with no snapshot should be evicted by GC"
             );
 
             let mutations = client.all_mutations::<String, User, QueryError>();
             assert_eq!(
                 mutations.len(),
-                2,
-                "both mutations should survive GC (one loading, one idle but retained by strong Entity ref)"
+                1,
+                "only the loading mutation should survive GC; the idle one aged past gc_threshold"
             );
         });
     });

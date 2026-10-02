@@ -17,6 +17,9 @@ default = []
 ## [`crate::backend::HttpBackend`] instead.
 reqwest = ["dep:reqwest"]
 
+[lib]
+bench = false
+
 [dependencies]
 # `version` must stay alongside `path`: `cargo publish` strips the path override.
 gpui-query = { path = "../gpui-query", version = "0.2", default-features = false, features = ["core"] }

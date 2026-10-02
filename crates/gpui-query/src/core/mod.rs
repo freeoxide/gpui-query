@@ -2,7 +2,7 @@
 //! Fetch protocol: `begin_request` → `accept_current_request` (single-use
 //! `RequestGuard`) → `complete_success`/`complete_failure`.
 
-mod error;
+pub(crate) mod error;
 mod fetched;
 mod infinite_query;
 mod key;

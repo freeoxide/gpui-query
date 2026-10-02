@@ -164,12 +164,78 @@ fn test_gc_evicts_idle_resources_with_no_snapshot(cx: &mut TestAppContext) {
             let _entity = client.resource::<String, QueryError>("idle_key", cx);
             assert_eq!(client.all_queries::<String, QueryError>().len(), 1);
 
-            client.gc_with_time(1_500, cx);
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 1_500, cx);
 
             let queries = client.all_queries::<String, QueryError>();
             assert!(
                 queries.is_empty(),
-                "idle resource with no snapshot should be evicted"
+                "idle resource with no snapshot should be evicted once older than gc_time"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_preserves_live_never_fetched_resource(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc/live_never_fetched");
+            let e1 = client.resource::<String, QueryError>(key.clone(), cx);
+
+            client.gc(cx);
+
+            assert!(
+                client.query::<String, QueryError>(&key).is_some(),
+                "GC must keep the bucket entry of a live never-fetched resource"
+            );
+            let e2 = client.resource::<String, QueryError>(key, cx);
+            assert_eq!(e1, e2, "resource() after GC must return the same entity");
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_preserves_set_query_data_primed_entry(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc/primed");
+            client.set_query_data::<String, QueryError>(key.clone(), "v".to_string(), cx);
+
+            client.gc(cx);
+
+            assert_eq!(
+                client
+                    .get_query_data::<String, QueryError>(&key, cx)
+                    .as_deref(),
+                Some("v"),
+                "set_query_data-primed data must survive GC"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_preserves_completed_entry(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc/completed");
+            let prepared = client
+                .prepare_fetch_query::<String, QueryError>(key.clone(), cx)
+                .expect("prepare_fetch_query should start");
+            prepared.complete_success("v".to_string(), cx);
+
+            client.gc(cx);
+
+            assert_eq!(
+                client
+                    .get_query_data::<String, QueryError>(&key, cx)
+                    .as_deref(),
+                Some("v"),
+                "completed entry must survive GC"
             );
         });
     });
@@ -315,7 +381,8 @@ fn test_gc_across_multiple_type_buckets(cx: &mut TestAppContext) {
             assert_eq!(client.all_queries::<String, QueryError>().len(), 1);
             assert_eq!(client.all_queries::<u32, QueryError>().len(), 1);
 
-            client.gc_with_time(3_000, cx);
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 3_000, cx);
 
             assert!(
                 client.all_queries::<String, QueryError>().is_empty(),
@@ -386,6 +453,70 @@ fn test_gc_boundary_success_threshold_exact(cx: &mut TestAppContext) {
                 client.query::<String, QueryError>(&key).is_none(),
                 "age=2000ms == success_threshold=2000ms => must be evicted (>= boundary)"
             );
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_preserves_invalidated_entry_with_fresh_baseline(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc/invalidated_baseline");
+            let held = client.resource::<String, QueryError>(key.clone(), cx);
+            held.update(cx, |r, _| r.apply_success("v".to_string(), 1_000));
+
+            let type_id = std::any::TypeId::of::<(String, QueryError)>();
+            let bucket = client.buckets.get_mut(&type_id).unwrap();
+            let typed = bucket
+                .as_any_mut()
+                .downcast_mut::<crate::client::QueryBucket<String, QueryError>>()
+                .unwrap();
+            typed.inner.entries.get_mut(&key).unwrap().updated_at = 1_000;
+
+            client.invalidate_queries(&QueryKeyFilter::Exact(&key), cx);
+
+            client.gc_with_time(3_000, cx);
+
+            assert!(
+                client.query::<String, QueryError>(&key).is_some(),
+                "invalidated entry held by a live component must survive GC on a fresh baseline"
+            );
+            let again = client.resource::<String, QueryError>(key, cx);
+            assert_eq!(
+                again, held,
+                "resource() must not mint a second entity after GC"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn test_gc_preserves_reset_entry_with_fresh_baseline(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("gc/reset_baseline");
+            let held = client.resource::<String, QueryError>(key.clone(), cx);
+            held.update(cx, |r, _| r.apply_success("v".to_string(), 1_000));
+
+            let type_id = std::any::TypeId::of::<(String, QueryError)>();
+            let bucket = client.buckets.get_mut(&type_id).unwrap();
+            let typed = bucket
+                .as_any_mut()
+                .downcast_mut::<crate::client::QueryBucket<String, QueryError>>()
+                .unwrap();
+            typed.inner.entries.get_mut(&key).unwrap().updated_at = 1_000;
+
+            client.reset_queries(&QueryKeyFilter::Exact(&key), cx);
+
+            client.gc_with_time(3_000, cx);
+
+            assert!(
+                client.query::<String, QueryError>(&key).is_some(),
+                "reset entry held by a live component must survive GC on a fresh baseline"
+            );
+            assert_eq!(held.read(cx).status(), QueryStatus::Idle);
         });
     });
 }

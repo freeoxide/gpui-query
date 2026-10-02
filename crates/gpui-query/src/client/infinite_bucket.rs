@@ -30,7 +30,8 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> Infinit
         request_policy: RequestPolicy,
         cx: &mut App,
     ) -> Entity<InfiniteQueryResource<T, E>> {
-        self.entries.get_or_create(key, cache_policy, request_policy, cx)
+        self.entries
+            .get_or_create(key, cache_policy, request_policy, cx)
     }
 
     pub(crate) fn get(&self, key: &QueryKey) -> Option<Entity<InfiniteQueryResource<T, E>>> {
@@ -101,10 +102,7 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> ErasedB
         &self,
         cx: &App,
         collect: &super::bucket::shared::PersistCollect<'_>,
-        out: &mut Vec<(
-            crate::core::QueryKey,
-            crate::client::persist::PersistedEntry,
-        )>,
+        out: &mut super::bucket::shared::PersistCollectOut,
     ) {
         self.entries
             .collect_persistable_into(cx, collect, out, |r| r.first_page());

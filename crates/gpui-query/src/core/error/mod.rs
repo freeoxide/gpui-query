@@ -3,7 +3,7 @@
 //! use [`QueryError::sanitized`] on server responses.
 
 mod convert;
-mod sanitize;
+pub(crate) mod sanitize;
 mod serde;
 mod types;
 

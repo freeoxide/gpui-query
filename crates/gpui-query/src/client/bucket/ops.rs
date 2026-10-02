@@ -2,9 +2,7 @@
 
 use gpui::{App, Entity};
 
-use crate::core::{
-    CachePolicy, QueryKey, QueryResource, RequestPolicy, RequestSequencer,
-};
+use crate::core::{CachePolicy, QueryKey, QueryResource, RequestPolicy, RequestSequencer};
 
 use super::shared::ResourceBucket;
 
@@ -26,7 +24,8 @@ impl<T: Clone + Send + Sync + 'static, E: Clone + Send + Sync + 'static> QueryBu
         request_policy: RequestPolicy,
         cx: &mut App,
     ) -> Entity<QueryResource<T, E>> {
-        self.inner.get_or_create(key, cache_policy, request_policy, cx)
+        self.inner
+            .get_or_create(key, cache_policy, request_policy, cx)
     }
 
     pub(crate) fn get_or_create_with_request_id(

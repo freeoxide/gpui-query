@@ -58,6 +58,21 @@ fn cancel_on_failure_is_noop() {
 }
 
 #[test]
+fn cancel_clears_data_from_previous_success() {
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
+    m.begin("vars");
+    m.complete_success(42);
+    m.begin("vars2");
+    m.cancel(QueryError::cancelled("x"));
+    assert!(m.is_failure());
+    assert!(
+        m.data().is_none(),
+        "data from previous success must be cleared on cancel"
+    );
+}
+
+#[test]
 fn cancelled_count_increments_across_mutations() {
     let mut m: MutationResource<&'static str, i32> =
         MutationResource::new(RetryPolicy::no_retries());
@@ -73,4 +88,17 @@ fn cancelled_count_increments_across_mutations() {
     m.begin("third");
     m.cancel(QueryError::cancelled("abort 3"));
     assert_eq!(m.cancelled_count(), 3);
+}
+
+#[test]
+fn cancel_stamps_last_updated_at_ms() {
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
+    m.begin("vars");
+    assert!(m.last_updated_at_ms().is_none());
+    m.cancel(QueryError::cancelled("user aborted"));
+    assert!(
+        m.last_updated_at_ms().is_some(),
+        "cancel is a terminal completion and must refresh GC recency"
+    );
 }

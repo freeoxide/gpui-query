@@ -66,6 +66,11 @@ impl<T, E> QueryResource<T, E> {
         self.data.is_some()
     }
 
+    /// Counts data writes, not value changes; compare instead of deep-comparing `T`.
+    pub fn data_epoch(&self) -> u64 {
+        self.data_epoch
+    }
+
     pub fn signal(&self) -> Option<&QuerySignal> {
         self.signal.as_ref()
     }
