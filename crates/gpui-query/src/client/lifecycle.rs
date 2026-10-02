@@ -178,7 +178,8 @@ impl QueryClient {
 
     /// Imperative fetch (TanStack `fetchQuery`): no observer is attached;
     /// the caller runs the fetcher and completes the request via
-    /// `complete_success` / `complete_failure`.
+    /// `complete_success` / `complete_failure`. Returns `None` when the
+    /// request policy ignored the start, leaving the in-flight fetcher in place.
     ///
     /// # Example
     ///
@@ -218,14 +219,20 @@ impl QueryClient {
         );
 
         let (request_id, signal) = entity.update(cx, |resource, _| {
-            let _ = resource.begin_request_with_id(
+            match resource.begin_request_with_id(
                 Some(request_id),
                 now_ms,
                 crate::core::QueryFetchMode::Force,
-            );
-            let rid = resource.active_request_id()?;
-            let signal = resource.signal().cloned()?;
-            Some((rid, signal))
+            ) {
+                // Force still defers to IgnoreWhileLoading: the still-active id
+                // belongs to a foreign fetcher, so binding would duplicate its completion.
+                crate::core::QueryBeginResult::Started { .. } => {
+                    let rid = resource.active_request_id()?;
+                    let signal = resource.signal().cloned()?;
+                    Some((rid, signal))
+                }
+                _ => None,
+            }
         })?;
 
         Some(PreparedFetch {

@@ -33,6 +33,48 @@ fn test_prepare_fetch_query_uses_force_mode_always_starts(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn test_prepare_fetch_query_ignored_while_loading_returns_none(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(QueryClient::with_policies(
+            CachePolicy::NoCache,
+            RequestPolicy::IgnoreWhileLoading,
+        ));
+    });
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("pf_ignore_foreign");
+            let entity = client.resource::<String, QueryError>(key.clone(), cx);
+            let rid = client
+                .next_request_id_for_key::<String, QueryError>(&key)
+                .expect("rid");
+            entity.update(cx, |r, _| {
+                let _ = r.begin_request_with_id(Some(rid), 1_000, QueryFetchMode::Normal);
+            });
+
+            let prepared = client.prepare_fetch_query::<String, QueryError>(key.clone(), cx);
+            assert!(
+                prepared.is_none(),
+                "IgnoreWhileLoading with a request in flight must not hand out a prepared fetch"
+            );
+            assert!(
+                entity.read(cx).is_current_request(rid),
+                "the original in-flight request must still own the resource"
+            );
+
+            let accepted = entity.update(cx, |r, _| {
+                r.complete_current_success(rid, "original".to_string(), 2_000)
+            });
+            assert!(
+                accepted,
+                "the original fetcher's completion must still be accepted"
+            );
+            let data = client.get_query_data::<String, QueryError>(&key, cx);
+            assert_eq!(data, Some("original".to_string()));
+        });
+    });
+}
+
+#[gpui::test]
 fn test_prepare_fetch_query_refetch_after_ttl(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_global(QueryClient::with_policies(
