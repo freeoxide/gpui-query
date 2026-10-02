@@ -140,6 +140,60 @@ fn test_prepare_prefetch_query_returns_none_for_fresh(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn test_prepare_prefetch_query_returns_none_while_revalidate_in_flight(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            let key = QueryKey::from("prefetch_stale_active");
+            let cache_policy = CachePolicy::StaleWhileRevalidate {
+                ttl_ms: 1_000,
+                stale_ms: 60_000,
+            };
+            let now = crate::client::current_time_ms();
+            let cached_at = now.saturating_sub(31_000);
+            let entity = client.resource_with_policies::<String, QueryError>(
+                key.clone(),
+                cache_policy,
+                RequestPolicy::IgnoreWhileLoading,
+                cx,
+            );
+            entity.update(cx, |r, _| r.apply_success("stale".to_string(), cached_at));
+
+            let rid = client
+                .next_request_id_for_key::<String, QueryError>(&key)
+                .expect("rid");
+            entity.update(cx, |r, _| {
+                let _ = r.begin_request_with_id(Some(rid), now, QueryFetchMode::Normal);
+            });
+            assert!(
+                entity.read(cx).is_current_request(rid),
+                "precondition: a revalidate must be in flight over the stale data"
+            );
+
+            let prepared = client.prepare_prefetch_query::<String, QueryError>(
+                key.clone(),
+                cache_policy,
+                RequestPolicy::IgnoreWhileLoading,
+                cx,
+            );
+            assert!(
+                prepared.is_none(),
+                "IgnoreWhileLoading handing back the still-active id means a \
+                 revalidate is already running; prefetch must return None"
+            );
+            assert!(
+                entity.read(cx).is_current_request(rid),
+                "the in-flight revalidate must still own the resource"
+            );
+            assert!(
+                !entity.read(cx).signal().unwrap().is_cancelled(),
+                "the duplicate prefetch must not cancel the active revalidate"
+            );
+        });
+    });
+}
+
+#[gpui::test]
 fn test_prepared_fetch_complete_failure_stores_error(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {
