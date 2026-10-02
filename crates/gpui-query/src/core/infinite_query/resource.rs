@@ -22,7 +22,7 @@ pub enum FetchDirection {
 
 /// Pages are stored as `Arc<T>` so the `*_arc` accessors can hand the fetcher
 /// a cheap clone instead of copying the page.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "T: serde::Serialize, E: serde::Serialize"))]
 #[serde(bound(deserialize = "T: serde::de::DeserializeOwned, E: serde::de::DeserializeOwned"))]
 pub struct InfiniteQueryResource<T, E = QueryError> {
@@ -36,6 +36,10 @@ pub struct InfiniteQueryResource<T, E = QueryError> {
     pub(super) request_policy: RequestPolicy,
     pub(super) started_at: Option<QueryTimestamp>,
     pub(super) last_updated_at: Option<QueryTimestamp>,
+    /// Counts page writes, not value changes; runtime only, so change
+    /// detection never deep-compares `T`.
+    #[serde(skip)]
+    pub(super) data_epoch: u64,
     pub(super) cache_hits: u64,
     pub(super) cancelled_count: u64,
     pub(super) ignored_results: u64,
@@ -57,6 +61,49 @@ pub struct InfiniteQueryResource<T, E = QueryError> {
     #[cfg(feature = "client")]
     #[serde(skip)]
     pub(crate) current_task: crate::core::current_task::CurrentTask,
+}
+
+/// Observable state only; `data_epoch` is bookkeeping and must not split two
+/// otherwise-equal resources, matching `QueryResource`.
+impl<T: PartialEq, E: PartialEq> PartialEq for InfiniteQueryResource<T, E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+            && self.pages == other.pages
+            && self.status == other.status
+            && self.error == other.error
+            && self.active_request_id == other.active_request_id
+            && self.cache_policy == other.cache_policy
+            && self.request_policy == other.request_policy
+            && self.started_at == other.started_at
+            && self.last_updated_at == other.last_updated_at
+            && self.cache_hits == other.cache_hits
+            && self.cancelled_count == other.cancelled_count
+            && self.ignored_results == other.ignored_results
+            && self.retry_count == other.retry_count
+            && self.has_next_page == other.has_next_page
+            && self.has_previous_page == other.has_previous_page
+            && self.fetching_direction == other.fetching_direction
+            && self.max_pages == other.max_pages
+            && self.direction == other.direction
+            && self.retry_policy == other.retry_policy
+            && self.transient_sequencer == other.transient_sequencer
+            && self.signal == other.signal
+            && self.current_task_eq(other)
+    }
+}
+
+impl<T: PartialEq + Eq, E: PartialEq + Eq> Eq for InfiniteQueryResource<T, E> {}
+
+impl<T, E> InfiniteQueryResource<T, E> {
+    #[cfg(feature = "client")]
+    fn current_task_eq(&self, other: &Self) -> bool {
+        self.current_task == other.current_task
+    }
+
+    #[cfg(not(feature = "client"))]
+    fn current_task_eq(&self, _other: &Self) -> bool {
+        true
+    }
 }
 
 /// The wire format is a plain sequence, identical to the old `Vec<T>`
@@ -143,6 +190,7 @@ impl<T, E> InfiniteQueryResource<T, E> {
             request_policy,
             started_at: None,
             last_updated_at: None,
+            data_epoch: 0,
             cache_hits: 0,
             cancelled_count: 0,
             ignored_results: 0,

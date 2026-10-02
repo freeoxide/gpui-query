@@ -175,3 +175,99 @@ fn full_lifecycle_round_trip() {
     assert_eq!(r.data(), None);
     assert_eq!(r.cancelled_count(), 0);
 }
+
+#[test]
+fn data_epoch_counts_writes_not_value_changes() {
+    let mut r = resource();
+    assert_eq!(r.data_epoch(), 0);
+
+    r.set_data("v");
+    assert_eq!(r.data_epoch(), 1);
+    r.set_data("v");
+    assert_eq!(
+        r.data_epoch(),
+        2,
+        "equal-value overwrite still counts as a write"
+    );
+
+    r.clear_data();
+    assert_eq!(r.data_epoch(), 3);
+
+    assert!(r.rollback_to_previous());
+    assert_eq!(r.data_epoch(), 4);
+}
+
+#[test]
+fn data_epoch_bumps_on_success_and_failure_with_data_paths() {
+    let mut r = nocache_resource("epoch-completion");
+    let mut s = seq();
+
+    let (rid, _) = begin(&mut r, &mut s, 100);
+    r.complete_current_optional_success(rid, Some("a"), 200);
+    assert_eq!(r.data_epoch(), 1);
+
+    let (rid2, _) = begin(&mut r, &mut s, 300);
+    r.complete_current_failure_with_data(rid2, "b", QueryError::response("x"), 400);
+    assert_eq!(r.data_epoch(), 2);
+    assert_eq!(r.data(), Some(&"b"));
+}
+
+#[test]
+fn data_epoch_unchanged_by_failure_without_data() {
+    let mut r = nocache_resource("epoch-failure");
+    let mut s = seq();
+
+    let (rid, _) = begin(&mut r, &mut s, 100);
+    r.complete_current_failure(rid, QueryError::response("x"), 200);
+
+    assert_eq!(r.data_epoch(), 0);
+    assert_eq!(r.status(), QueryStatus::Failure);
+}
+
+#[test]
+fn data_epoch_bumps_when_cancel_or_reset_moves_data_out() {
+    let mut r = nocache_resource("epoch-cancel-reset");
+    let mut s = seq();
+
+    let (rid, _) = begin(&mut r, &mut s, 100);
+    assert!(r.complete_current_success(rid, "v", 200));
+    assert_eq!(r.data_epoch(), 1);
+
+    let (_rid2, _) = begin(&mut r, &mut s, 300);
+    assert!(r.cancel(QueryError::response("c")));
+    assert_eq!(r.data(), None);
+    assert_eq!(r.data_epoch(), 2);
+
+    assert!(r.rollback_to_previous());
+    assert_eq!(r.data(), Some(&"v"));
+    assert_eq!(r.data_epoch(), 3);
+
+    r.reset();
+    assert_eq!(r.data(), None);
+    assert_eq!(r.data_epoch(), 4);
+
+    r.reset();
+    assert_eq!(r.data_epoch(), 4, "reset without data is not a data write");
+}
+
+#[test]
+fn equality_ignores_the_data_epoch() {
+    let mut a = resource();
+    let mut s = seq();
+
+    let (rid, _) = begin(&mut a, &mut s, 100);
+    assert!(a.complete_current_success(rid, "v", 200));
+    let mut b = a.clone();
+    assert_eq!(a, b);
+
+    a.set_data("v");
+    assert!(a.rollback_to_previous());
+    assert_eq!(
+        a, b,
+        "a same-value write + rollback leaves equal observable state despite \
+         different data epochs"
+    );
+
+    b.set_data("w");
+    assert_ne!(a, b);
+}

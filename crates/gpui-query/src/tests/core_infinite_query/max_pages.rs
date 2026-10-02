@@ -86,13 +86,7 @@ fn max_pages_50_allows_50_pages_and_evicts_on_51st() {
 
     for (i, label) in P_LABELS.iter().enumerate().take(50) {
         let id = r.begin_fetch_next(&mut seq, (i * 100) as u64).unwrap();
-        r.complete_page_success(
-            id,
-            vec![*label],
-            true,
-            true,
-            ((i + 1) * 100) as u64,
-        );
+        r.complete_page_success(id, vec![*label], true, true, ((i + 1) * 100) as u64);
     }
     assert_eq!(r.page_count(), 50);
     assert_eq!(r.first_page(), Some(&vec!["p0"]));

@@ -102,7 +102,6 @@ fn mapped_resource_update_source_replaces_previous() {
 
 #[test]
 fn mapped_resource_data_applies_transform_lazily() {
-
     let transform = SelectTransform::new(|v: &Vec<i32>| v.len());
 
     let mut mapped: MappedQueryResource<Vec<i32>, usize, ()> =

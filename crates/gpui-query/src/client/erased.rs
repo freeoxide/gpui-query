@@ -2,8 +2,6 @@
 //! in `AHashMap<TypeId, Box<dyn Erased*>>` maps.
 
 use crate::client::devtools::{MutationDiagnostic, QueryDiagnostic};
-#[cfg(feature = "persist")]
-use crate::client::persist::PersistedEntry;
 use crate::core::QueryKeyFilter;
 #[cfg(feature = "persist")]
 use crate::core::{MutationStatus, QueryStatus};
@@ -26,15 +24,15 @@ pub(crate) trait ErasedBucket {
     /// diagnostics; used by `dehydrate`.
     #[cfg(feature = "persist")]
     fn collect_key_status_into(&self, cx: &gpui::App, out: &mut Vec<(String, QueryStatus)>);
-    /// Entries whose `T` has no registered serializer are skipped; filter
-    /// and max-age are checked before serializing so skipped entries cost
-    /// nothing.
+    /// Entries whose `T` has no registered serializer are skipped; filter,
+    /// max-age, and the driver's last-flushed epochs are checked before
+    /// serializing so skipped entries cost nothing.
     #[cfg(feature = "persist")]
     fn collect_persistable_into(
         &self,
         cx: &gpui::App,
         collect: &crate::client::bucket::shared::PersistCollect<'_>,
-        out: &mut Vec<(crate::core::QueryKey, PersistedEntry)>,
+        out: &mut crate::client::bucket::shared::PersistCollectOut,
     );
     /// Prunes the persisted-meta map of keys whose entries were evicted.
     #[cfg(feature = "persist")]
@@ -49,7 +47,11 @@ pub(crate) trait ErasedMutationBucket {
     fn collect_diagnostics_into(&self, cx: &gpui::App, out: &mut Vec<MutationDiagnostic>);
     /// `key` is `None` for keyless mutations.
     #[cfg(feature = "persist")]
-    fn collect_key_status_into(&self, cx: &gpui::App, out: &mut Vec<(Option<String>, MutationStatus)>);
+    fn collect_key_status_into(
+        &self,
+        cx: &gpui::App,
+        out: &mut Vec<(Option<String>, MutationStatus)>,
+    );
 }
 
 /// Legacy metadata-only persistence: entries serialize as JSON strings,
