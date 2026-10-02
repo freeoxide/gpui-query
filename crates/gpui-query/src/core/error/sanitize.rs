@@ -194,12 +194,28 @@ fn redact_emails(input: Cow<'_, str>) -> Cow<'_, str> {
         if let Some(email_end) = try_match_email(&chars, i) {
             result.push_str("[REDACTED_EMAIL]");
             i = email_end;
+        } else if chars[i].is_alphanumeric() || chars[i] == '_' {
+            // The failed candidate scanned a local run whose every interior
+            // start fails identically, so resume at the run's first
+            // non-local char instead of re-walking it one char at a time.
+            let mut resume = i;
+            while resume < len && is_email_local(chars[resume]) {
+                resume += 1;
+            }
+            for c in &chars[i..resume] {
+                result.push(*c);
+            }
+            i = resume;
         } else {
             result.push(chars[i]);
             i += 1;
         }
     }
     result.into()
+}
+
+fn is_email_local(c: char) -> bool {
+    c.is_alphanumeric() || "_.%+-".contains(c)
 }
 
 /// TLD contract: >= 2 chars, all-alphanumeric, letter-first or >= 2 letters (`c0m`/`c0`/`0rg` redact; `2x`, `1.2.10` pass); the TLD slice is bounded by the last domain dot, falling back to `@` for dotless domains (`user@intranet` redacts), and a trailing FQDN dot is trimmed for the slice but stays inside the redaction.
@@ -462,5 +478,24 @@ mod tests {
         );
         assert!(out.contains("[REDACTED_CONNECTION]"));
         assert!(out.contains("[REDACTED_PATH]"));
+    }
+
+    #[test]
+    fn sanitize_message_stays_linear_on_large_failed_email_local_run() {
+        let local = "a".repeat(64 * 1024);
+        let msg = format!("{local}@x!");
+        let start = std::time::Instant::now();
+        let out = sanitize_message(&msg);
+        assert!(
+            start.elapsed().as_secs_f64() < 1.0,
+            "sanitizing a 64KiB failed-candidate local part took {:?}",
+            start.elapsed()
+        );
+        assert!(!out.contains("[REDACTED_EMAIL]"));
+        let direct = redact_emails(Cow::Borrowed(msg.as_str()));
+        assert_eq!(
+            direct, msg,
+            "a failed-candidate local run must pass through unchanged"
+        );
     }
 }
