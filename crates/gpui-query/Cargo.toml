@@ -18,6 +18,9 @@ client = ["core", "dep:gpui"]
 hook = ["client"]
 persist = ["client", "hook", "dep:serde_json", "dep:thiserror"]
 
+[lib]
+bench = false
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true, optional = true }
@@ -37,6 +40,10 @@ serde_json = { workspace = true }
 gpui = { workspace = true, features = ["test-support"] }
 proptest = "1"
 criterion = { workspace = true }
+
+[[test]]
+name = "edge_cases"
+bench = false
 
 [[bench]]
 name = "sanitize"
