@@ -89,3 +89,16 @@ fn cancelled_count_increments_across_mutations() {
     m.cancel(QueryError::cancelled("abort 3"));
     assert_eq!(m.cancelled_count(), 3);
 }
+
+#[test]
+fn cancel_stamps_last_updated_at_ms() {
+    let mut m: MutationResource<&'static str, i32> =
+        MutationResource::new(RetryPolicy::no_retries());
+    m.begin("vars");
+    assert!(m.last_updated_at_ms().is_none());
+    m.cancel(QueryError::cancelled("user aborted"));
+    assert!(
+        m.last_updated_at_ms().is_some(),
+        "cancel is a terminal completion and must refresh GC recency"
+    );
+}

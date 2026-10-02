@@ -193,3 +193,34 @@ impl<
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use gpui::{AppContext as _, TestAppContext};
+
+    use crate::core::{MutationResource, QueryError, RetryPolicy};
+
+    use super::{ErasedMutationBucket, MutationBucket};
+
+    #[gpui::test]
+    fn gc_keeps_just_cancelled_entry_with_stale_insertion(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let mut bucket = MutationBucket::<String, String, QueryError>::new();
+            let entity = cx.new(|_| {
+                MutationResource::<String, String, QueryError>::new(RetryPolicy::no_retries())
+            });
+            entity.update(cx, |m, _| m.begin("vars".to_string()));
+            bucket.insert(&entity, 1_000, cx);
+
+            entity.update(cx, |m, _| m.cancel(QueryError::cancelled("user aborted")));
+
+            bucket.gc(1_001_000, 500_000, cx);
+            assert_eq!(
+                bucket.count(),
+                1,
+                "GC must age a cancelled mutation from its completion time, \
+                 not the insertion baseline"
+            );
+        });
+    }
+}

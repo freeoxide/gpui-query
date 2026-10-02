@@ -37,11 +37,6 @@ pub(super) async fn run_mutation_loop<V, T, E, F, Fut>(
 
         match result {
             Ok(data) => {
-                let data_for_callback = callbacks
-                    .as_ref()
-                    .is_some_and(needs_data)
-                    .then(|| data.clone());
-
                 let Some(entity) = weak.upgrade() else {
                     if let Some(ref cb) = callbacks
                         && let Some(ref f) = cb.on_settled
@@ -50,6 +45,20 @@ pub(super) async fn run_mutation_loop<V, T, E, F, Fut>(
                     }
                     return;
                 };
+
+                // A cancel/reset while the mutator was awaited leaves a
+                // terminal state a late Ok must not overwrite.
+                if !read_entity(&entity, cx, |r, _| r.is_loading()).unwrap_or(false) {
+                    let terminal_error =
+                        read_entity(&entity, cx, |r, _| r.error().cloned()).flatten();
+                    fire_error_callbacks(&callbacks, &terminal_error);
+                    return;
+                }
+
+                let data_for_callback = callbacks
+                    .as_ref()
+                    .is_some_and(needs_data)
+                    .then(|| data.clone());
                 let _ = entity.update(cx, |resource, cx| {
                     resource.complete_success(data);
                     resource.reset_retry_count();

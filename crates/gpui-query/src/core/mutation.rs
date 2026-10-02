@@ -251,6 +251,7 @@ impl<V, T, E> MutationResource<V, T, E> {
         self.status = MutationStatus::Failure;
         self.data = None;
         self.error = Some(error);
+        self.last_updated_at_ms = Some(completion_now_ms());
         if let Some(signal) = self.signal.as_ref() {
             signal.cancel();
         }
