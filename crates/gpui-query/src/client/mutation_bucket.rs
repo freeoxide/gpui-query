@@ -11,9 +11,8 @@ use super::ErasedMutationBucket;
 use super::bucket::types::{DEFAULT_MAX_ENTRIES, MIN_GC_TIME_MS, SUCCESS_GC_MULTIPLIER};
 use super::devtools::MutationDiagnostic;
 
-/// `last_updated_ms` / `loading` mirror the entity, refreshed wherever the
-/// bucket already reads it, so `evict_oldest` scans cheap fields and
-/// confirms its winner with a single entity read.
+/// Mirrors refreshed wherever the bucket already reads the entity, so
+/// eviction scans cheap fields and confirms its winner with one entity read.
 struct MutationEntry<V, T, E> {
     entity: WeakEntity<MutationResource<V, T, E>>,
     updated_at: u64,
@@ -42,11 +41,8 @@ impl<
         }
     }
 
-    /// Collected entries are age-zero candidates so they evict before any
-    /// live entry; the winner gets one confirming entity read (the mirror
-    /// can be stale if a fetch began after the last refresh), and each
-    /// stale re-check marks the mirror and re-picks. A dead winner is
-    /// removed in place by the failed confirm.
+    /// Dead entries are age-zero candidates; the mirror can be stale, so the
+    /// winner is confirmed with one entity read.
     pub(crate) fn evict_oldest(&mut self, cx: &App) {
         loop {
             let target = self

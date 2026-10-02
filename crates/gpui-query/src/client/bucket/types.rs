@@ -14,11 +14,8 @@ pub(crate) const DEFAULT_MAX_ENTRIES: usize = 10_000;
 /// `gc_time_ms`.
 pub(crate) const SUCCESS_GC_MULTIPLIER: u32 = 2;
 
-/// `updated_at` is the bucket's recency baseline for entities that have no
-/// completion timestamp of their own; `last_updated_ms` / `loading` mirror
-/// the entity, refreshed wherever the bucket already reads it, so
-/// `evict_oldest` scans cheap fields and confirms its winner with a single
-/// entity read.
+/// `updated_at` is the recency baseline when the resource has no completion
+/// timestamp; the mirrors are refreshed wherever the bucket already reads the entity.
 pub(crate) struct BucketEntry<R> {
     pub entity: WeakEntity<R>,
     pub sequencer: RequestSequencer,
