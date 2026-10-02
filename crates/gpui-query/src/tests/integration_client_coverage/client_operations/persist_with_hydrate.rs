@@ -1,6 +1,8 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Poll, Waker};
 use std::time::Duration;
 
 use gpui::{AppContext as _, BorrowAppContext as _, Entity, TestAppContext};
@@ -772,6 +774,138 @@ fn test_persist_with_debounce_coalesces(cx: &mut TestAppContext) {
         saved.entries.contains_key("coalesced"),
         "the coalesced save should include the retained Success entry: {:?}",
         saved.entries.keys().collect::<Vec<_>>()
+    );
+    let _ = harness;
+}
+
+#[derive(Clone, Default)]
+struct FlushGate {
+    inner: Arc<StdMutex<FlushGateInner>>,
+}
+
+#[derive(Default)]
+struct FlushGateInner {
+    released: bool,
+    wakers: Vec<Waker>,
+}
+
+impl FlushGate {
+    fn release(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.released = true;
+        for waker in inner.wakers.drain(..) {
+            waker.wake();
+        }
+    }
+
+    fn wait(&self) -> impl Future<Output = ()> + Send {
+        let inner = self.inner.clone();
+        async move {
+            std::future::poll_fn(move |cx| {
+                let mut guard = inner.lock().unwrap();
+                if guard.released {
+                    return Poll::Ready(());
+                }
+                if !guard.wakers.iter().any(|w| w.will_wake(cx.waker())) {
+                    guard.wakers.push(cx.waker().clone());
+                }
+                Poll::Pending
+            })
+            .await
+        }
+    }
+}
+
+#[derive(Clone)]
+struct GatedPersister {
+    gate: FlushGate,
+    events: Arc<StdMutex<Vec<String>>>,
+}
+
+impl Persister for GatedPersister {
+    async fn load(&self) -> Result<PersistSnapshot, PersistError> {
+        Ok(PersistSnapshot::new())
+    }
+
+    async fn save(&self, snapshot: &PersistSnapshot) -> Result<(), PersistError> {
+        let value = snapshot
+            .entries
+            .get("gated")
+            .and_then(|e| e.value.as_str())
+            .unwrap_or("?")
+            .to_string();
+        self.events.lock().unwrap().push(format!("start:{value}"));
+        self.gate.wait().await;
+        self.events.lock().unwrap().push(format!("end:{value}"));
+        Ok(())
+    }
+}
+
+#[gpui::test]
+fn flush_while_save_in_flight_queues_and_saves_in_order(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    let gate = FlushGate::default();
+    let persister = GatedPersister {
+        gate: gate.clone(),
+        events: Arc::new(StdMutex::new(Vec::new())),
+    };
+    let events = persister.events.clone();
+
+    struct H {
+        _entity: Entity<QueryResource<String, QueryError>>,
+        _handle: PersistHandle,
+    }
+    let harness = cx.new(|cx| {
+        let (handle, entity) = cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(ser_string);
+            let handle = client.persist_with(persister, zero_debounce(), cx);
+            let entity = client.resource::<String, QueryError>(QueryKey::from("gated"), cx);
+            (handle, entity)
+        });
+        H {
+            _entity: entity,
+            _handle: handle,
+        }
+    });
+
+    cx.update(|cx| {
+        let entity = harness.read_with(cx, |h, _| h._entity.clone());
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            entity.update(cx, |r, _| {
+                r.apply_success("v1".to_string(), crate::client::current_time_ms())
+            });
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        events.lock().unwrap().as_slice(),
+        ["start:v1"],
+        "the first save must be started and blocked on the gate"
+    );
+
+    cx.update(|cx| {
+        let entity = harness.read_with(cx, |h, _| h._entity.clone());
+        cx.update_global::<QueryClient, _>(|_client, cx| {
+            entity.update(cx, |r, _| {
+                r.apply_success("v2".to_string(), crate::client::current_time_ms())
+            });
+            cx.default_global::<CacheMutation>();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        events.lock().unwrap().as_slice(),
+        ["start:v1"],
+        "a flush while a save is in flight must queue, not start a second save"
+    );
+
+    gate.release();
+    cx.run_until_parked();
+    assert_eq!(
+        events.lock().unwrap().as_slice(),
+        ["start:v1", "end:v1", "start:v2", "end:v2"],
+        "the queued flush must save the newer snapshot after the in-flight save completes"
     );
     let _ = harness;
 }

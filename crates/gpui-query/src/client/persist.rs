@@ -301,7 +301,9 @@ impl QueryClient {
     /// Saves carry the full accumulated store, but only dirty entries (data
     /// epoch changed since the last flush) are re-serialized; entries
     /// removed from the cache are pruned. A flush with no dirty entries and
-    /// no prunes does not save at all.
+    /// no prunes does not save at all. Saves run one at a time: a flush
+    /// landing while a save is in flight queues a follow-up flush, so
+    /// snapshots reach the persister in flush order.
     pub fn persist_with<P: Persister>(
         &self,
         persister: P,
@@ -315,6 +317,8 @@ impl QueryClient {
         let flush_state = Arc::new(Mutex::new(PersistFlushState {
             flushed: HashMap::new(),
             store: Arc::new(PersistSnapshot::new()),
+            save_in_flight: false,
+            save_queued: false,
         }));
 
         let _ = cx.default_global::<super::CacheMutation>();
@@ -340,56 +344,71 @@ impl QueryClient {
                     }
                     // Disarm before collecting: a bump landing now arms a fresh task.
                     armed.store(false, Ordering::Release);
-                    let delta = cx.update_global::<QueryClient, _>(|client, cx| {
-                        let Ok(state) = flush_state.lock() else {
-                            return None;
+                    loop {
+                        let delta = cx.update_global::<QueryClient, _>(|client, cx| {
+                            let Ok(state) = flush_state.lock() else {
+                                return None;
+                            };
+                            Some(client.collect_persist_delta(&filter, max_age, &state.flushed, cx))
+                        });
+                        let Some(delta) = delta.ok().flatten() else {
+                            return;
                         };
-                        Some(client.collect_persist_delta(&filter, max_age, &state.flushed, cx))
-                    });
-                    let Some(delta) = delta.ok().flatten() else {
-                        return;
-                    };
-                    let Ok(mut state) = flush_state.lock() else {
-                        return;
-                    };
-                    let live: HashSet<String> = delta
-                        .fresh
-                        .iter()
-                        .map(|c| c.path.clone())
-                        .chain(delta.reused.iter().cloned())
-                        .collect();
-                    let prune = state.store.entries.keys().any(|path| !live.contains(path));
-                    if delta.fresh.is_empty() && !prune {
-                        return;
-                    }
-                    // Clone-on-write only while a previous save is still in flight.
-                    let fresh_epochs: Vec<(String, (gpui::EntityId, u64))> = delta
-                        .fresh
-                        .iter()
-                        .map(|c| (c.path.clone(), (c.entity_id, c.epoch)))
-                        .collect();
-                    {
-                        let snapshot = Arc::make_mut(&mut state.store);
-                        if prune {
-                            snapshot.entries.retain(|path, _| live.contains(path));
-                        }
-                        for collected in delta.fresh {
-                            snapshot.entries.insert(collected.path, collected.entry);
-                        }
-                    }
-                    if prune {
-                        state.flushed.retain(|path, _| live.contains(path));
-                    }
-                    state.flushed.extend(fresh_epochs);
-                    let out = state.store.clone();
-                    drop(state);
-                    // Collect on the main thread (entity reads), save on background (IO).
-                    bg.spawn(async move {
-                        if let Err(err) = persister.save(&out).await {
+                        // Collect on the main thread (entity reads), save on background (IO).
+                        let out = {
+                            let Ok(mut state) = flush_state.lock() else {
+                                return;
+                            };
+                            let live: HashSet<String> = delta
+                                .fresh
+                                .iter()
+                                .map(|c| c.path.clone())
+                                .chain(delta.reused.iter().cloned())
+                                .collect();
+                            let prune = state.store.entries.keys().any(|path| !live.contains(path));
+                            if delta.fresh.is_empty() && !prune {
+                                return;
+                            }
+                            if state.save_in_flight {
+                                // The in-flight owner re-collects after its save, keeping saves ordered.
+                                state.save_queued = true;
+                                return;
+                            }
+                            let fresh_epochs: Vec<(String, (gpui::EntityId, u64))> = delta
+                                .fresh
+                                .iter()
+                                .map(|c| (c.path.clone(), (c.entity_id, c.epoch)))
+                                .collect();
+                            {
+                                let snapshot = Arc::make_mut(&mut state.store);
+                                if prune {
+                                    snapshot.entries.retain(|path, _| live.contains(path));
+                                }
+                                for collected in delta.fresh {
+                                    snapshot.entries.insert(collected.path, collected.entry);
+                                }
+                            }
+                            if prune {
+                                state.flushed.retain(|path, _| live.contains(path));
+                            }
+                            state.flushed.extend(fresh_epochs);
+                            state.save_in_flight = true;
+                            state.store.clone()
+                        };
+                        let persister = persister.clone();
+                        let result = bg.spawn(async move { persister.save(&out).await }).await;
+                        let Ok(mut state) = flush_state.lock() else {
+                            return;
+                        };
+                        state.save_in_flight = false;
+                        if let Err(err) = result {
                             eprintln!("persist_with: save failed: {}", save_failure_log_text(&err));
                         }
-                    })
-                    .detach();
+                        if !state.save_queued {
+                            return;
+                        }
+                        state.save_queued = false;
+                    }
                 })
                 .detach();
             })
@@ -403,10 +422,13 @@ impl QueryClient {
 
 /// Per-driver flush state: the owning entity id and data epoch each path was
 /// last flushed at, plus the full store as of the last save. Main-thread
-/// only; the mutex guards the handoff of an in-flight save's snapshot.
+/// only; the mutex guards the save handoff and the in-flight/queued pair
+/// that keeps saves ordered.
 struct PersistFlushState {
     flushed: HashMap<String, (gpui::EntityId, u64)>,
     store: Arc<PersistSnapshot>,
+    save_in_flight: bool,
+    save_queued: bool,
 }
 
 /// Persister errors can embed payload or path detail (custom `Deserialize`
