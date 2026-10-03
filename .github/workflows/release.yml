@@ -15,6 +15,16 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag }}
 
+      # Tags cut before the release-bump sync carry a stale satellite req
+      # (v0.3.0) that breaks workspace resolution before the libc pin can run.
+      - name: Sync satellite reqs with the tagged version
+        run: |
+          VERSION="$(grep -m1 '^version' crates/gpui-query/Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
+          MINOR="$(cut -d. -f1-2 <<<"$VERSION")"
+          sed -i -E "s|(gpui-query = [{] path = \"\.\./gpui-query\", version = \")[^\"]+|\1${MINOR}|" \
+            crates/gpui-query-http/Cargo.toml \
+            crates/gpui-query-persist/Cargo.toml
+
       - uses: dtolnay/rust-toolchain@stable
 
       # xattr 0.2.3 (via gpui -> zed-async-tar) references libc::ENOATTR,
