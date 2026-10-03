@@ -142,6 +142,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Tags cut before the release-bump sync carry a stale satellite req
+      # (v0.3.0) that breaks workspace resolution before the libc pin can run.
+      - name: Sync satellite reqs with the tagged version
+        run: |
+          MINOR="$(cut -d. -f1-2 <<<"${{ needs.check-and-release.outputs.version }}")"
+          sed -i -E "s|(gpui-query = [{] path = \"\.\./gpui-query\", version = \")[^\"]+|\1${MINOR}|" \
+            crates/gpui-query-http/Cargo.toml \
+            crates/gpui-query-persist/Cargo.toml
+
       # xattr 0.2.3 (via gpui -> zed-async-tar) references libc::ENOATTR,
       # removed on Linux in libc 0.2.190; drop once zed-async-tar moves off xattr 0.2.x.
       - name: Pin libc below the ENOATTR removal
