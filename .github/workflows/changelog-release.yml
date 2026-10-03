@@ -78,13 +78,19 @@ jobs:
             web/src/content/docs/docs/getting-started/installation.mdx \
             skills/gpui-query/SKILL.md \
             skills/gpui-query-extensions/SKILL.md
+          # The satellites pin `gpui-query` by major.minor; a minor release
+          # must move that req or path+version resolution stops matching.
+          MINOR="$(echo "$VERSION" | cut -d. -f1-2)"
+          sed -i -E "s|(gpui-query = [{] path = \"\.\./gpui-query\", version = \")[^\"]+|\1${MINOR}|" \
+            crates/gpui-query-http/Cargo.toml \
+            crates/gpui-query-persist/Cargo.toml
 
       - name: Commit version bump
         if: steps.check_tag.outputs.exists == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add crates/gpui-query/Cargo.toml README.md crates/gpui-query/README.md web/src/content/docs/docs/getting-started/installation.mdx skills/gpui-query/SKILL.md skills/gpui-query-extensions/SKILL.md
+          git add crates/gpui-query/Cargo.toml crates/gpui-query-http/Cargo.toml crates/gpui-query-persist/Cargo.toml README.md crates/gpui-query/README.md web/src/content/docs/docs/getting-started/installation.mdx skills/gpui-query/SKILL.md skills/gpui-query-extensions/SKILL.md
           git diff --cached --quiet || git commit -m "chore: bump gpui-query version to v${{ steps.changelog.outputs.version }}"
 
       - name: Create Git tag
@@ -124,6 +130,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # xattr 0.2.3 (via gpui -> zed-async-tar) references libc::ENOATTR,
+      # removed on Linux in libc 0.2.190; drop once zed-async-tar moves off xattr 0.2.x.
+      - name: Pin libc below the ENOATTR removal
+        run: cargo update -p libc --precise 0.2.189
+
       # No `workspaces` override: the repo root is the workspace root and
       # rust-cache resolves the default "." against GITHUB_WORKSPACE, not the
       # job's working-directory — the old "crates/gpui-query -> target"
@@ -139,9 +150,17 @@ jobs:
 
       - name: Publish main crate
         working-directory: crates/gpui-query
-        run: cargo publish || echo "Already published, continuing."
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set +e
+          out=$(cargo publish 2>&1)
+          status=$?
+          printf '%s\n' "$out"
+          # Only crates.io's "already uploaded" rejection is safe to swallow.
+          if [ "$status" -ne 0 ] && ! printf '%s\n' "$out" | grep -q "already uploaded"; then
+            exit "$status"
+          fi
 
   deploy-web:
     needs: [publish-main, check-and-release]
