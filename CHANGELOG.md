@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `QueryResource` exposes an additive `data_epoch()`; `use_query_select` compares epochs instead of deep-comparing `T` on every notification and clones only on real change (the compare was ~93% of per-notify cost on a 1.6 MB payload). The `T: PartialEq` hook bound is unchanged.
 - Criterion benches (sanitize, key path, request policy, request id, persist round-trip) land as dev-dependency tooling with a recorded baseline for regression gating; nothing ships to consumers.
 - The docs match the shipped API: the rollback guides use the real `set_query_data` capture/restore pattern instead of the nonexistent `rollback_query_data`, and the mutations page documents this crate's `MutationResource` instead of the deprecated legacy crate's.
+- The release pipeline recovers from the failed 0.3.0 publish: publishing is gated on crates.io rather than the git tag, so a CHANGELOG push retries while the version is missing; real publish failures fail the run instead of being logged over; and the satellites' version req moves with every bump so minor releases cannot leave the workspace unresolvable.
 
 ## [0.2.2] - 2026-09-21
 

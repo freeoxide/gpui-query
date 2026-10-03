@@ -22,7 +22,7 @@ bench = false
 
 [dependencies]
 # `version` must stay alongside `path`: `cargo publish` strips the path override.
-gpui-query = { path = "../gpui-query", version = "0.2", default-features = false, features = ["core"] }
+gpui-query = { path = "../gpui-query", version = "0.3", default-features = false, features = ["core"] }
 bytes = "1"
 http = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }

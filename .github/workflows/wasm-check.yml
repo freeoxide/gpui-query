@@ -37,6 +37,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      # xattr 0.2.3 (via gpui -> zed-async-tar) references libc::ENOATTR,
+      # removed on Linux in libc 0.2.190; drop once zed-async-tar moves off xattr 0.2.x.
+      - name: Pin libc below the ENOATTR removal
+        run: cargo update -p libc --precise 0.2.189
+
       # No `workspaces` override: cargo runs from the repo root, so the
       # root workspace manifest is the right cache key. Cargo.lock is not
       # committed; rust-cache keys off the manifests that exist.

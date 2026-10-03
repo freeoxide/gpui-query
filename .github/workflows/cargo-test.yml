@@ -44,6 +44,11 @@ jobs:
       - name: Install native test dependencies
         run: sudo apt-get update && sudo apt-get install -y libx11-xcb-dev libxkbcommon-x11-dev
 
+      # xattr 0.2.3 (via gpui -> zed-async-tar) references libc::ENOATTR,
+      # removed on Linux in libc 0.2.190; drop once zed-async-tar moves off xattr 0.2.x.
+      - name: Pin libc below the ENOATTR removal
+        run: cargo update -p libc --precise 0.2.189
+
       # No `workspaces` override: the repo root is the workspace root, so the
       # default "." already caches the workspace target dir (same rationale
       # as wasm-check.yml; the working-directory trick is not needed here).
@@ -61,6 +66,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      # xattr 0.2.3 (via gpui -> zed-async-tar) references libc::ENOATTR,
+      # removed on Linux in libc 0.2.190; drop once zed-async-tar moves off xattr 0.2.x.
+      - name: Pin libc below the ENOATTR removal
+        run: cargo update -p libc --precise 0.2.189
 
       # No apt step and no `workspaces` override, matching wasm-check.yml:
       # only test executables link against X11/XCB, and neither a release
