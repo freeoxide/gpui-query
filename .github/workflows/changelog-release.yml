@@ -16,6 +16,7 @@ jobs:
       version: ${{ steps.changelog.outputs.version }}
       tag: ${{ steps.changelog.outputs.tag }}
       should_release: ${{ steps.check_tag.outputs.exists == 'false' }}
+      should_publish: ${{ steps.check_crates.outputs.published == 'false' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +45,18 @@ jobs:
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if the version is on crates.io
+        id: check_crates
+        # The tag is cut before `cargo publish` runs, so tag-exists does not
+        # imply published (v0.3.0 tagged, publish broke). Retry on the registry.
+        run: |
+          VERSION="${{ steps.changelog.outputs.version }}"
+          if curl -fsSL "https://index.crates.io/gp/ui/gpui-query" | grep -q "\"vers\":\"$VERSION\""; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract release notes
@@ -118,10 +131,9 @@ jobs:
 
   publish-main:
     needs: check-and-release
-    # Same guard as the check_tag-gated steps above, via the job output —
-    # `needs:` alone would still run this job on the skip path (tag already
-    # exists) and re-attempt `cargo publish` on an already-released version.
-    if: needs.check-and-release.outputs.should_release == 'true'
+    # Runs while the CHANGELOG's newest version is missing from crates.io —
+    # first attempt or retry after a failed publish — and skips once it lands.
+    if: needs.check-and-release.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
