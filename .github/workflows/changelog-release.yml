@@ -99,36 +99,43 @@ jobs:
         run: |
           VERSION="${{ steps.changelog.outputs.version }}"
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" crates/gpui-query/Cargo.toml
+          grep -q "^version = \"$VERSION\"" crates/gpui-query/Cargo.toml || { echo "main version sed did not match"; exit 1; }
           # Keep the version literal in sync across the install snippets that
           # external systems render statically (crates.io README, GitHub README,
-          # docs installation page, skill docs). Mirrors the Cargo.toml bump
-          # above: bare and table `version = "x.y.z"` forms plus the two skill
-          # prose forms `gpui-query (vx.y.z)` and `gpui-query` vx.y.z. Every
-          # pattern anchors on `gpui-query` itself, so the -http and -persist
-          # satellite pins are never touched.
+          # docs installation and persistence pages, skill docs, AGENTS.md).
+          # Mirrors the Cargo.toml bump above: bare and table `version = "x.y.z"`
+          # forms plus the prose forms `gpui-query (vx.y.z)`, `gpui-query` vx.y.z,
+          # and `main crate (vx.y.z)`. Each pattern anchors on `gpui-query` or
+          # `main crate`, so the -http and -persist satellite pins are untouched.
           sed -i -E \
             -e 's|gpui-query = "[^"]*"|gpui-query = "'"$VERSION"'"|g' \
             -e 's|gpui-query = [{] version = "[^"]*"|gpui-query = { version = "'"$VERSION"'"|g' \
             -e 's|gpui-query \(v[0-9]+\.[0-9]+\.[0-9]+\)|gpui-query (v'"$VERSION"')|g' \
             -e 's|gpui-query` v[0-9]+\.[0-9]+\.[0-9]+|gpui-query` v'"$VERSION"'|g' \
+            -e 's|main crate \(v[0-9]+\.[0-9]+\.[0-9]+\)|main crate (v'"$VERSION"')|g' \
             README.md \
             crates/gpui-query/README.md \
             web/src/content/docs/docs/getting-started/installation.mdx \
+            web/src/content/docs/docs/guides/persistence.mdx \
             skills/gpui-query/SKILL.md \
-            skills/gpui-query-extensions/SKILL.md
+            skills/gpui-query-extensions/SKILL.md \
+            AGENTS.md
           # The satellites pin `gpui-query` by major.minor; a minor release
           # must move that req or path+version resolution stops matching.
           MINOR="$(echo "$VERSION" | cut -d. -f1-2)"
           sed -i -E "s|(gpui-query = [{] path = \"\.\./gpui-query\", version = \")[^\"]+|\1${MINOR}|" \
             crates/gpui-query-http/Cargo.toml \
             crates/gpui-query-persist/Cargo.toml
+          for f in crates/gpui-query-http/Cargo.toml crates/gpui-query-persist/Cargo.toml; do
+            grep -q "path = \"../gpui-query\", version = \"$MINOR\"" "$f" || { echo "satellite req sync missed $f"; exit 1; }
+          done
 
       - name: Commit version bump
         if: steps.check_tag.outputs.exists == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add crates/gpui-query/Cargo.toml crates/gpui-query-http/Cargo.toml crates/gpui-query-persist/Cargo.toml README.md crates/gpui-query/README.md web/src/content/docs/docs/getting-started/installation.mdx skills/gpui-query/SKILL.md skills/gpui-query-extensions/SKILL.md
+          git add crates/gpui-query/Cargo.toml crates/gpui-query-http/Cargo.toml crates/gpui-query-persist/Cargo.toml README.md crates/gpui-query/README.md web/src/content/docs/docs/getting-started/installation.mdx web/src/content/docs/docs/guides/persistence.mdx skills/gpui-query/SKILL.md skills/gpui-query-extensions/SKILL.md AGENTS.md
           git diff --cached --quiet || git commit -m "chore: bump gpui-query version to v${{ steps.changelog.outputs.version }}"
 
       - name: Create Git tag
