@@ -22,10 +22,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-          # Without fetch-tags, a shallow checkout fetches NO tags, so the
-          # `git tag -l` guard below would always report "not exists" and
-          # every CHANGELOG-path push would re-attempt the release.
-          fetch-tags: true
 
       - name: Extract version from CHANGELOG
         id: changelog
@@ -40,12 +36,22 @@ jobs:
 
       - name: Check if tag already exists
         id: check_tag
+        env:
+          TAG: ${{ steps.changelog.outputs.tag }}
         run: |
-          if git tag -l | grep -q "^${{ steps.changelog.outputs.tag }}$"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          set +e
+          git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1
+          status=$?
+          set -e
+          case $status in
+            0) exists=true ;;
+            2) exists=false ;;
+            *)
+              echo "git ls-remote failed with exit $status"
+              exit "$status"
+              ;;
+          esac
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
 
       - name: Check if the version is on crates.io
         id: check_crates
