@@ -148,8 +148,7 @@ jobs:
       - name: Push tag and commit
         if: steps.check_tag.outputs.exists == 'false'
         run: |
-          git push origin HEAD:${{ github.ref }}
-          git push origin "${{ steps.changelog.outputs.tag }}"
+          git push --atomic origin HEAD:${{ github.ref }} "${{ steps.changelog.outputs.tag }}"
 
       - name: Create or update GitHub Release
         env:
