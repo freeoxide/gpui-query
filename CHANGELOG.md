@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Criterion benches (sanitize, key path, request policy, request id, persist round-trip) land as dev-dependency tooling with a recorded baseline for regression gating; nothing ships to consumers.
 - The docs match the shipped API: the rollback guides use the real `set_query_data` capture/restore pattern instead of the nonexistent `rollback_query_data`, and the mutations page documents this crate's `MutationResource` instead of the deprecated legacy crate's.
 - The release pipeline recovers from the failed 0.3.0 publish: publishing is gated on crates.io rather than the git tag, so a CHANGELOG push retries while the version is missing; real publish failures fail the run instead of being logged over; and the satellites' version req moves with every bump so minor releases cannot leave the workspace unresolvable. The publish job realigns tags cut before that sync the same way before building.
+- The tag check consults the remote instead of the runner clone now, so a CHANGELOG-only push retries a stalled publish instead of failing at the tag push.
 
 ## [0.2.2] - 2026-09-21
 
@@ -273,6 +274,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Initial public release
 
+[0.3.0]: https://github.com/freeoxide/gpui-query/releases/tag/v0.3.0
+[0.2.2]: https://github.com/freeoxide/gpui-query/releases/tag/v0.2.2
 [0.2.1]: https://github.com/freeoxide/gpui-query/releases/tag/v0.2.1
 [0.2.0]: https://github.com/freeoxide/gpui-query/releases/tag/v0.2.0
 [0.1.4]: https://github.com/freeoxide/gpui-query/releases/tag/v0.1.4
