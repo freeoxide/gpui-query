@@ -286,9 +286,10 @@ jobs:
 
   deploy-web:
     needs: [publish-main, check-and-release]
-    # Skip-path guard as in publish-main — avoids redundant prod redeploys
-    # when the CHANGELOG's first version heading is already tagged.
-    if: needs.check-and-release.outputs.should_release == 'true'
+    # The site must never advertise a version crates.io lacks: deploy only
+    # after a successful publish, or when the version was already published
+    # and this run re-cut the tag.
+    if: ${{ !cancelled() && needs.check-and-release.result == 'success' && (needs.publish-main.result == 'success' || (needs.publish-main.result == 'skipped' && needs.check-and-release.outputs.should_release == 'true')) }}
     runs-on: ubuntu-latest
     environment: prod
     defaults:
@@ -318,7 +319,7 @@ jobs:
           CLOUDFLARE_INCLUDE_PROCESS_ENV: "true"
 
       - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy dist/client --project-name=gpui-query
+        run: npx wrangler pages deploy dist/client --project-name=gpui-query --branch=master
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
