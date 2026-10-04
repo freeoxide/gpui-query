@@ -61,12 +61,32 @@ jobs:
         id: check_crates
         # The tag is cut before `cargo publish` runs, so tag-exists does not
         # imply published (v0.3.0 tagged, publish broke). Retry on the registry.
+        env:
+          VERSION: ${{ steps.changelog.outputs.version }}
         run: |
-          VERSION="${{ steps.changelog.outputs.version }}"
-          if curl -fsSL "https://index.crates.io/gp/ui/gpui-query" | grep -q "\"vers\":\"$VERSION\""; then
+          index=$(curl -fsSL --max-time 30 --retry 3 "https://index.crates.io/gp/ui/gpui-query") || { echo "crates.io index fetch failed"; exit 1; }
+          if printf '%s' "$index" | grep "\"vers\":\"$VERSION\"" | grep -q '"yanked":false'; then
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+          newest=$(printf '%s' "$index" | grep -oP '"vers":"\K[^"]+' | sort -V | tail -1)
+          lowest=$(printf '%s\n%s\n' "$VERSION" "$newest" | sort -V | head -1)
+          if [ "$lowest" = "$VERSION" ] && [ "$VERSION" != "$newest" ]; then
+            echo "CHANGELOG head $VERSION is below registry newest $newest; refusing to downgrade"
+            exit 1
+          fi
+          stranded=""
+          while read -r v; do
+            if [ "$v" = "$VERSION" ]; then continue; fi
+            git ls-remote --exit-code origin "refs/tags/v$v" >/dev/null 2>&1 || continue
+            if ! printf '%s' "$index" | grep -q "\"vers\":\"$v\""; then
+              echo "Tagged v$v is missing from crates.io; recover it with: just publish v$v"
+              stranded=1
+            fi
+          done < <(grep -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md)
+          if [ -n "$stranded" ]; then
+            exit 1
           fi
 
       - name: Extract release notes
