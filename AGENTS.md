@@ -6,7 +6,7 @@ Async state management for [GPUI](https://github.com/zed-industries/zed/tree/mai
 
 Workspace (`resolver = "3"`, edition 2024) with three published members:
 
-- `crates/gpui-query`: main crate (v0.2.1), four gated layers (see Feature matrix).
+- `crates/gpui-query`: main crate (v0.3.0), four gated layers (see Feature matrix).
 - `crates/gpui-query-http`: satellite (v0.1.0), RFC 9111 `Cache-Control` → `CachePolicy`, URL-keyed `HttpCache<B>` over a pluggable `HttpBackend`. GPUI-free.
 - `crates/gpui-query-persist`: satellite (v0.1.0), reference atomic disk `FilePersister` (JSON/bincode) implementing the main crate's async `Persister`.
 - `crates/gpui-query-legacy`: DEPRECATED and EXCLUDED from the workspace (`exclude = [...]`). Frozen artifact; publish only via its own workflow.
@@ -46,10 +46,10 @@ Main crate, strictly additive (`core` ← `client` ← `hook` ← `persist`):
 
 | Layer | Cargo line |
 |---|---|
-| core only (no GPUI) | `gpui-query = { version = "0.2.1", default-features = false, features = ["core"] }` |
-| client (DEFAULT) | `gpui-query = "0.2.1"` |
-| hooks | `gpui-query = { version = "0.2.1", features = ["hook"] }` |
-| persistence | `gpui-query = { version = "0.2.1", features = ["persist"] }` |
+| core only (no GPUI) | `gpui-query = { version = "0.3.0", default-features = false, features = ["core"] }` |
+| client (DEFAULT) | `gpui-query = "0.3.0"` |
+| hooks | `gpui-query = { version = "0.3.0", features = ["hook"] }` |
+| persistence | `gpui-query = { version = "0.3.0", features = ["persist"] }` |
 
 ```
 default = ["client"]
@@ -63,7 +63,7 @@ Satellites depend on `gpui-query` core-only by default: `gpui-query-http` (optio
 
 ## Release flow
 
-CHANGELOG-driven. The `CHANGELOG.md` version heading is the source of truth; CI bumps `Cargo.toml` and syncs the version literal into the READMEs and the docs install page.
+CHANGELOG-driven. The `CHANGELOG.md` version heading is the source of truth; CI bumps `Cargo.toml` and syncs the version literal into the READMEs, the docs install page, the persistence guide, both skill packs, and this file.
 
 1. Add a `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
 2. `just release x.y.z`: verifies the heading, commits `chore: release vX`, pushes master.

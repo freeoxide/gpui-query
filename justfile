@@ -83,7 +83,7 @@ releases:
 # Usage: just release 0.1.2
 release version:
     @echo "Preparing release {{ version }}..."
-    @grep -q "\[{{ version }}\]" CHANGELOG.md || (echo "Error: [{{ version }}] not found in CHANGELOG.md. Add a changelog entry first." && exit 1)
+    @first="$(grep -m1 -oP '^## \[\K[^\]]+' CHANGELOG.md)" && [ "$first" = "{{ version }}" ] || (echo "Error: the newest CHANGELOG section is [$first], not [{{ version }}]. Add a [{{ version }}] section at the top." && exit 1)
     git add CHANGELOG.md
     git diff --cached --quiet && echo "Nothing staged. Make sure CHANGELOG.md has changes." && exit 1
     git commit -m "chore: release v{{ version }}"
