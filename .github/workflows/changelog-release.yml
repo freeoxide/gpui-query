@@ -64,12 +64,21 @@ jobs:
         env:
           VERSION: ${{ steps.changelog.outputs.version }}
         run: |
+          published=true
           index=$(curl -fsSL --max-time 30 --retry 3 "https://index.crates.io/gp/ui/gpui-query") || { echo "crates.io index fetch failed"; exit 1; }
-          if printf '%s' "$index" | grep "\"vers\":\"$VERSION\"" | grep -q '"yanked":false'; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
+          if ! printf '%s' "$index" | grep "\"vers\":\"$VERSION\"" | grep -q '"yanked":false'; then
+            published=false
           fi
+          # The satellites ship alongside the main crate, so a missing one
+          # keeps the publish job armed even when the main version is up.
+          for crate in gpui-query-http gpui-query-persist; do
+            v=$(grep -m1 '^version' "crates/$crate/Cargo.toml" | sed 's/version = "\(.*\)"/\1/')
+            if ! curl -fsSL --max-time 30 --retry 3 "https://index.crates.io/gp/ui/$crate" | grep -q "\"vers\":\"$v\""; then
+              echo "$crate v$v is missing from the index"
+              published=false
+            fi
+          done
+          echo "published=$published" >> "$GITHUB_OUTPUT"
           newest=$(printf '%s' "$index" | grep -oP '"vers":"\K[^"]+' | sort -V | tail -1)
           lowest=$(printf '%s\n%s\n' "$VERSION" "$newest" | sort -V | head -1)
           if [ "$lowest" = "$VERSION" ] && [ "$VERSION" != "$newest" ]; then
@@ -264,7 +273,9 @@ jobs:
               echo "$crate v$v is already on the index"
               continue
             fi
-            out=$(cd "crates/$crate" && cargo publish 2>&1)
+            # The realign above leaves the satellite manifests intentionally
+            # dirty in the tagged checkout; shipping them is the point.
+            out=$(cd "crates/$crate" && cargo publish --allow-dirty 2>&1)
             status=$?
             printf '%s\n' "$out"
             if [ "$status" -ne 0 ] && ! printf '%s\n' "$out" | grep -q "already uploaded"; then
