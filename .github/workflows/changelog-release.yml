@@ -30,7 +30,7 @@ jobs:
       - name: Extract version from CHANGELOG
         id: changelog
         run: |
-          VERSION=$(grep -m 1 -oP '\[\K[0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md)
+          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(?=\])' CHANGELOG.md)
           if [ -z "$VERSION" ]; then
             echo "No version found in CHANGELOG.md"
             exit 1
