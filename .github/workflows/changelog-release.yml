@@ -234,8 +234,10 @@ jobs:
           out=$(cargo publish 2>&1)
           status=$?
           printf '%s\n' "$out"
-          # Only crates.io's "already uploaded" rejection is safe to swallow.
-          if [ "$status" -ne 0 ] && ! printf '%s\n' "$out" | grep -q "already uploaded"; then
+          # Only a duplicate-version rejection is safe to swallow; cargo's
+          # wording differs by version ("already uploaded", "already exists
+          # on crates.io index").
+          if [ "$status" -ne 0 ] && ! printf '%s\n' "$out" | grep -Eq "already uploaded|already exists on crates.io"; then
             exit "$status"
           fi
           if [ "$status" -ne 0 ]; then
@@ -245,7 +247,7 @@ jobs:
               fi
               sleep 10
             done
-            echo "crates.io claimed already uploaded but v$VERSION never landed on the index"
+            echo "crates.io rejected v$VERSION as a duplicate but it never landed on the index"
             exit 1
           fi
 
@@ -278,7 +280,7 @@ jobs:
             out=$(cd "crates/$crate" && cargo publish --allow-dirty 2>&1)
             status=$?
             printf '%s\n' "$out"
-            if [ "$status" -ne 0 ] && ! printf '%s\n' "$out" | grep -q "already uploaded"; then
+            if [ "$status" -ne 0 ] && ! printf '%s\n' "$out" | grep -Eq "already uploaded|already exists on crates.io"; then
               exit "$status"
             fi
             ok=""
