@@ -47,7 +47,7 @@ gpui-query = { version = "0.3.0", features = ["hook"] }
 cargo add gpui-query --features hook
 ```
 
-You almost always want `hook` in an application. Reach for `core` alone when you need the state machine without a GPUI dependency (a library, a CLI that reasons about cached state, or unit tests). Add `persist` when you want to save and restore the cache across restarts (`gpui-query = { features = ["hook", "persist"] }`).
+Enable `hook` unless you drive the `QueryClient` manually. Reach for `core` alone when you need the state machine without a GPUI dependency (a library, a CLI that reasons about cached state, or unit tests). Add `persist` when you want to save and restore the cache across restarts (`gpui-query = { features = ["hook", "persist"] }`).
 
 ## Companion crates
 

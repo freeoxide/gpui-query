@@ -35,7 +35,7 @@ It's also the safe choice when you're unsure. You trade a little performance for
 
 ## Ttl
 
-`CachePolicy::Ttl { ttl_ms }` caches a successful result for `ttl_ms` milliseconds. While the entry is fresh, new observers short-circuit: they get the cached value immediately without firing a request. `can_short_circuit()` returns `true` for both `Ttl` and `StaleWhileRevalidate`. Both can hand back cached data without firing a request.
+`CachePolicy::Ttl { ttl_ms }` caches a successful result for `ttl_ms` milliseconds. While the entry is fresh, new observers short-circuit: they get the cached value immediately without firing a request. `can_short_circuit()` returns `true` for both `Ttl` and `StaleWhileRevalidate`.
 
 ```rust
 let policy = CachePolicy::Ttl { ttl_ms: 60_000 }; // 60s
@@ -62,7 +62,7 @@ Like `Ttl`, `can_short_circuit()` is `true` here: during the stale window the en
 
 ## How policies interact with the rest of the crate
 
-A cache policy never acts alone. A few interactions worth knowing:
+A cache policy never acts alone. Four interactions worth knowing:
 
 - Retries. A failed fetch follows `RetryPolicy` (capped exponential backoff) regardless of cache policy. `NoCache` with `RetryPolicy::no_retries()` is the most pessimistic combination; `StaleWhileRevalidate` with default retries is the most forgiving.
 - Request policies. `RequestPolicy::LatestWins` cancels in-flight requests when a newer one arrives for the same key, so a revalidation triggered by a stale hit can be cleanly superseded. The cancellation mechanism is covered in [Cooperative cancellation in gpui-query](/blog/cooperative-cancellation).

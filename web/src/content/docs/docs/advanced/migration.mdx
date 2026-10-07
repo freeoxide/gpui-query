@@ -21,7 +21,7 @@ gpui-query v2 (the `0.2.x` line) is an options-first redesign. The hooks keep th
 
 ## 1. Switch to options-first
 
-The biggest mechanical change is the call signature. v1 took the key, cache policy, and request policy as separate positional arguments. v2 takes a single `QueryOptions` (or just a key string, which converts via `Into`).
+The biggest mechanical change is the call signature. v1 took the key, cache policy, and request policy as separate positional arguments. v2 takes a single `QueryOptions` (or a bare key string, which converts via `Into`).
 
 ```rust
 // v1
@@ -40,7 +40,7 @@ let (entity, _sub) = use_query(
 );
 ```
 
-For the simplest case (just a key with default policies), pass the string directly:
+For the simplest case (a key with default policies), pass the string directly:
 
 ```rust
 let (entity, _sub) = use_query("users", |signal| async move { Ok(vec![]) }, cx);
@@ -95,7 +95,7 @@ If you were still on the deprecated hook, switch to the `opts` form above; the c
 
 ## 6. Bound infinite queries with max_pages
 
-v1 infinite queries accumulated pages without limit. v2 defaults to `max_pages: Some(50)` to prevent unbounded memory growth from deep scrolling. If you genuinely need unbounded pages, opt back in:
+v1 infinite queries accumulated pages without limit. v2 defaults to `max_pages: Some(50)` to prevent unbounded memory growth from deep scrolling. If you need unbounded pages, opt back in:
 
 ```rust
 use gpui_query::hook::InfiniteQueryOptions;
@@ -105,7 +105,7 @@ let opts = InfiniteQueryOptions::new("feed").unbounded_pages();
 
 Otherwise, decide on a cap that fits your UI (`max_pages(n)`).
 
-## 7. Take advantage of `QueryError: Display + Error`
+## 7. Use `QueryError: Display + Error`
 
 v2 gives `QueryError` full `Display + Error` impls, so it composes with `?` and `anyhow`. You can now return it from fallible helpers directly:
 
@@ -131,7 +131,7 @@ v1 re-rendered views on every internal mutation (including retry ticks). v2's `Q
 - The `QueryClient` as a GPUI `Global`, set via `cx.set_global(QueryClient::new())`, is unchanged.
 - Cancellation is still cooperative via `QuerySignal`; only the staleness guard is stricter (no more TOCTOU window).
 
-## Need help?
+## The source of truth
 
 If a v1 pattern is not covered here, the source of truth is the crate's own doc comments: every module lists its v2 changes at the top. Run `cargo doc -p gpui-query --open` for the item-level reference.
 

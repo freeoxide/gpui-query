@@ -25,7 +25,7 @@ Each resource exposes its status via an inherent `status()` method; the `Observa
 
 ## Status deduplication
 
-This is the whole point of the observer. Without it, a raw `cx.observe` would call `cx.notify()` on every entity mutation, including intermediate ones like `increment_retry()` that leave the status at `Loading`. A query retrying three times would re-render the view two or three extra times for nothing.
+Without status deduplication, a raw `cx.observe` would call `cx.notify()` on every entity mutation, including intermediate ones like `increment_retry()` that leave the status at `Loading`. A query retrying three times would re-render the view two or three extra times for nothing.
 
 `Observer` tracks the last status it saw and notifies only on change:
 
@@ -79,7 +79,7 @@ The hooks (`use_query`, `use_infinite_query`, `use_mutation`) already construct 
 
 ## ObserverConfig
 
-`ObserverConfig::notify_on_status_change_only` controls the dedup behavior. It defaults to `true`, which is what you almost always want. Set it to `false` to get unconditional notifications on every entity mutation:
+`ObserverConfig::notify_on_status_change_only` controls the dedup behavior. It defaults to `true`. Set it to `false` to get unconditional notifications on every entity mutation:
 
 ```rust
 use gpui_query::client::{Observer, ObserverConfig};
@@ -95,7 +95,7 @@ let sub = Observer::new(&entity)
 # }
 ```
 
-Use unconditional mode only when you genuinely need to react to non-status fields (a custom retry counter you display inline, for example). It is strictly more re-renders.
+Use unconditional mode only when you need to react to non-status fields (a custom retry counter you display inline, for example). It is strictly more re-renders.
 
 ## `Option<Subscription>`
 

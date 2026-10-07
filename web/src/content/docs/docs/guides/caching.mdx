@@ -4,7 +4,7 @@ title: Caching
 description: "Configure caching in gpui-query: how NoCache, Ttl, and StaleWhileRevalidate policies decide when data is fresh, stale, or refetched in the background."
 ---
 
-Every query in gpui-query has a cache policy. The policy determines whether a fetch happens at all, and whether stale data gets served while a refetch runs in the background. Picking the right policy is the main lever you have for tuning how "live" your data feels versus how many network requests your app makes.
+Every query in gpui-query has a cache policy. The policy determines whether a fetch happens at all, and whether stale data gets served while a refetch runs in the background. Picking a policy is how you trade data freshness against request volume.
 
 ## Cache policies
 
@@ -28,7 +28,7 @@ CachePolicy::Ttl { ttl_ms: 30_000 }
 
 Data is fresh for `ttl_ms` milliseconds after it was last fetched. While fresh, accessing the query returns `CacheHit` and skips the network entirely. After the TTL expires, the next access starts a new fetch.
 
-This is the default policy. The built-in default TTL is 60 seconds (60,000 ms). For most read-heavy UIs this is a reasonable starting point.
+This is the default policy.
 
 ### StaleWhileRevalidate
 
@@ -48,7 +48,7 @@ Use this when your UI benefits from showing slightly outdated data rather than f
 
 ## How freshness is decided
 
-`CachePolicy` exposes several methods that control the caching decision internally. You normally do not call these yourself (the library does), but understanding them helps reason about behavior.
+`CachePolicy` exposes six methods that control the caching decision internally. You normally do not call these yourself (the library does).
 
 - **`is_fresh(age_ms)`** - returns `true` when `age_ms` is within the TTL window
 - **`is_stale_but_serveable(age_ms)`** - returns `true` when the age is past TTL but within the stale window (only `StaleWhileRevalidate`)
@@ -108,7 +108,7 @@ RequestPolicy::IgnoreWhileLoading
 
 ## What happened: QueryBeginResult
 
-When you call `begin_request` on a resource, the return value tells you exactly what happened.
+When you call `begin_request` on a resource, the return value tells you what happened.
 
 ```rust
 pub enum QueryBeginResult {
@@ -163,7 +163,7 @@ This is the standard pattern after a mutation: invalidate the affected query pre
 
 ### Removal
 
-`remove_queries` drops matching resources from the registry entirely. Unlike invalidation, which keeps the entity and just expires its cache, removal deletes the entity.
+`remove_queries` drops matching resources from the registry entirely. Unlike invalidation, which keeps the entity and expires its cache, removal deletes the entity.
 
 ```rust
 client.remove_queries(&QueryKeyFilter::All, cx);
@@ -251,7 +251,7 @@ Fetched::with_policy(data, policy: CachePolicy)
 Fetched::with_meta(self, meta)
 ```
 
-A fetcher that just parsed the response headers can push that TTL back into the resource:
+A fetcher that parses only the response headers can push that TTL back into the resource:
 
 ```rust
 use gpui_query::{
@@ -290,6 +290,6 @@ cx.set_global(
 );
 ```
 
-Then override per query as needed. A real-time notifications feed might use `NoCache`. A rarely-changing config endpoint might use `Ttl { ttl_ms: 300_000 }`. Most things fall somewhere in between.
+Then override per query as needed. A real-time notifications feed might use `NoCache`. A rarely-changing config endpoint might use `Ttl { ttl_ms: 300_000 }`.
 
 See [Queries](/docs/api/queries) for how to define queries that use these policies, [QueryClient](/docs/api/query-client) for the full client API, and [Error Handling](/docs/guides/error-handling) for what happens when a fetch fails.

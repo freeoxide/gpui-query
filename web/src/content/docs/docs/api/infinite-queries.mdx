@@ -136,7 +136,7 @@ Use `new_bidirectional` when you need to prepend pages. The default constructor 
 | `has_data()` | `bool` | True when at least one page is loaded |
 | `is_page_data_valid()` | `bool` | True when loaded pages are safe to use |
 
-`is_page_data_valid()` deserves a note. It returns `true` on `Success`, on `LoadingWithData` (previous pages still valid while fetching more), and on `Failure` if pages were already loaded. A page fetch failure does not wipe existing pages. It returns `false` on `Idle` and `Cancelled`.
+`is_page_data_valid()` returns `true` on `Success`, on `LoadingWithData` (previous pages still valid while fetching more), and on `Failure` if pages were already loaded. A page fetch failure does not wipe existing pages. It returns `false` on `Idle` and `Cancelled`.
 
 ### Fetch state
 

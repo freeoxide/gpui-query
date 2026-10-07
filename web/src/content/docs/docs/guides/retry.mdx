@@ -104,7 +104,7 @@ A retry in progress is cancelled if a newer request supersedes it (`LatestWins`)
 ## When not to retry
 
 - **Non-idempotent mutations.** A `POST /charge` that fails after the request was sent but before the response arrived may have already charged the card. Retrying can double-charge. Keep the `no_retries` default for these.
-- **4xx errors.** A 400 or 401 will not succeed on retry; it just burns the retry budget and delays surfacing the real error. Map these to `QueryError::response` and consider a policy with fewer retries.
+- **4xx errors.** A 400 or 401 will not succeed on retry; it burns the retry budget and delays surfacing the real error. Map these to `QueryError::response` and consider a policy with fewer retries.
 - **User-visible destructive actions.** Let the user decide whether to retry, so they stay in control of side effects.
 
 Retry is most useful for transient failures: network blips, 5xx responses, timeouts. For these, exponential backoff with an appropriate cap is usually the right call.

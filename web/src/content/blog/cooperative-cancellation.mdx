@@ -13,7 +13,7 @@ Here's a bug that shows up in almost every async UI eventually. A component kick
 
 `gpui-query` handles it with cooperative cancellation via `QuerySignal`.
 
-## What QuerySignal actually is
+## What QuerySignal is
 
 ```rust
 #[derive(Debug, Clone)]
@@ -80,4 +80,4 @@ Long-running scans and paginated fetches should also poll `is_cancelled()` at th
 
 `QuerySignal` is an `Arc<AtomicBool>`: cheap to clone and lock-free to read. Check `is_cancelled()` at retry and chunk boundaries inside your fetcher. Component unmount and `LatestWins` both flow through the same signal, so the crate has one teardown story instead of three.
 
-If your fetcher never checks the signal, nothing breaks. It just won't stop early. Treat the signal as a contract between your fetcher and the client: honor it, and abandoned queries cost you almost nothing.
+If your fetcher never checks the signal, nothing breaks. It won't stop early. Treat the signal as a contract between your fetcher and the client: honor it, and abandoned queries cost you almost nothing.

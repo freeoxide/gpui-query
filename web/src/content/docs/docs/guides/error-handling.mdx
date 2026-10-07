@@ -95,7 +95,7 @@ assert!(clean.message().ends_with("...[truncated]"));
 assert_eq!(clean.kind(), QueryErrorKind::Unknown);
 ```
 
-The sanitization runs a lightweight scan without depending on the `regex` crate. It is cheap enough to call on every error that leaves your app.
+The sanitization runs a scan without depending on the `regex` crate.
 
 ## Reading errors from QueryResource
 
@@ -136,7 +136,7 @@ entity.read_with(cx, |resource| {
 - `LoadingWithData` means a fetch is in progress, but a previous fetch failed. The stale data from before the error is still available via `data()`. This is the "show old data while retrying" scenario.
 - `Cancelled` means the request was cooperatively cancelled, typically because a new query with the same key superseded it.
 
-The `LoadingWithData` case is worth paying attention to. When a refetch fails, gpui-query keeps the last successful data around. You can show it to the user while also surfacing the error:
+When a refetch fails, gpui-query keeps the last successful data around. You can show it to the user while also surfacing the error:
 
 ```rust
 entity.read_with(cx, |resource| {
@@ -180,7 +180,7 @@ Mutations also track a retry count. Call `should_retry()` to check whether the r
 
 ## Best practices
 
-**Sanitize before logging.** Any error that leaves your app (logs, analytics, crash reporting) should go through `sanitized()`. Raw error messages from server responses can contain credentials, internal paths, and tokens.
+**Sanitize before logging.** Any error that leaves your app (logs, analytics, crash reporting) should go through `sanitized()`.
 
 ```rust
 // Good: sanitized before logging
