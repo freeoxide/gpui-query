@@ -111,7 +111,7 @@ let label = self.query_entity.read_with(cx, |resource, _| match resource.status(
 
 The library is four layers, each gated by a Cargo feature flag.
 
-**Core** (`feature = "core"`) is a serde-only state machine with zero framework coupling. This is where `QueryResource<T,E>`, `MutationResource<V,T,E>`, `CachePolicy`, `RetryPolicy`, `QueryKey`, and all the request lifecycle types live. You can use this layer in any Rust project, not just GPUI.
+**Core** (`feature = "core"`) is a serde-only state machine with zero framework coupling. This is where `QueryResource<T,E>`, `MutationResource<V,T,E>`, `CachePolicy`, `RetryPolicy`, `QueryKey`, and all the request lifecycle types live. You can use this layer in any Rust project.
 
 **Client** (`feature = "client"`, the default) builds on core and adds `QueryClient`, a GPUI `Global` that provides type-partitioned storage via `QueryBucket<T,E>`. This layer handles garbage collection, cache invalidation, observers, and devtools diagnostics.
 
