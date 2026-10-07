@@ -1,5 +1,5 @@
 // Minimal Rust syntax tinter for landing code snippets. Pure logic module (no
-// markup) — kept as .ts so it can be imported as a named export by rust-code.astro.
+// markup); kept as .ts so it can be imported as a named export by rust-code.astro.
 const KEYWORDS = new Set([
   "let",
   "use",

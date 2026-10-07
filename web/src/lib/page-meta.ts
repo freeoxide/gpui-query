@@ -1,6 +1,6 @@
 /**
- * Single source of truth for the "synthetic" index pages — Blog index and
- * Changelog — whose bodies are generated from data rather than authored as
+ * Single source of truth for the "synthetic" index pages (Blog index and
+ * Changelog), whose bodies are generated from data rather than authored as
  * MDX. Their title / SEO description / visible subtitle are shared between the
  * rendered .astro page and the .md/.txt alt generator (scripts/lib/pages.ts),
  * so the two can never drift.
@@ -26,5 +26,5 @@ export const changelogMeta: PageMeta = {
   title: "Changelog",
   description:
     "gpui-query release history: the v1 to v2 rewrite, crate reorganization, fixes, and docs updates in every published version.",
-  subtitle: "Release history for gpui-query. Every version, every improvement.",
+  subtitle: "Release history for gpui-query.",
 };

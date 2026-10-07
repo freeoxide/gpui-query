@@ -1,5 +1,5 @@
 ---
-// Navbar — vanilla port of navbar.tsx (+ mobile-nav.tsx folded in as a Basecoat
+// Navbar: vanilla port of navbar.tsx (+ mobile-nav.tsx folded in as a Basecoat
 // Drawer). Static markup; a small inline script wires the scroll shadow, the
 // mobile drawer open/close, and hands search opening off to SearchDialog
 // (which binds [data-search-open] and the ⌘K shortcut itself).
@@ -130,7 +130,7 @@ const navLinks: { href: string; label: string }[] = [
   </div>
 </header>
 
-{/* Mobile navigation — Basecoat Drawer (native <dialog> + drawer.js slide) */}
+{/* Mobile navigation: Basecoat Drawer (native <dialog> + drawer.js slide) */}
 <dialog
   id="mobile-nav"
   class="drawer"

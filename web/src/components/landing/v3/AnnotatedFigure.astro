@@ -36,7 +36,7 @@ const CALLOUTS = [
   {
     mark: "B",
     title: "the policy",
-    desc: "Past ttl_ms, cached data is served instantly while a background refetch runs — for up to stale_ms.",
+    desc: "Past ttl_ms, cached data is served while a background refetch runs, for up to stale_ms.",
   },
   {
     mark: "C",
@@ -46,7 +46,7 @@ const CALLOUTS = [
   {
     mark: "D",
     title: "the fetcher",
-    desc: "Runs on the background executor. The QuerySignal makes cancellation cooperative — drop the view, the work stops.",
+    desc: "Runs on the background executor. The QuerySignal makes cancellation cooperative: drop the view, and the work stops.",
   },
   {
     mark: "E",
@@ -55,9 +55,9 @@ const CALLOUTS = [
   },
 ];
 
-// Local helper (FigCaption) inlined: splits the label on the em dash.
-const figCaption = "FIG. 1 — anatomy of a query · hover a callout";
-const [figLabel, figRest] = figCaption.split("—");
+// Local helper (FigCaption) inlined: splits the label on the colon.
+const figCaption = "FIG. 1: anatomy of a query · hover a callout";
+const [figLabel, figRest] = figCaption.split(":");
 
 // Build the <code> inner HTML as one string. Astro preserves literal template
 // whitespace, so the indented multi-line .map() inside <pre> below would render
@@ -78,7 +78,7 @@ const figInner = FIG_LINES.map((line, i) => {
 <section class="border-t border-border py-20 sm:py-24" data-annotated-figure>
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
     <p class="font-mono text-[11px] tracking-[0.2em] uppercase text-muted-foreground">
-      <span class="text-primary">{figLabel}</span>—{figRest}
+      <span class="text-primary">{figLabel}</span>:{figRest}
     </p>
     <h2 class="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
       Every line, accounted for

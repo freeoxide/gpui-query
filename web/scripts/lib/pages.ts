@@ -4,7 +4,7 @@
  *
  * Nothing is re-authored here: docs and blog come from their MDX, the changelog
  * from the repo-root CHANGELOG.md (via release.ts), the FAQ from faq-data.ts,
- * and the legal pages from legal-content.ts — the same modules the rendered
+ * and the legal pages from legal-content.ts, the same modules the rendered
  * Astro pages import. `generate-page-alts.ts` turns each entry into `.md` and
  * `.txt`; `generate-llms-txt.ts` reads the doc subset for the index files.
  */
@@ -67,7 +67,7 @@ function blogIndexPage(posts: ParsedDoc[]): ParsedPage {
   const lines = [blogIndexMeta.subtitle, ""];
   for (const p of sorted) {
     const title = p.frontmatter.title || p.route;
-    const desc = p.frontmatter.description ? ` — ${p.frontmatter.description}` : "";
+    const desc = p.frontmatter.description ? `: ${p.frontmatter.description}` : "";
     const date = p.frontmatter.date ? ` (${p.frontmatter.date})` : "";
     lines.push(`- [${title}](/blog/${p.route})${date}${desc}`);
   }
@@ -84,7 +84,7 @@ function changelogPage(): ParsedPage {
   const entries = parseChangelog();
   const lines = [changelogMeta.subtitle, ""];
   for (const e of entries) {
-    lines.push(`## v${e.version} — ${e.date}`, "");
+    lines.push(`## v${e.version}, ${e.date}`, "");
     if (e.description) lines.push(`> ${e.description}`, "");
     for (const item of e.items) {
       lines.push(`- **${item.category}**: ${item.text}`);
@@ -165,7 +165,7 @@ function rootPage(docs: ParsedDoc[]): ParsedPage {
 
 /**
  * Every public page that gets a `.md` / `.txt` alternate. The 404 page is
- * intentionally excluded — it carries no content an agent would fetch.
+ * intentionally excluded: it carries no content an agent would fetch.
  */
 export async function loadAllPages(): Promise<ParsedPage[]> {
   const docs = await loadDocs(DOCS_ROOT);
