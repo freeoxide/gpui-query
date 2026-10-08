@@ -258,7 +258,7 @@ const rows = INITIAL_ENTRIES.map((entry) => {
     // Cache the last-rendered chip state per entry (so the REVALIDATE chip's
     // pulse isn't restarted every tick) and track which log ids are already in
     // the DOM. syncLogs then only ADDS new lines (animate-status-in fires once,
-    // on entry) and REMOVES aged ones — it never rebuilds the list, which is
+    // on entry) and REMOVES aged ones: it never rebuilds the list, which is
     // what re-triggered the entrance animation on every line every 150ms.
     const entryStateCache = new Map<string, string>();
     const renderedLogIds = new Set<string>();

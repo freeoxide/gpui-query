@@ -16,7 +16,7 @@ gpui-query = { version = "0.3.0", features = ["hook", "persist"] }
 
 ## How it fits together
 
-The cache stores type-erased buckets, so persistence has to move typed data (`Vec<User>`, `Config`, …) through an opaque shape. gpui-query splits that into a few pieces:
+The cache stores type-erased buckets, so persistence has to move typed data (`Vec<User>`, `Config`, …) through an opaque shape. gpui-query splits that into seven pieces:
 
 | Piece | Role |
 | ----- | ---- |
@@ -53,7 +53,7 @@ client.register_deserializer::<Vec<User>, MyError>(
 ```
 
 :::caution
-`hydrate` offers every on-disk entry to every registered deserializer. There is no type tag on `PersistedEntry`, so routing is by trial. A deserializer **must** return `None` for any shape that is not its own, or a foreign entry can be mis-primed. Keep them strict and cheap.
+`hydrate` offers every on-disk entry to every registered deserializer. There is no type tag on `PersistedEntry`, so routing is by trial. A deserializer must return `None` for any shape that is not its own, or a foreign entry can be mis-primed. Keep them strict and cheap.
 :::
 
 ## Implement a Persister
@@ -128,7 +128,7 @@ Entries older than `max_age`, excluded by `filter`, or without a matching deseri
 
 ## Reference adapter: FilePersister
 
-The companion crate [`gpui-query-persist`](https://crates.io/crates/gpui-query-persist) ships a production-grade disk adapter, so you usually do not implement `Persister` yourself:
+The companion crate [`gpui-query-persist`](https://crates.io/crates/gpui-query-persist) ships a disk adapter, so you usually do not implement `Persister` yourself:
 
 ```sh
 cargo add gpui-query-persist

@@ -18,6 +18,9 @@ Thumbs.db
 # z-workflow state
 .z-workflow/
 
+# z-flashflow state
+.z-flashflow/
+
 # z-proflow state
 .z-proflow/
 

@@ -38,7 +38,7 @@ export const faqCategories: FaqCategory[] = [
       {
         question: "How do I set up QueryClient in my app?",
         answer:
-          "Create a QueryClient instance and register it in your GPUI application. The client manages all query resources, caching, and garbage collection. See the Getting Started guide for a complete walkthrough.",
+          "Create a QueryClient instance and register it in your GPUI application. The client manages all query resources, caching, and garbage collection. See the Getting Started guide.",
       },
     ],
   },
@@ -54,7 +54,7 @@ export const faqCategories: FaqCategory[] = [
       {
         question: "What happens if my component unmounts during a fetch?",
         answer:
-          "gpui-query uses cooperative cancellation via QuerySignal (Arc<AtomicBool>). When a component unmounts, the signal is set and the query checks it between retry attempts, which keeps teardown clean.",
+          "gpui-query uses cooperative cancellation via QuerySignal (Arc<AtomicBool>). When a component unmounts, the signal is set and the query checks it between retry attempts.",
       },
       {
         question: "What is QuerySignal and when do I check it?",
@@ -85,7 +85,7 @@ export const faqCategories: FaqCategory[] = [
       {
         question: "Is there a devtools experience?",
         answer:
-          "gpui-query provides ClientDiagnostic types for inspecting cache state, query status, and resource lifecycle, a developer toolkit for debugging async state.",
+          "gpui-query provides ClientDiagnostic types for inspecting cache state, query status, and resource lifecycle.",
       },
     ],
   },

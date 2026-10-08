@@ -4,7 +4,7 @@ title: gpui-query vs. raw async
 description: "What you stop writing when you move from cx.spawn and manual caching to gpui-query"
 ---
 
-GPUI already lets you run async work with `cx.spawn` and store the result on an entity. So why reach for gpui-query? This page is a side-by-side: the same feature implemented with raw `cx.spawn` + manual state, then with gpui-query, so you can see exactly what the library takes off your plate.
+GPUI already lets you run async work with `cx.spawn` and store the result on an entity. This page is a side-by-side: the same feature implemented with raw `cx.spawn` + manual state, then with gpui-query.
 
 ## The core problem
 
@@ -110,17 +110,17 @@ What you got for free:
 
 ## When the raw approach is enough
 
-gpui-query is not free. It is a dependency and a mental model. The raw approach is genuinely fine when:
+gpui-query is not free. It is a dependency and a mental model. The raw approach is fine when:
 
-- You have **one** async operation that does not need to be cached or shared.
+- You have one async operation that does not need to be cached or shared.
 - The result is not something a second view will ever want.
 - There is no retry, no dedup, and no stale-write concern (a fire-and-forget side effect, for example).
 
 For those cases `cx.spawn` plus a field on the view is the right tool. gpui-query earns its keep the moment a second view needs the same data, the user can trigger a re-fetch while one is in flight, or you want the app to feel instant because data is already cached.
 
-## Caching is the big win
+## Shared caching
 
-The single largest difference is shared caching. With `QueryClient` set as a global, every `use_query` call with the same key resolves to the **same** resource entity. Two views that both need `["users", "42"]` get one fetch, one cache entry, and consistent state. A third view mounted later reads straight from the cache.
+With `QueryClient` set as a global, every `use_query` call with the same key resolves to the same resource entity. Two views that both need `["users", "42"]` get one fetch, one cache entry, and consistent state. A third view mounted later reads straight from the cache.
 
 ```rust
 // Set once, in app setup:

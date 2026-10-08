@@ -4,7 +4,7 @@ title: HTTP cache headers
 description: "Turn a server's Cache-Control into a gpui-query CachePolicy (server wins) and persist ETags for cheap 304 refetches with gpui-query-http."
 ---
 
-The companion crate `gpui-query-http` turns your server's HTTP cache headers into a gpui-query `CachePolicy`. Two pieces work together: a parser that derives the policy from response headers, and an in-memory `HttpCache` you can layer over any HTTP client. Together they let the server drive cache TTLs and enable cheap `304 Not Modified` refetches after relaunch.
+The companion crate `gpui-query-http` turns your server's HTTP cache headers into a gpui-query `CachePolicy`. Two pieces: a parser that derives the policy from response headers, and an in-memory `HttpCache` you can layer over any HTTP client. The server drives cache TTLs, and a relaunch refetch can be a cheap `304 Not Modified`.
 
 ```sh
 cargo add gpui-query-http
@@ -43,9 +43,9 @@ If `cache_policy_from_headers` returns an error (a malformed `max-age`), fall ba
 2. `Cache-Control: max-age=N` (seconds) → `CachePolicy::Ttl { ttl_ms: N * 1000 }`. If `stale-while-revalidate=M` is also present → `CachePolicy::StaleWhileRevalidate { ttl_ms: N * 1000, stale_ms: M * 1000 }`.
 3. Otherwise → `CachePolicy::NoCache` (no usable cache directives).
 
-A few specifics:
+Four specifics:
 
-- `s-maxage` (the shared-cache directive) is treated like `max-age` and takes precedence when both are present.
+- `s-maxage` (the shared-cache directive) is a fallback: it applies only when `max-age` is absent, since this is a private cache.
 - Directive names are matched case-insensitively (`Max-Age=60` works).
 - Values may be quoted (`max-age="600"`).
 - Multiple `Cache-Control` headers combine; unknown directives (`public`, `private`) are ignored.
@@ -75,7 +75,7 @@ let (body, policy, meta) = cache.fetch("/api/users/42").await?;
 
 `HttpCache::fetch(&self, url: &str) -> Result<(Bytes, CachePolicy, Option<CacheMeta>), HttpError>` returns the body, the policy in effect for this response, and the cached `CacheMeta` when the entry is cacheable.
 
-### Library-agnostic by design
+### The `HttpBackend` trait
 
 `HttpBackend` is a trait that abstracts a single conditional `GET`. The crate ships one optional backend, `ReqwestBackend`, behind the `reqwest` cargo feature; `reqwest` is never a hard dependency. Any other request library can implement `HttpBackend` and plug into `HttpCache::new`:
 
@@ -115,7 +115,7 @@ let fetched = Fetched::with_policy(data, policy)
     .with_meta(serde_json::to_value(&meta).unwrap());
 ```
 
-This is what closes the loop with [Persistence](/docs/guides/persistence): the ETag survives a process restart, hydration re-primes the cache, and the first refetch after launch costs a `304` instead of a full download.
+This is what closes the loop with [Persistence](/docs/guides/persistence): the ETag survives a process restart, and hydration re-primes the cache.
 
 ## Next steps
 

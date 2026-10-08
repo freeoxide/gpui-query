@@ -6,7 +6,7 @@ description: "use_mutation API reference for gpui-query: dispatching writes from
 
 Mutations handle write operations: creating a user, updating a record, deleting a resource. Unlike [Queries](/docs/api/queries), mutations don't run automatically. You trigger them explicitly, and they manage their own loading/success/failure lifecycle.
 
-A mutation does not touch the query cache on its own. If you need to invalidate or refetch queries after a mutation succeeds, do that in an `on_success` callback. This is by design: the library doesn't guess which queries a mutation should affect.
+A mutation does not touch the query cache on its own. If you need to invalidate or refetch queries after a mutation succeeds, do that in an `on_success` callback. The library doesn't guess which queries a mutation should affect.
 
 ## `use_mutation`
 
@@ -66,7 +66,7 @@ mutate(&self.create_user, NewUser { name: "Alice" }, |vars| async move {
 }, cx);
 ```
 
-`mutate` holds a `WeakEntity` reference internally, so dropping the entity before the async task finishes is safe. The task simply exits.
+`mutate` holds a `WeakEntity` reference internally, so dropping the entity before the async task finishes is safe. The task exits.
 
 ### Concurrency
 
@@ -186,7 +186,7 @@ If the entity has a retry policy and retries remain after a failure, the interna
 
 **`reset()`** returns the resource to `Idle` and clears everything: data, error, variables, retry count, signal, and timestamp.
 
-**`with_key(key)`** associate a `QueryKey` with this mutation for cache correlation. Returns `self` for builder-style chaining.
+**`with_key(key)`** associates a `QueryKey` with this mutation for cache correlation. Returns `self` for builder-style chaining.
 
 ### `MutationStatus`
 

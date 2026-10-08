@@ -4,7 +4,7 @@ title: Query Keys
 description: "Hierarchical, cheap-to-clone cache keys and the QueryKeyFilter for bulk operations"
 ---
 
-Every cached resource in gpui-query is identified by a [`QueryKey`](/docs/api/queries), a structured, hierarchical key inspired by TanStack Query's array keys (`["users", "42", "posts"]`). Keys are the foundation of caching, deduplication, and the bulk operations (`invalidate_queries`, `cancel_queries`, `reset_queries`, `remove_queries`) that the [`QueryClient`](/docs/api/query-client) exposes.
+Every cached resource in gpui-query is identified by a [`QueryKey`](/docs/api/queries), a structured, hierarchical key inspired by TanStack Query's array keys (`["users", "42", "posts"]`). Keys drive caching, deduplication, and the bulk operations (`invalidate_queries`, `cancel_queries`, `reset_queries`, `remove_queries`) that the [`QueryClient`](/docs/api/query-client) exposes.
 
 ## Creating a key
 
@@ -32,7 +32,7 @@ You can construct a key from any of:
 
 ## Cheap cloning
 
-Internally a `QueryKey` stores its segments in an `Arc<[Arc<str>]>`, so cloning a key is a single atomic ref-count increment regardless of how many segments it holds. This matters because the hook layer and the `QueryClient` both clone keys freely (into buckets, into fetch tasks, into diagnostics). You never pay an allocation per clone.
+Internally a `QueryKey` stores its segments in an `Arc<[Arc<str>]>`, so cloning a key is a single atomic ref-count increment regardless of how many segments it holds. The hook layer and the `QueryClient` both clone keys freely (into buckets, into fetch tasks, into diagnostics).
 
 ```rust
 let key = QueryKey::from(["users", "42", "posts", "comments"]);
