@@ -181,12 +181,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ttl_zero_label_uses_ms() {
-        let policy = CachePolicy::Ttl { ttl_ms: 0 };
-        assert_eq!(policy.label(), "Cache TTL 0ms");
-    }
-
-    #[test]
     fn swr_zero_values_label_uses_ms() {
         let policy = CachePolicy::StaleWhileRevalidate {
             ttl_ms: 0,

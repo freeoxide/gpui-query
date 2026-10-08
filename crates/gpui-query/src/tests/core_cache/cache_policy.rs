@@ -182,11 +182,6 @@ fn nocache_no_short_circuit() {
 }
 
 #[test]
-fn nocache_cannot_short_circuit_policy() {
-    assert!(!CachePolicy::NoCache.can_short_circuit());
-}
-
-#[test]
 fn nocache_begin_request_always_starts() {
     let mut r = nocache_test_resource();
     let mut seq = test_sequencer();

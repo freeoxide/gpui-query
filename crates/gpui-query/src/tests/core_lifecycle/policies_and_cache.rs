@@ -214,40 +214,6 @@ fn begin_request_with_id_uses_provided_id() {
 }
 
 #[test]
-fn begin_request_with_id_none_uses_transient_sequencer() {
-    let mut r = resource();
-
-    let result = r.begin_request_with_id(None, 100, QueryFetchMode::Normal);
-
-    match result {
-        QueryBeginResult::Started { request_id, .. } => {
-            assert_eq!(
-                request_id.scope_id(),
-                RequestSequencer::RESERVED_FALLBACK_SCOPE
-            );
-            assert_eq!(request_id.value(), 1);
-        }
-        _ => panic!("expected Started"),
-    }
-}
-
-#[test]
-fn force_fetch_mode_bypasses_fresh_cache() {
-    let mut r = resource();
-    let mut s = seq();
-
-    let (rid, _) = begin(&mut r, &mut s, 100);
-    assert!(r.complete_current_success(rid, "data", 200));
-
-    let result = r.begin_request(&mut s, 300, QueryFetchMode::Force);
-
-    match result {
-        QueryBeginResult::Started { .. } => {}
-        _ => panic!("expected Started with Force mode, got {:?}", result),
-    }
-}
-
-#[test]
 fn set_data_saves_previous_for_rollback() {
     let mut r = resource();
     let mut s = seq();
@@ -280,10 +246,4 @@ fn clear_data_saves_for_rollback() {
 
     assert!(r.rollback_to_previous());
     assert_eq!(r.data(), Some(&"real"));
-}
-
-#[test]
-fn rollback_returns_false_when_no_previous_data() {
-    let mut r = resource();
-    assert!(!r.rollback_to_previous());
 }

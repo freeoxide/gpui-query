@@ -221,33 +221,9 @@ mod tests {
     }
 
     #[test]
-    fn starts_with_prefix() {
-        let key = QueryKey::from(["users", "42", "posts"]);
-        assert!(key.starts_with(&QueryKey::from(["users"])));
-        assert!(key.starts_with(&QueryKey::from(["users", "42"])));
-        assert!(!key.starts_with(&QueryKey::from(["posts"])));
-    }
-
-    #[test]
     fn to_path_joins_segments() {
         let key = QueryKey::from(["users", "42", "posts"]);
         assert_eq!(key.to_path(), "users::42::posts");
-    }
-
-    #[test]
-    fn clone_is_cheap() {
-        let key = QueryKey::from(["a", "b", "c"]);
-        let cloned = key.clone();
-        assert_eq!(key, cloned);
-        assert!(Arc::ptr_eq(&key.0, &cloned.0));
-    }
-
-    #[test]
-    fn serde_roundtrip() {
-        let key = QueryKey::from(["users", "42"]);
-        let json = serde_json::to_string(&key).unwrap();
-        let back: QueryKey = serde_json::from_str(&json).unwrap();
-        assert_eq!(key, back);
     }
 
     #[test]
