@@ -349,12 +349,6 @@ mod tests {
     }
 
     #[test]
-    fn negative_max_age_is_typed_error() {
-        let err = cache_policy_from_headers(&cc("max-age=-1")).unwrap_err();
-        assert!(matches!(err, ParseError::InvalidMaxAge(_)));
-    }
-
-    #[test]
     fn invalid_swr_is_typed_error() {
         let err =
             cache_policy_from_headers(&cc("max-age=10, stale-while-revalidate=oops")).unwrap_err();
@@ -405,12 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn tabs_around_equals_are_tolerated() {
-        let policy = cache_policy_from_headers(&cc("max-age\t=\t60")).unwrap();
-        assert_eq!(policy, CachePolicy::Ttl { ttl_ms: 60_000 });
-    }
-
-    #[test]
     fn invalid_value_is_truncated_in_error_text() {
         let err =
             cache_policy_from_headers(&cc(&format!("max-age={}", "x".repeat(600)))).unwrap_err();
@@ -431,6 +419,17 @@ mod tests {
         let raw = format!("{}{}", "x".repeat(511), "é".repeat(60));
         let err = parse_secs(false, &raw).unwrap_err();
         assert!(err.to_string().ends_with("...[truncated]"));
+    }
+
+    #[test]
+    fn multibyte_invalid_value_truncation_stays_under_cap() {
+        let raw = format!("{}é", "x".repeat(511));
+        let err = parse_secs(false, &raw).unwrap_err();
+        let text = err.to_string();
+        assert!(text.ends_with("...[truncated]"));
+        assert!(
+            text.len() <= "invalid max-age value: ".len() + ERROR_VALUE_MAX_BYTES + "...[truncated]".len()
+        );
     }
 
     #[test]

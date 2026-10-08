@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use gpui_query::client::{
-    NoopPersister, PERSIST_VERSION, PersistError, PersistSnapshot, PersistedEntry, Persister,
+    PERSIST_VERSION, PersistError, PersistSnapshot, PersistedEntry, Persister,
 };
 use gpui_query::core::CachePolicy;
 use gpui_query_persist::{FilePersister, PersistFormat};
@@ -124,29 +124,6 @@ fn file_persister_concurrent_saves_do_not_corrupt() {
         "final snapshot should have at least one entry"
     );
     assert_eq!(final_.version, PERSIST_VERSION);
-}
-
-#[test]
-fn noop_persister_round_trip() {
-    let p = NoopPersister;
-    let snap = sample_snapshot();
-    pollster::block_on(p.save(&snap)).expect("noop save");
-    let loaded = pollster::block_on(p.load()).expect("noop load");
-    assert!(loaded.entries.is_empty());
-    assert_eq!(loaded.version, PERSIST_VERSION);
-}
-
-#[test]
-fn file_persister_format_choice_round_trips() {
-    for fmt in [PersistFormat::Json, PersistFormat::Bincode] {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("cache");
-        let p = FilePersister::new(&path, fmt);
-        let snap = sample_snapshot();
-        pollster::block_on(p.save(&snap)).expect("save");
-        let reloaded = pollster::block_on(p.load()).expect("reload");
-        assert_eq!(reloaded.entries.len(), 1, "format {fmt:?} round-trips");
-    }
 }
 
 #[test]

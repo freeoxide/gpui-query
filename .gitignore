@@ -24,6 +24,9 @@ Thumbs.db
 # z-flow state
 .zflow/
 
+# z-flashflow state
+.z-flashflow/
+
 # Local Playwright/MCP artifacts
 .playwright-mcp/
 
