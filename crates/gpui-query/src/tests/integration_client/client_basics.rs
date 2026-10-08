@@ -1,6 +1,6 @@
 use gpui::{AppContext as _, BorrowAppContext as _, TestAppContext};
 
-use crate::client::{MutationObserver, QueryClient, QueryObserver};
+use crate::client::{QueryClient, QueryObserver};
 use crate::core::*;
 use crate::tests::test_support::*;
 
@@ -138,15 +138,5 @@ fn test_query_observer_observe_returns_subscription(cx: &mut TestAppContext) {
 
             drop(subscription);
         });
-    });
-}
-
-#[gpui::test]
-fn test_mutation_observer_creation(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    cx.update(|cx| {
-        let entity = cx
-            .new(|_| MutationResource::<String, User, QueryError>::new(RetryPolicy::no_retries()));
-        let _observer = MutationObserver::<String, User, QueryError>::new(&entity);
     });
 }

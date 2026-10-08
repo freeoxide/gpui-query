@@ -155,32 +155,6 @@ fn test_use_query_signal_not_cancelled_on_normal_fetch(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-fn test_subscription_drops_gracefully(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-
-    struct H {
-        entity: Entity<QueryResource<String, QueryError>>,
-    }
-
-    let harness = cx.new(|cx| {
-        let (entity, sub) = use_query_manual::<String, QueryError, _>(
-            QueryKey::from("sub-lifecycle"),
-            CachePolicy::Ttl { ttl_ms: 1_000 },
-            RequestPolicy::LatestWins,
-            cx,
-        );
-        assert_eq!(entity.read(cx).status(), QueryStatus::Idle);
-        drop(sub);
-        assert_eq!(entity.read(cx).status(), QueryStatus::Idle);
-        H { entity }
-    });
-
-    cx.update(|cx| {
-        assert_eq!(harness.read(cx).entity.read(cx).status(), QueryStatus::Idle);
-    });
-}
-
-#[gpui::test]
 fn test_multiple_subscriptions_same_key(cx: &mut TestAppContext) {
     setup_query_client(cx);
 

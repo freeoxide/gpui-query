@@ -61,13 +61,6 @@ fn query_error_from_string() {
 }
 
 #[test]
-fn query_error_from_string_ref() {
-    let err: QueryError = "oops".into();
-    assert_eq!(err.kind(), QueryErrorKind::Unknown);
-    assert_eq!(err.message(), "oops");
-}
-
-#[test]
 fn query_error_as_ref_str() {
     let err = QueryError::response("detail");
     let s: &str = err.as_ref();

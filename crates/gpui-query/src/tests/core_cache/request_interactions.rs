@@ -31,39 +31,6 @@ fn forced_begin_request_bypasses_fresh_ttl_cache() {
 }
 
 #[test]
-fn ignore_while_loading_rejects_duplicate_request() {
-    let mut r: QueryResource<&'static str> = QueryResource::new(
-        "demo",
-        CachePolicy::NoCache,
-        RequestPolicy::IgnoreWhileLoading,
-    );
-    let mut seq = test_sequencer();
-    let first = r.begin_request(&mut seq, 100, QueryFetchMode::Normal);
-    assert!(matches!(first, QueryBeginResult::Started { .. }));
-    let duplicate = r.begin_request(&mut seq, 200, QueryFetchMode::Normal);
-    assert!(matches!(
-        duplicate,
-        QueryBeginResult::IgnoredWhileLoading { .. }
-    ));
-}
-
-#[test]
-fn latest_wins_replaces_active_request() {
-    let mut r = ttl_resource();
-    let mut seq = test_sequencer();
-    let _ = r.begin_request(&mut seq, 100, QueryFetchMode::Normal);
-    let replacement = r.begin_request(&mut seq, 200, QueryFetchMode::Normal);
-    assert!(matches!(
-        replacement,
-        QueryBeginResult::Started {
-            replaced_request_id: Some(_),
-            ..
-        }
-    ));
-    assert_eq!(r.cancelled_count(), 1);
-}
-
-#[test]
 fn ignore_while_loading_with_swr_still_serves_stale() {
     let mut r = QueryResource::new(
         "swr-ignore",

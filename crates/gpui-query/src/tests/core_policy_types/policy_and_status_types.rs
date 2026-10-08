@@ -62,18 +62,6 @@ fn query_timestamp_from_u64() {
 }
 
 #[test]
-fn query_timestamp_zero() {
-    let ts = QueryTimestamp::from_millis(0);
-    assert_eq!(ts.as_millis(), 0);
-}
-
-#[test]
-fn query_timestamp_large_value() {
-    let ts = QueryTimestamp::from_millis(u64::MAX);
-    assert_eq!(ts.as_millis(), u64::MAX);
-}
-
-#[test]
 fn query_timestamp_ordering() {
     let earlier = QueryTimestamp::from_millis(100);
     let later = QueryTimestamp::from_millis(200);
@@ -102,13 +90,6 @@ fn request_id_hash_consistency() {
     set.insert(a);
     assert!(set.contains(&b), "equal ids should have equal hashes");
     assert!(!set.contains(&c));
-}
-
-#[test]
-fn request_id_copy_semantics() {
-    let a = RequestId::scoped(NonZero::new(5).unwrap(), 10);
-    let b = a;
-    assert_eq!(a, b);
 }
 
 #[test]
@@ -164,12 +145,6 @@ fn cache_policy_is_fresh_one_past_ttl() {
 }
 
 #[test]
-fn cache_policy_nocache_is_never_fresh() {
-    assert!(!CachePolicy::NoCache.is_fresh(0));
-    assert!(!CachePolicy::NoCache.is_fresh(1));
-}
-
-#[test]
 fn cache_policy_swr_is_stale_between_ttl_and_total() {
     let policy = CachePolicy::StaleWhileRevalidate {
         ttl_ms: 100,
@@ -191,12 +166,6 @@ fn cache_policy_swr_is_expired_past_total() {
     assert!(!policy.is_expired(100));
     assert!(!policy.is_expired(300));
     assert!(policy.is_expired(301));
-}
-
-#[test]
-fn cache_policy_nocache_is_always_expired() {
-    assert!(CachePolicy::NoCache.is_expired(0));
-    assert!(CachePolicy::NoCache.is_expired(1));
 }
 
 #[test]

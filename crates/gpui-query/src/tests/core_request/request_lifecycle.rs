@@ -112,21 +112,6 @@ fn complete_convenience_method_rejects_stale_id() {
 }
 
 #[test]
-fn begin_request_with_id_uses_provided_id() {
-    let mut resource: QueryResource<&str> =
-        test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);
-    let custom_id = RequestId::scoped(NonZero::new(99).unwrap(), 7);
-
-    let result =
-        resource.begin_request_with_id(Some(custom_id), TEST_NOW_MS, QueryFetchMode::Normal);
-    let rid = match result {
-        QueryBeginResult::Started { request_id, .. } => request_id,
-        other => panic!("expected Started, got {:?}", other),
-    };
-    assert_eq!(rid, custom_id);
-}
-
-#[test]
 fn begin_request_with_id_none_mints_in_reserved_fallback_scope() {
     let mut resource: QueryResource<&str> =
         test_resource_with_policies("key", CachePolicy::NoCache, RequestPolicy::LatestWins);

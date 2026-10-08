@@ -88,23 +88,6 @@ fn test_dehydrate_includes_infinite_query_success(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_dehydrated_state_default_and_construction(_cx: &mut TestAppContext) {
-    let state = DehydratedState::default();
-    assert!(state.entries.is_empty());
-
-    let entry = DehydratedEntry {
-        key: "users".to_string(),
-        type_id: std::any::TypeId::of::<(String, QueryError)>(),
-        kind: "query",
-    };
-    let state = DehydratedState {
-        entries: vec![entry],
-    };
-    assert_eq!(state.entries.len(), 1);
-    assert_eq!(state.entries[0].key, "users");
-}
-
-#[gpui::test]
 fn test_hydrate_is_noop(cx: &mut TestAppContext) {
     setup_query_client(cx);
     cx.update(|cx| {

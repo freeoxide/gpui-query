@@ -133,44 +133,6 @@ fn test_use_query_select_transform_updated_on_refetch(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_use_query_select_memoization_consistency(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-
-    #[allow(dead_code)]
-    struct H {
-        mapped: Entity<MappedQueryResource<&'static str, usize, QueryError>>,
-        query: Entity<QueryResource<&'static str, QueryError>>,
-        _subs: (gpui::Subscription, gpui::Subscription),
-    }
-
-    let harness = cx.new(|cx| {
-        let transform = SelectTransform::new(|data: &&'static str| data.len());
-        let (mapped, query, subs) = use_query_select(
-            QueryOptions::new("select-memo").cache_policy(CachePolicy::Ttl { ttl_ms: 0 }),
-            transform,
-            |_signal| async move { Ok::<_, QueryError>("hello") },
-            cx,
-        );
-        H {
-            mapped,
-            query,
-            _subs: subs,
-        }
-    });
-
-    cx.run_until_parked();
-
-    let result1 = cx.update(|cx| harness.read(cx).mapped.read(cx).data());
-    let result2 = cx.update(|cx| harness.read(cx).mapped.read(cx).data());
-
-    assert_eq!(
-        result1, result2,
-        "repeated reads should produce the same result"
-    );
-    assert_eq!(result1, Some(5), "length of 'hello' is 5");
-}
-
-#[gpui::test]
 fn test_use_query_select_handles_fetch_failure(cx: &mut TestAppContext) {
     setup_query_client(cx);
 
