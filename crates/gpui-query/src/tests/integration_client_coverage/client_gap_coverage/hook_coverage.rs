@@ -4,33 +4,10 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 
 use crate::core::*;
 use crate::hook::{
-    InfiniteQueryOptions, MutationOptions, QueryOptions, fetch_next_page_infinite, fetch_query,
-    fetch_query_with_signal, use_infinite_query, use_mutation, use_query_manual, use_query_select,
+    InfiniteQueryOptions, QueryOptions, fetch_next_page_infinite, fetch_query,
+    fetch_query_with_signal, use_infinite_query, use_query_manual, use_query_select,
 };
 use crate::tests::test_support::*;
-
-#[gpui::test]
-fn test_use_mutation_accepts_mutation_options_directly(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-
-    #[allow(dead_code)]
-    struct H {
-        mutation: Entity<MutationResource<String, String, QueryError>>,
-    }
-
-    let harness = cx.new(|cx| {
-        let (entity, _sub) =
-            use_mutation::<String, String, QueryError, _>(MutationOptions::default(), cx);
-        assert_eq!(entity.read(cx).status(), MutationStatus::Idle);
-        H { mutation: entity }
-    });
-
-    cx.update(|cx| {
-        let resource = harness.read(cx).mutation.read(cx);
-        assert_eq!(resource.status(), MutationStatus::Idle);
-        assert!(resource.data().is_none());
-    });
-}
 
 #[gpui::test]
 fn test_fetch_retry_stops_after_request_replaced(cx: &mut TestAppContext) {

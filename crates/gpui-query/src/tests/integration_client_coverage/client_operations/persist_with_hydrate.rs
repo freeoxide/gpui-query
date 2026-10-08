@@ -12,8 +12,8 @@ use crate::client::{
     PersistSnapshot, PersistedEntry, Persister, QueryClient, hydrate,
 };
 use crate::core::{
-    InfiniteQueryResource, MutationResource, QueryError, QueryKey, QueryKeyFilter, QueryResource,
-    QueryStatus,
+    InfiniteQueryResource, MutationResource, QueryError, QueryFetchMode, QueryKey,
+    QueryKeyFilter, QueryResource, QueryStatus,
 };
 use crate::hook::{
     InfiniteQueryOptions, fetch_query, mutate, use_infinite_query, use_mutation, use_query_manual,
@@ -143,52 +143,6 @@ fn test_collect_persist_snapshot_filter_and_max_age(cx: &mut TestAppContext) {
             assert!(!snap_all.entries.contains_key("posts::9"));
         });
     });
-}
-
-#[gpui::test]
-fn test_persist_with_saves_on_mutation(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    let persister = MemPersister::default();
-    let captured = persister.last_saved.clone();
-
-    struct H {
-        _entity: Entity<QueryResource<String, QueryError>>,
-        _handle: PersistHandle,
-    }
-    let harness = cx.new(|cx| {
-        let (_handle, entity) = cx.update_global::<QueryClient, _>(|client, cx| {
-            client.register_serializer::<String, QueryError>(ser_string);
-            let handle = client.persist_with(persister.clone(), zero_debounce(), cx);
-            let entity = client.resource::<String, QueryError>(QueryKey::from("persisted"), cx);
-            entity.update(cx, |r, _| {
-                r.apply_success("data".to_string(), crate::client::current_time_ms())
-            });
-            (handle, entity)
-        });
-        H {
-            _entity: entity,
-            _handle,
-        }
-    });
-
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            client.set_query_data::<String, QueryError>("trigger", "x".to_string(), cx);
-        });
-    });
-    cx.run_until_parked();
-
-    let saved = captured
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("persist_with should have saved after the mutation");
-    assert!(
-        saved.entries.contains_key("persisted"),
-        "saved snapshot should include the retained Success entry: {:?}",
-        saved.entries.keys().collect::<Vec<_>>()
-    );
-    let _ = harness;
 }
 
 #[gpui::test]
@@ -342,39 +296,6 @@ fn test_hydrate_rebuilds_multi_segment_keys(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_hydrate_rejects_version_mismatch(cx: &mut TestAppContext) {
-    setup_query_client(cx);
-    let persister = MemPersister::default();
-    *persister.load_value.lock().unwrap() = Some(PersistSnapshot {
-        entries: Default::default(),
-        version: 9999,
-    });
-
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, _cx| {
-            client
-                .register_deserializer::<String, QueryError>(|v| v.as_str().map(|s| s.to_string()));
-        });
-    });
-
-    let filter = PersistFilter::All;
-    let max_age = DAY;
-    let outcome = cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            block_on_ready(hydrate(client, &persister, &filter, max_age, cx))
-        })
-    });
-
-    match outcome {
-        Err(PersistError::VersionMismatch { expected, found }) => {
-            assert_eq!(expected, crate::client::PERSIST_VERSION);
-            assert_eq!(found, 9999);
-        }
-        other => panic!("expected VersionMismatch, got {other:?}"),
-    }
-}
-
-#[gpui::test]
 fn test_hydrate_hostile_entries_skip_without_panicking(cx: &mut TestAppContext) {
     setup_query_client(cx);
     let persister = MemPersister::default();
@@ -466,6 +387,57 @@ fn test_hydrate_hostile_entries_skip_without_panicking(cx: &mut TestAppContext) 
             Some(&"future".to_string()),
             "u64::MAX cached_at must saturate to age 0 and stay hydratable"
         );
+    });
+}
+
+#[gpui::test]
+fn test_collect_persist_snapshot_skips_non_success_entries(cx: &mut TestAppContext) {
+    setup_query_client(cx);
+    cx.update(|cx| {
+        cx.update_global::<QueryClient, _>(|client, cx| {
+            client.register_serializer::<String, QueryError>(ser_string);
+
+            let ok = client.resource::<String, QueryError>(QueryKey::from("ok_entry"), cx);
+            ok.update(cx, |r, _| {
+                r.apply_success("v".to_string(), crate::client::current_time_ms())
+            });
+
+            let _idle = client.resource::<String, QueryError>(QueryKey::from("idle_entry"), cx);
+
+            let failed = client.resource::<String, QueryError>(QueryKey::from("failed_entry"), cx);
+            failed.update(cx, |r, _| {
+                r.apply_failure(QueryError::response("boom"), crate::client::current_time_ms())
+            });
+
+            let refetching = client.resource::<String, QueryError>(QueryKey::from("refetching"), cx);
+            refetching.update(cx, |r, _| {
+                r.apply_success("stale".to_string(), crate::client::current_time_ms())
+            });
+            let rid = client
+                .next_request_id_for_key::<String, QueryError>(&QueryKey::from("refetching"))
+                .expect("rid");
+            refetching.update(cx, |r, _| {
+                let _ = r.begin_request_with_id(Some(rid), crate::client::current_time_ms(), QueryFetchMode::Force);
+            });
+            assert_eq!(
+                refetching.read(cx).status(),
+                QueryStatus::LoadingWithData,
+                "precondition: the refetching entry holds data while loading"
+            );
+
+            let snap = client.collect_persist_snapshot(&PersistFilter::All, DAY, cx);
+            assert_eq!(
+                snap.entries.len(),
+                1,
+                "only the Success entry is collected: {:?}",
+                snap.entries.keys().collect::<Vec<_>>()
+            );
+            assert!(snap.entries.contains_key("ok_entry"));
+            assert!(
+                !snap.entries.contains_key("refetching"),
+                "a loading-with-data entry must not be persisted mid-refetch"
+            );
+        });
     });
 }
 

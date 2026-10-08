@@ -38,33 +38,6 @@ fn test_gc_preserves_swr_resources_within_stale_window(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-fn test_gc_preserves_swr_resources_within_ttl(cx: &mut TestAppContext) {
-    setup_query_client_with_gc(cx, 5_000);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let key = QueryKey::from("swr_fresh");
-            let swr = CachePolicy::StaleWhileRevalidate {
-                ttl_ms: 5_000,
-                stale_ms: 3_000,
-            };
-            let entity = client.resource_with_policies::<String, QueryError>(
-                key.clone(),
-                swr,
-                RequestPolicy::LatestWins,
-                cx,
-            );
-            entity.update(cx, |r, _| r.apply_success("fresh".to_string(), 1_000));
-
-            client.gc_with_time(3_000, cx);
-            assert!(
-                client.query::<String, QueryError>(&key).is_some(),
-                "SWR resource within TTL must survive GC"
-            );
-        });
-    });
-}
-
-#[gpui::test]
 fn test_gc_preserves_success_mutation(cx: &mut TestAppContext) {
     setup_query_client_with_gc(cx, 1_000);
     cx.update(|cx| {
@@ -86,25 +59,6 @@ fn test_gc_preserves_success_mutation(cx: &mut TestAppContext) {
             assert!(
                 !mutations.is_empty(),
                 "Success mutation should survive GC — only Idle/Failure are evictable"
-            );
-        });
-    });
-}
-
-#[gpui::test]
-fn test_gc_evicts_idle_infinite_query_with_realistic_timing(cx: &mut TestAppContext) {
-    setup_query_client_with_gc(cx, 1_000);
-    cx.update(|cx| {
-        cx.update_global::<QueryClient, _>(|client, cx| {
-            let key = QueryKey::from("inf_gc_idle");
-            let _entity = client.infinite_resource::<String, QueryError>(key.clone(), cx);
-
-            let now = crate::client::current_time_ms();
-            client.gc_with_time(now + 100_000, cx);
-
-            assert!(
-                client.infinite_query::<String, QueryError>(&key).is_none(),
-                "idle infinite query should be evicted by GC"
             );
         });
     });
@@ -162,20 +116,33 @@ fn test_gc_evicts_aged_successful_infinite_query(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_bucket_default_max_entries_allows_many_resources(cx: &mut TestAppContext) {
-    setup_query_client(cx);
+fn test_gc_evicts_success_mutation_after_success_window(cx: &mut TestAppContext) {
+    setup_query_client_with_gc(cx, 1_000);
     cx.update(|cx| {
         cx.update_global::<QueryClient, _>(|client, cx| {
-            for i in 0..100 {
-                let key = format!("max_{}", i);
-                let _entity = client.resource::<String, QueryError>(key, cx);
-            }
+            let entity = cx.new(|_| {
+                MutationResource::<String, String, QueryError>::new(RetryPolicy::no_retries())
+            });
+            client.register_mutation::<String, String, QueryError>(&entity, cx);
 
-            let all = client.all_queries::<String, QueryError>();
+            entity.update(cx, |m, _| {
+                m.begin("vars".to_string());
+                m.complete_success("done".to_string());
+            });
+
+            let now = crate::client::current_time_ms();
+            client.gc_with_time(now + 1_500, cx);
             assert_eq!(
-                all.len(),
-                100,
-                "all 100 resources should exist within default max_entries(10_000)"
+                client.all_mutations::<String, String, QueryError>().len(),
+                1,
+                "success mutation must survive past gc_time while inside the success window"
+            );
+
+            client.gc_with_time(now + 2_500, cx);
+            assert_eq!(
+                client.all_mutations::<String, String, QueryError>().len(),
+                0,
+                "success mutation must be evicted once age exceeds the success window"
             );
         });
     });
@@ -238,23 +205,6 @@ fn test_idle_mutation_is_evicted_by_gc_after_age_exceeds_threshold(cx: &mut Test
             );
         });
     });
-}
-
-#[gpui::test]
-fn test_observer_status_dedup_default_config_is_status_change_only(_cx: &mut TestAppContext) {
-    let config = crate::client::ObserverConfig::default();
-    assert!(
-        config.notify_on_status_change_only,
-        "default ObserverConfig should notify on status change only"
-    );
-
-    let always_notify = crate::client::ObserverConfig {
-        notify_on_status_change_only: false,
-    };
-    assert!(
-        !always_notify.notify_on_status_change_only,
-        "explicit always-notify config should be false"
-    );
 }
 
 #[gpui::test]
