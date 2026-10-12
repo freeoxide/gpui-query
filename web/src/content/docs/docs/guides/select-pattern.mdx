@@ -50,7 +50,6 @@ struct User { name: String }
 struct MyError;
 
 struct UserCountView {
-    /// Derived view: just the count.
     count: gpui::Entity<gpui_query::core::MappedQueryResource<Vec<User>, usize, MyError>>,
     _subs: (gpui::Subscription, gpui::Subscription),
 }

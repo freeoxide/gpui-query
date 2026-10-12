@@ -91,10 +91,9 @@ fn example(client: &QueryClient, cx: &mut gpui::App) {
     // Defaults: every key, max age 24h, 500ms debounce.
     let _handle = client.persist_with(DbPersister, PersistOptions::default(), cx);
 
-    // ...or scope and tune it:
     use std::time::Duration;
     let opts = PersistOptions {
-        filter: PersistFilter::Prefix("users".into()), // only the "users" subtree
+        filter: PersistFilter::Prefix("users".into()),
         max_age: Duration::from_secs(60 * 60),
         debounce: Duration::from_millis(250),
     };
@@ -141,7 +140,6 @@ use gpui_query::client::{QueryClient, PersistOptions};
 fn example(client: &QueryClient, cx: &mut gpui::App) {
     // JSON (human-readable) or Bincode (compact); in_cache_dir roots at the OS cache dir.
     let persister = FilePersister::json("path/to/cache.json");
-    // let persister = FilePersister::in_cache_dir("my-app").unwrap();
     let _handle = client.persist_with(persister, PersistOptions::default(), cx);
 }
 ```
