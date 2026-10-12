@@ -61,14 +61,14 @@ For the cache layer, wrap any `HttpBackend`. With the `reqwest` feature:
 ```rust,no_run
 use gpui_query_http::{HttpCache, ReqwestBackend};
 
-# async fn doc() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-let cache = HttpCache::new(ReqwestBackend::from_client(reqwest::Client::new()));
+async fn example() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let cache = HttpCache::new(ReqwestBackend::from_client(reqwest::Client::new()));
 
-// Fresh hit → no network call; stale → conditional GET; 304 → cached body.
-let (body, policy, meta) = cache.fetch("https://example.test/data").await?;
-#     let _ = (body, policy, meta);
-#     Ok(())
-# }
+    // Fresh hit → no network call; stale → conditional GET; 304 → cached body.
+    let (body, policy, meta) = cache.fetch("https://example.test/data").await?;
+    let _ = (body, policy, meta);
+    Ok(())
+}
 ```
 
 ## WebAssembly
@@ -79,15 +79,19 @@ For custom backends, `HttpBackend::fetch` bounds its returned future with `Maybe
 
 ```rust,no_run
 use std::future::Future;
+
 use gpui_query_http::{BackendResponse, Conditionals, HttpBackend, MaybeSend};
-# #[derive(Debug)]
-# struct MyError;
-# impl std::fmt::Display for MyError {
-#     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-#         f.write_str("GET failed")
-#     }
-# }
-# impl std::error::Error for MyError {}
+
+#[derive(Debug)]
+struct MyError;
+
+impl std::fmt::Display for MyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GET failed")
+    }
+}
+
+impl std::error::Error for MyError {}
 
 struct MyBackend;
 
@@ -96,8 +100,8 @@ impl HttpBackend for MyBackend {
 
     fn fetch(
         &self,
-        url: &str,
-        conditionals: Conditionals,
+        _url: &str,
+        _conditionals: Conditionals,
     ) -> impl Future<Output = Result<BackendResponse, MyError>> + MaybeSend {
         // perform the conditional GET (stubbed here)
         async { Err(MyError) }

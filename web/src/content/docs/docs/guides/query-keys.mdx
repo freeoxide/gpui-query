@@ -70,10 +70,12 @@ The options-first query hooks (`use_query`, `use_query_with_policy`, `use_query_
 ```rust
 use gpui_query::hook::use_query;
 use gpui_query::{QueryOptions, QueryKey};
-# #[derive(Clone)]
-# struct User;
-# #[derive(Clone, Debug)]
-# struct MyError;
+
+#[derive(Clone)]
+struct User;
+
+#[derive(Clone, Debug)]
+struct MyError;
 
 impl View {
     fn new(cx: &mut gpui::Context<Self>) -> Self {
@@ -95,8 +97,7 @@ impl View {
             |_signal| async move { Ok::<_, MyError>(vec![]) },
             cx,
         );
-        // ...
-#       unimplemented!()
+        Self { users, user }
     }
 }
 ```
@@ -117,19 +118,19 @@ The bulk operations on `QueryClient` do not take a raw key; they take a [`QueryK
 use gpui_query::client::QueryClient;
 use gpui_query::core::{QueryKey, QueryKeyFilter};
 
-# fn _doc(client: &mut QueryClient, cx: &mut gpui::App) {
-// Invalidate everything under the "users" subtree — every user,
-// every user's posts, etc.
-let users = QueryKey::from(["users"]);
-client.invalidate_queries(&QueryKeyFilter::Prefix(&users), cx);
+fn example(client: &mut QueryClient, cx: &mut gpui::App) {
+    // Invalidate everything under the "users" subtree — every user,
+    // every user's posts, etc.
+    let users = QueryKey::from(["users"]);
+    client.invalidate_queries(&QueryKeyFilter::Prefix(&users), cx);
 
-// Invalidate just one specific resource.
-let one = QueryKey::from(["users", "42"]);
-client.invalidate_queries(&QueryKeyFilter::Exact(&one), cx);
+    // Invalidate just one specific resource.
+    let one = QueryKey::from(["users", "42"]);
+    client.invalidate_queries(&QueryKeyFilter::Exact(&one), cx);
 
-// Throw away all cached query state (e.g. on logout).
-client.remove_queries(&QueryKeyFilter::All);
-# }
+    // Throw away all cached query state (e.g. on logout).
+    client.remove_queries(&QueryKeyFilter::All);
+}
 ```
 
 ### Choosing a filter

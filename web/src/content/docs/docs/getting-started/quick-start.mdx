@@ -158,29 +158,35 @@ impl TodoActions {
 Read the mutation's status the same way as a query:
 
 ```rust
-# use gpui_query::{MutationResource, MutationStatus, QueryError};
-# #[derive(Clone)] struct ToggleTodo { id: u32 }
-# #[derive(Clone)] struct Todo { id: u32, title: String, done: bool }
-# fn doc(m: &gpui::Entity<MutationResource<ToggleTodo, Todo, QueryError>>, cx: &gpui::App) {
-match m.read(cx).status() {
-    MutationStatus::Idle => { /* render a button */ }
-    MutationStatus::Loading => { /* disable the button, show a spinner */ }
-    MutationStatus::Success => { /* confirm */ }
-    MutationStatus::Failure => { /* render a retry button */ }
+use gpui_query::{MutationResource, MutationStatus, QueryError};
+
+#[derive(Clone)]
+struct ToggleTodo { id: u32 }
+
+#[derive(Clone)]
+struct Todo { id: u32, title: String, done: bool }
+
+fn example(m: &gpui::Entity<MutationResource<ToggleTodo, Todo, QueryError>>, cx: &gpui::App) {
+    match m.read(cx).status() {
+        MutationStatus::Idle => { /* render a button */ }
+        MutationStatus::Loading => { /* disable the button, show a spinner */ }
+        MutationStatus::Success => { /* confirm */ }
+        MutationStatus::Failure => { /* render a retry button */ }
+    }
 }
-# }
 ```
 
 Mutations default to **no retries**. After a mutation that changes server state, invalidate the affected queries so they refetch:
 
 ```rust
-# use gpui::BorrowAppContext as _;
-# use gpui_query::client::QueryClient;
-# use gpui_query::core::{QueryKey, QueryKeyFilter};
-# fn doc(cx: &mut gpui::App) {
-let todos = QueryKey::from(["todos"]);
-cx.update_global::<QueryClient, _>(|client, cx| client.invalidate_queries(&QueryKeyFilter::Prefix(&todos), cx));
-# }
+use gpui::BorrowAppContext as _;
+use gpui_query::client::QueryClient;
+use gpui_query::core::{QueryKey, QueryKeyFilter};
+
+fn example(cx: &mut gpui::App) {
+    let todos = QueryKey::from(["todos"]);
+    cx.update_global::<QueryClient, _>(|client, cx| client.invalidate_queries(&QueryKeyFilter::Prefix(&todos), cx));
+}
 ```
 
 ## Where to go next

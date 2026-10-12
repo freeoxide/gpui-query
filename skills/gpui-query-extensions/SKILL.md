@@ -280,7 +280,8 @@ fn render_users(cx: &mut gpui::Context<impl 'static>) {
     );
     // entity.read(cx).data() / .status() ...
 }
-# async fn fetch_users() -> Result<Vec<User>, QueryError> { Ok(vec![]) }
+
+async fn fetch_users() -> Result<Vec<User>, QueryError> { Ok(vec![]) }
 ```
 
 Both `use_query` completions and `use_mutation` / `use_infinite_query` first-page completions bump the dirty signal; the imperative `prepare_fetch_query().complete_success(...)` path bumps it too, so nothing fetched through the public API is invisible to the driver.

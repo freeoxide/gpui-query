@@ -44,8 +44,7 @@ The `core` layer also builds for `wasm32-unknown-unknown`; the wasm-specific set
 Set up the `QueryClient` as a GPUI global when your app starts:
 
 ```rust,no_run
-use gpui::Application;
-# use gpui::BorrowAppContext;
+use gpui::{Application, BorrowAppContext};
 use gpui_query::QueryClient;
 
 Application::new().run(|cx| {
@@ -57,19 +56,24 @@ Application::new().run(|cx| {
 Fetch data with `use_query`:
 
 ```rust,no_run
-use gpui_query::use_query;
-# use gpui::{Context, Entity, Subscription};
-# use gpui_query::QueryResource;
-# struct MyView;
-# #[derive(Clone)]
-# struct User;
-# #[derive(Clone, Debug)]
-# struct MyError;
-# async fn fetch_users() -> Result<Vec<User>, MyError> {
-#     Ok(vec![])
-# }
+use gpui::{Context, Entity, Subscription};
+use gpui_query::{use_query, QueryResource};
 
-fn setup_query(cx: &mut Context<MyView>) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
+struct MyView;
+
+#[derive(Clone)]
+struct User;
+
+#[derive(Clone, Debug)]
+struct MyError;
+
+async fn fetch_users() -> Result<Vec<User>, MyError> {
+    Ok(vec![])
+}
+
+fn setup_query(
+    cx: &mut Context<MyView>,
+) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
     use_query(
         "users",
         |signal| async move {
@@ -85,26 +89,30 @@ fn setup_query(cx: &mut Context<MyView>) -> (Entity<QueryResource<Vec<User>, MyE
 Read the state in your render method:
 
 ```rust,no_run
-# use gpui::{Context, Entity};
-# use gpui_query::{QueryResource, QueryStatus};
-# #[derive(Clone)]
-# struct User;
-# #[derive(Clone, Debug)]
-# struct MyError;
-# struct MyView {
-#     query_entity: Entity<QueryResource<Vec<User>, MyError>>,
-# }
-# impl MyView {
-#     fn label(&self, cx: &Context<Self>) -> &'static str {
-let label = self.query_entity.read_with(cx, |resource, _| match resource.status() {
-    QueryStatus::LoadingEmpty => "Loading...",
-    QueryStatus::Success => "Got data",
-    QueryStatus::Failure => "Error",
-    _ => "Idle",
-});
-#         label
-#     }
-# }
+use gpui::{Context, Entity};
+use gpui_query::{QueryResource, QueryStatus};
+
+#[derive(Clone)]
+struct User;
+
+#[derive(Clone, Debug)]
+struct MyError;
+
+struct MyView {
+    query_entity: Entity<QueryResource<Vec<User>, MyError>>,
+}
+
+impl MyView {
+    fn label(&self, cx: &Context<Self>) -> &'static str {
+        let label = self.query_entity.read_with(cx, |resource, _| match resource.status() {
+            QueryStatus::LoadingEmpty => "Loading...",
+            QueryStatus::Success => "Got data",
+            QueryStatus::Failure => "Error",
+            _ => "Idle",
+        });
+        label
+    }
+}
 ```
 
 ## architecture
@@ -133,32 +141,34 @@ persist = ["client", "hook", "dep:serde_json", "dep:thiserror"]
 The primary hook. Pass a key (string or `QueryOptions`), a fetcher function, and the view context. The fetcher receives a `QuerySignal` for cooperative cancellation.
 
 ```rust,no_run
-use gpui_query::{use_query, QueryOptions, CachePolicy, RetryPolicy};
-# use gpui::Context;
-# use gpui_query::QuerySignal;
-# #[derive(Clone)]
-# struct User;
-# #[derive(Clone, Debug)]
-# struct MyError;
-# fn doc<C: 'static, F, Fut>(cx: &mut Context<C>, fetcher: F)
-# where
-#     F: Fn(QuerySignal) -> Fut + Copy + Send + 'static,
-#     Fut: std::future::Future<Output = Result<Vec<User>, MyError>> + Send + 'static,
-# {
+use gpui::Context;
+use gpui_query::{use_query, CachePolicy, QueryOptions, QuerySignal, RetryPolicy};
 
-// Simple key
-let (entity, sub) = use_query("users", fetcher, cx);
+#[derive(Clone)]
+struct User;
 
-// With options
-let (entity, sub) = use_query(
-    QueryOptions::new("users")
-        .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
-        .retry_policy(RetryPolicy::new(5).with_exponential_backoff()),
-    fetcher,
-    cx,
-);
-# let _ = (entity, sub);
-# }
+#[derive(Clone, Debug)]
+struct MyError;
+
+fn example<C: 'static, F, Fut>(cx: &mut Context<C>, fetcher: F)
+where
+    F: Fn(QuerySignal) -> Fut + Copy + Send + 'static,
+    Fut: std::future::Future<Output = Result<Vec<User>, MyError>> + Send + 'static,
+{
+    // Simple key
+    let (entity, sub) = use_query("users", fetcher, cx);
+    let _ = (entity, sub);
+
+    // With options
+    let (entity, sub) = use_query(
+        QueryOptions::new("users")
+            .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
+            .retry_policy(RetryPolicy::new(5).with_exponential_backoff()),
+        fetcher,
+        cx,
+    );
+    let _ = (entity, sub);
+}
 ```
 
 `QueryResource<T,E>` tracks the full lifecycle: idle, loading (with or without previous data), success, failure, or cancelled. You get `data()`, `error()`, `status()`, `is_loading()`, `has_data()`, `cache_age_ms(now_ms)`, and `retry_count()`.
@@ -168,44 +178,47 @@ For manual control with no auto-fetch, use `use_query_manual` and trigger fetche
 ## mutations
 
 ```rust,no_run
-use gpui_query::{use_mutation, mutate, MutationCallbacks};
-# use gpui::Context;
-# use gpui_query::mutate_with_callbacks;
-# #[derive(Clone)]
-# struct NewUser {
-#     name: &'static str,
-# }
-# #[derive(Clone)]
-# struct User;
-# #[derive(Clone, Debug)]
-# struct MyError;
-# async fn create_user(vars: NewUser) -> User {
-#     let _ = vars;
-#     User
-# }
-# fn doc<C: 'static>(cx: &mut Context<C>) {
-#     let variables = NewUser { name: "Ada" };
-#     let mutator =
-#         |vars: NewUser| async move { Ok::<User, MyError>(create_user(vars).await) };
+use gpui::Context;
+use gpui_query::{mutate, mutate_with_callbacks, use_mutation, MutationCallbacks};
 
-let (entity, sub) = use_mutation((), cx);
+#[derive(Clone)]
+struct NewUser {
+    name: &'static str,
+}
 
-// Trigger the mutation
-mutate(&entity, NewUser { name: "Alice" }, |vars| async move {
-    Ok::<User, MyError>(create_user(vars).await)
-}, cx);
+#[derive(Clone)]
+struct User;
 
-// With success/error/settled callbacks
-mutate_with_callbacks(
-    &entity,
-    variables,
-    mutator,
-    MutationCallbacks::new()
-        .on_success(|data| { /* invalidate user queries */ })
-        .on_error(|err| eprintln!("mutation failed: {err:?}")),
-    cx,
-);
-# }
+#[derive(Clone, Debug)]
+struct MyError;
+
+async fn create_user(vars: NewUser) -> User {
+    let _ = vars;
+    User
+}
+
+fn example<C: 'static>(cx: &mut Context<C>) {
+    let (entity, sub) = use_mutation((), cx);
+    let _ = sub;
+
+    // Trigger the mutation
+    mutate(&entity, NewUser { name: "Alice" }, |vars| async move {
+        Ok::<User, MyError>(create_user(vars).await)
+    }, cx);
+
+    // With success/error/settled callbacks
+    let variables = NewUser { name: "Ada" };
+    let mutator = |vars: NewUser| async move { Ok::<User, MyError>(create_user(vars).await) };
+    mutate_with_callbacks(
+        &entity,
+        variables,
+        mutator,
+        MutationCallbacks::new()
+            .on_success(|data| { /* invalidate user queries */ })
+            .on_error(|err| eprintln!("mutation failed: {err:?}")),
+        cx,
+    );
+}
 ```
 
 Mutations track their own state in `MutationResource<V,T,E>` with a begin/complete/retry/reset lifecycle. They don't touch the query cache unless you explicitly invalidate queries in an `on_success` callback.
@@ -215,41 +228,47 @@ Mutations track their own state in `MutationResource<V,T,E>` with a begin/comple
 For paginated data. The fetcher receives the last page (or `None` for the first request) and returns `(page_data, has_more)`.
 
 ```rust,no_run
+use gpui::Context;
 use gpui_query::{use_infinite_query, InfiniteQueryOptions};
-# use gpui::Context;
-# #[derive(Clone, Debug)]
-# struct MyError;
-# #[derive(Clone)]
-# struct Page {
-#     cursor: u32,
-# }
-# impl Page {
-#     fn cursor(&self) -> u32 {
-#         self.cursor
-#     }
-# }
-# struct FetchedPage {
-#     items: Page,
-#     has_more: bool,
-# }
-# async fn fetch_page(cursor: Option<u32>) -> Result<FetchedPage, MyError> {
-#     let _ = cursor;
-#     Ok(FetchedPage { items: Page { cursor: 0 }, has_more: false })
-# }
-# fn doc<C: 'static>(cx: &mut Context<C>) {
 
-let (entity, sub) = use_infinite_query(
-    InfiniteQueryOptions::new("feed").max_pages(10),
-    |last_page: Option<&Page>| {
-        let cursor = last_page.map(|p| p.cursor());
-        async move {
-            let page = fetch_page(cursor).await?;
-            Ok::<_, MyError>((page.items, page.has_more))
-        }
-    },
-    cx,
-);
-# }
+#[derive(Clone, Debug)]
+struct MyError;
+
+#[derive(Clone)]
+struct Page {
+    cursor: u32,
+}
+
+impl Page {
+    fn cursor(&self) -> u32 {
+        self.cursor
+    }
+}
+
+struct FetchedPage {
+    items: Page,
+    has_more: bool,
+}
+
+async fn fetch_page(cursor: Option<u32>) -> Result<FetchedPage, MyError> {
+    let _ = cursor;
+    Ok(FetchedPage { items: Page { cursor: 0 }, has_more: false })
+}
+
+fn example<C: 'static>(cx: &mut Context<C>) {
+    let (entity, sub) = use_infinite_query(
+        InfiniteQueryOptions::new("feed").max_pages(10),
+        |last_page: Option<&Page>| {
+            let cursor = last_page.map(|p| p.cursor());
+            async move {
+                let page = fetch_page(cursor).await?;
+                Ok::<_, MyError>((page.items, page.has_more))
+            }
+        },
+        cx,
+    );
+    let _ = (entity, sub);
+}
 ```
 
 Pages are stored in a `VecDeque`. Default cap is 50 pages, configurable via `max_pages()`. Supports bidirectional fetching with `fetch_next_page_infinite` and `fetch_previous_page_infinite`.
@@ -265,28 +284,29 @@ Three policies:
 Bulk operations on the `QueryClient`:
 
 ```rust,no_run
-# use gpui::App;
-# use gpui::AppContext;
-# use gpui::BorrowAppContext;
-# use gpui_query::client::QueryClient;
-# use gpui_query::{QueryKey, QueryKeyFilter};
-# #[derive(Clone)]
-# struct User;
-# #[derive(Clone, Debug)]
-# struct MyError;
-# fn doc(cx: &mut App, new_user: User) {
-cx.update_global::<QueryClient, _>(|client, cx| {
-    // Invalidate all queries with a matching key prefix
-    client.invalidate_queries(&QueryKeyFilter::Prefix(&QueryKey::from(["users"])), cx);
+use gpui::{App, BorrowAppContext};
+use gpui_query::client::QueryClient;
+use gpui_query::{QueryKey, QueryKeyFilter};
 
-    // Remove everything
-    client.remove_queries(&QueryKeyFilter::All);
+#[derive(Clone)]
+struct User;
 
-    // Optimistic update; the previous value is kept for the resource's
-    // rollback_to_previous()
-    client.set_query_data::<Vec<User>, MyError>("users", vec![new_user], cx);
-});
-# }
+#[derive(Clone, Debug)]
+struct MyError;
+
+fn example(cx: &mut App, new_user: User) {
+    cx.update_global::<QueryClient, _>(|client, cx| {
+        // Invalidate all queries with a matching key prefix
+        client.invalidate_queries(&QueryKeyFilter::Prefix(&QueryKey::from(["users"])), cx);
+
+        // Remove everything
+        client.remove_queries(&QueryKeyFilter::All);
+
+        // Optimistic update; the previous value is kept for the resource's
+        // rollback_to_previous()
+        client.set_query_data::<Vec<User>, MyError>("users", vec![new_user], cx);
+    });
+}
 ```
 
 Invalidation matching supports `Exact`, `Prefix`, and `All` filters via `QueryKeyFilter`.
@@ -314,10 +334,11 @@ Enable the `persist` feature to save and restore the cache across restarts. Impl
 
 ```rust,no_run
 use std::time::Duration;
+
+use gpui::App;
 use gpui_query::client::{
-    QueryClient, Persister, PersistSnapshot, PersistError, PersistOptions, PersistFilter,
+    hydrate, PersistError, PersistFilter, PersistOptions, Persister, PersistSnapshot, QueryClient,
 };
-# use gpui::App;
 
 struct MyPersister; // your backend: file, db, kv, …
 
@@ -325,20 +346,23 @@ impl Persister for MyPersister {
     async fn load(&self) -> Result<PersistSnapshot, PersistError> {
         Ok(PersistSnapshot::new())
     }
+
     async fn save(&self, _snapshot: &PersistSnapshot) -> Result<(), PersistError> {
         Ok(())
     }
 }
 
-# async fn doc(mut client: &mut QueryClient, cx: &mut App) {
-// Debounced saves: coalesces bursts of cache mutations into one snapshot.
-let _handle = client.persist_with(MyPersister, PersistOptions::default(), cx);
+async fn example(mut client: &mut QueryClient, cx: &mut App) {
+    // Debounced saves: coalesces bursts of cache mutations into one snapshot.
+    let _handle = client.persist_with(MyPersister, PersistOptions::default(), cx);
 
-// Cold start: re-prime the cache from the persister (needs &mut QueryClient).
-gpui_query::client::hydrate(
-    &mut client, &MyPersister, &PersistFilter::All, Duration::from_secs(86_400), cx,
-).await.ok();
-# }
+    // Cold start: re-prime the cache from the persister (needs &mut QueryClient).
+    hydrate(
+        &mut client, &MyPersister, &PersistFilter::All, Duration::from_secs(86_400), cx,
+    )
+    .await
+    .ok();
+}
 ```
 
 Only `Success` entries with a registered serializer are persisted; the typed round-trip is driven by `QueryClient::register_serializer` / `register_deserializer`. The companion crate **`gpui-query-persist`** ships a ready-made atomic disk adapter (`FilePersister`). See the [Persistence guide](https://gpui-query.freeoxide.com/docs/guides/persistence).
