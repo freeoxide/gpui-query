@@ -139,8 +139,8 @@ fn example(client: &mut QueryClient, cx: &mut gpui::App) {
 Keep the list and a detail view under a shared prefix so one invalidation refreshes both:
 
 ```rust
-let list  = QueryKey::from(["users"]);             // the list
-let detail= QueryKey::from(["users", id.as_str()]); // one user
+let list = QueryKey::from(["users"]);
+let detail = QueryKey::from(["users", id.as_str()]);
 ```
 
 After an update mutation, `invalidate_queries(Prefix(&["users"]))` marks the list and any cached detail pages stale in one call; the next access to each refetches.

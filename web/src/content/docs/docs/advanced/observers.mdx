@@ -11,14 +11,13 @@ Observers bridge gpui-query's resources to GPUI's reactivity. An observer attach
 There is a single generic implementation, `Observer<R>`, parameterized over the resource kind. Three type aliases name the concrete observers you will use:
 
 ```rust
-// All three are Observer<R> with a different R / Status pair.
 use gpui_query::client::{
     QueryObserver, InfiniteQueryObserver, MutationObserver,
 };
 
-type QueryObserver<T, E>          = Observer<QueryResource<T, E>>;          // Status: QueryStatus
-type InfiniteQueryObserver<T, E>  = Observer<InfiniteQueryResource<T, E>>;  // Status: QueryStatus
-type MutationObserver<V, T, E>    = Observer<MutationResource<V, T, E>>;    // Status: MutationStatus
+type QueryObserver<T, E> = Observer<QueryResource<T, E>>;
+type InfiniteQueryObserver<T, E> = Observer<InfiniteQueryResource<T, E>>;
+type MutationObserver<V, T, E> = Observer<MutationResource<V, T, E>>;
 ```
 
 Each resource exposes its status via an inherent `status()` method; the public `ObservableResource` trait surfaces it generically so `Observer<R>` can deduplicate notifications for any resource kind.

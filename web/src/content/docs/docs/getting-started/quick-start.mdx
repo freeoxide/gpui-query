@@ -65,10 +65,10 @@ pub struct TodosView {
 impl TodosView {
     pub fn new(cx: &mut gpui::Context<Self>) -> Self {
         let (todos, sub) = use_query(
-            QueryOptions::new("todos")                             // cache key
-                .cache_policy(CachePolicy::Ttl { ttl_ms: 60_000 }) // fresh for 1 minute
-                .request_policy(RequestPolicy::LatestWins),        // supersede in-flight fetches
-            |_signal| async { fetch_todos().await },               // fetcher: Fn(QuerySignal) -> Fut
+            QueryOptions::new("todos")
+                .cache_policy(CachePolicy::Ttl { ttl_ms: 60_000 })
+                .request_policy(RequestPolicy::LatestWins),
+            |_signal| async { fetch_todos().await },
             cx,
         );
         Self { todos, _sub: sub }

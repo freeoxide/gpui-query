@@ -67,12 +67,10 @@ struct DbPersister { /* your handle */ }
 
 impl Persister for DbPersister {
     async fn load(&self) -> Result<PersistSnapshot, PersistError> {
-        // Read from your backend. Missing/corrupt → Ok(PersistSnapshot::new()).
         Ok(PersistSnapshot::new())
     }
 
     async fn save(&self, snapshot: &PersistSnapshot) -> Result<(), PersistError> {
-        // Serialize `snapshot` (it is Serialize) and write it out.
         Ok(())
     }
 }

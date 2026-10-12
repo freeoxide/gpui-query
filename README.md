@@ -75,7 +75,7 @@ fn setup_query(
 ) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
     use_query(
         "users",
-        |signal| async move {
+        |_signal| async move {
             let users = fetch_users().await?;
             Ok::<Vec<User>, MyError>(users)
         },
@@ -308,14 +308,12 @@ Invalidation matching supports `Exact`, `Prefix`, and `All` filters via `QueryKe
 ```rust
 use gpui_query::RetryPolicy;
 
-// Defaults: 3 retries, 1s base delay, exponential backoff, 30s cap
 let policy = RetryPolicy::default();
 
-// Custom
-let policy = RetryPolicy::new(5)          // max retries
-    .with_delay(2_000)                     // 2s base
-    .with_exponential_backoff()            // 2s, 4s, 8s, 16s, 32s
-    .with_max_delay(60_000);               // cap at 60s
+let policy = RetryPolicy::new(5)
+    .with_delay(2_000)
+    .with_exponential_backoff()
+    .with_max_delay(60_000);
 ```
 
 Retry delay is `base * 2^attempt`, capped at `max_delay`. The fetcher's `QuerySignal` is checked between attempts, so cancelled queries stop retrying immediately.

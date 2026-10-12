@@ -248,11 +248,9 @@ fn bootstrap(cx: &mut App) {
         ..PersistOptions::default()
     };
 
-    // 2. Cold start: hydrate primes the live cache from disk. It needs
-    //    &mut QueryClient + &mut App, so drive it on the main thread inside a
-    //    global lease with a blocking executor (pollster::block_on, or a test
-    //    clock), before any view reads the client:
-    //    hydrate(&mut client, &persister, &opts.filter, opts.max_age, cx)
+    // 2. Cold start: hydrate needs &mut QueryClient + &mut App on the main
+    //    thread under a blocking executor (pollster::block_on), before any
+    //    view reads the client.
 
     cx.set_global(ClientGlobal(client));
 
@@ -267,7 +265,7 @@ Then a consuming component fetches as usual; a real fetch completion bumps `Cach
 
 ```rust
 fn render_users(cx: &mut gpui::Context<impl 'static>) {
-    let (entity, _sub) = use_query_with_policy::<Users, QueryError, _, _, _>(
+    let (_entity, _sub) = use_query_with_policy::<Users, QueryError, _, _, _>(
         QueryOptions::new(["users", "all"])
             .cache_policy(CachePolicy::Ttl { ttl_ms: 60_000 })
             .request_policy(RequestPolicy::LatestWins),

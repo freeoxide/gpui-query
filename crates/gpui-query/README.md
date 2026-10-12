@@ -65,7 +65,7 @@ fn setup_query(
 ) -> (Entity<QueryResource<Vec<User>, MyError>>, Subscription) {
     use_query(
         "users",
-        |signal| async move {
+        |_signal| async move {
             let users = fetch_users().await?;
             Ok::<Vec<User>, MyError>(users)
         },
