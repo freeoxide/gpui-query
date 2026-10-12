@@ -40,5 +40,6 @@ bun run deploy       # build + deploy dist/client to Cloudflare Pages
 ## URLs
 
 Canonical URLs have no trailing slash (e.g. `/blog`, `/docs/api/queries`).
-Astro's `build.format: "file"` emits flat `*.html` so Cloudflare Pages
-(`html_handling: "auto-trailing-slash"`) serves them directly without redirects.
+`build.format: "directory"` with `trailingSlash: "ignore"` serves both `/docs`
+and `/docs/` without redirects; the `Head.astro` override normalizes
+canonical/OG URLs.

@@ -63,8 +63,10 @@ impl UserView {
         self._task = Some(task);
     }
 }
-# struct User;
-# async fn fetch_user(_: u64) -> Result<User, std::convert::Infallible> { Ok(User) }
+
+struct User;
+
+async fn fetch_user(_: u64) -> Result<User, std::convert::Infallible> { Ok(User) }
 ```
 
 That is one resource, one view, no cache, no retry, and it already has a latent stale-write bug. Add a second view that needs the same user and you are either refetching or hand-rolling a shared cache.
@@ -74,7 +76,8 @@ That is one resource, one view, no cache, no retry, and it already has a latent 
 ```rust
 use gpui_query::hook::use_query;
 use gpui_query::{QueryOptions, QueryKey, QueryError};
-# struct User;
+
+struct User;
 
 struct UserView {
     user: gpui::Entity<gpui_query::QueryResource<User, QueryError>>,
@@ -91,7 +94,8 @@ impl UserView {
         Self { user, _subscription: subscription }
     }
 }
-# async fn fetch_user(_: u64) -> Result<User, QueryError> { Ok(User) }
+
+async fn fetch_user(_: u64) -> Result<User, QueryError> { Ok(User) }
 ```
 
 What you got for free:

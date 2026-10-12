@@ -94,10 +94,11 @@ If a query hook (`use_query` and its variants) runs before a `QueryClient` is in
 From any context, read the client back to confirm the global is set:
 
 ```rust
-# use gpui_query::client::QueryClient;
-# fn doc(cx: &gpui::App) {
-let _client = cx.global::<QueryClient>();
-# }
+use gpui_query::client::QueryClient;
+
+fn example(cx: &gpui::App) {
+    let _client = cx.global::<QueryClient>();
+}
 ```
 
 That is the entire setup: add the crate, enable `hook`, install a `QueryClient` global. With that in place, the [Quick Start](/docs/getting-started/quick-start) shows your first end-to-end query.

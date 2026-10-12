@@ -67,12 +67,10 @@ struct DbPersister { /* your handle */ }
 
 impl Persister for DbPersister {
     async fn load(&self) -> Result<PersistSnapshot, PersistError> {
-        // Read from your backend. Missing/corrupt → Ok(PersistSnapshot::new()).
         Ok(PersistSnapshot::new())
     }
 
     async fn save(&self, snapshot: &PersistSnapshot) -> Result<(), PersistError> {
-        // Serialize `snapshot` (it is Serialize) and write it out.
         Ok(())
     }
 }
@@ -87,19 +85,18 @@ For tests or a disabled mode, `NoopPersister` persists nothing and loads an empt
 ```rust
 use gpui_query::client::{QueryClient, PersistOptions, PersistFilter};
 
-# fn doc(client: &QueryClient, cx: &mut gpui::App) {
-// Defaults: every key, max age 24h, 500ms debounce.
-let _handle = client.persist_with(DbPersister, PersistOptions::default(), cx);
+fn example(client: &QueryClient, cx: &mut gpui::App) {
+    // Defaults: every key, max age 24h, 500ms debounce.
+    let _handle = client.persist_with(DbPersister, PersistOptions::default(), cx);
 
-// ...or scope and tune it:
-use std::time::Duration;
-let opts = PersistOptions {
-    filter: PersistFilter::Prefix("users".into()), // only the "users" subtree
-    max_age: Duration::from_secs(60 * 60),
-    debounce: Duration::from_millis(250),
-};
-let _handle = client.persist_with(DbPersister, opts, cx);
-# }
+    use std::time::Duration;
+    let opts = PersistOptions {
+        filter: PersistFilter::Prefix("users".into()),
+        max_age: Duration::from_secs(60 * 60),
+        debounce: Duration::from_millis(250),
+    };
+    let _handle = client.persist_with(DbPersister, opts, cx);
+}
 ```
 
 For a one-shot snapshot without the driver, call `client.collect_persist_snapshot(&filter, max_age, cx)` and persist it yourself.
@@ -112,16 +109,16 @@ The free `hydrate` function loads a snapshot and re-primes the live cache throug
 use std::time::Duration;
 use gpui_query::client::{hydrate, PersistFilter};
 
-# async fn doc(client: &mut gpui_query::client::QueryClient, cx: &mut gpui::App) {
-let persister = DbPersister;
-match hydrate(client, &persister, &PersistFilter::All, Duration::from_secs(86_400), cx).await {
-    Ok(snapshot) => {
-        // Entries with a registered deserializer are already primed.
-        // `snapshot` is returned so you can do ad-hoc typed priming for the rest.
+async fn example(client: &mut gpui_query::client::QueryClient, cx: &mut gpui::App) {
+    let persister = DbPersister;
+    match hydrate(client, &persister, &PersistFilter::All, Duration::from_secs(86_400), cx).await {
+        Ok(snapshot) => {
+            // Entries with a registered deserializer are already primed.
+            // `snapshot` is returned so you can do ad-hoc typed priming for the rest.
+        }
+        Err(e) => eprintln!("hydrate failed: {e}"),
     }
-    Err(e) => eprintln!("hydrate failed: {e}"),
 }
-# }
 ```
 
 Entries older than `max_age`, excluded by `filter`, or without a matching deserializer are skipped. A snapshot whose `version` does not match `PERSIST_VERSION` returns `PersistError::VersionMismatch`.
@@ -138,12 +135,11 @@ cargo add gpui-query-persist
 use gpui_query_persist::FilePersister;
 use gpui_query::client::{QueryClient, PersistOptions};
 
-# fn doc(client: &QueryClient, cx: &mut gpui::App) {
-// JSON (human-readable) or Bincode (compact); in_cache_dir roots at the OS cache dir.
-let persister = FilePersister::json("path/to/cache.json");
-// let persister = FilePersister::in_cache_dir("my-app").unwrap();
-let _handle = client.persist_with(persister, PersistOptions::default(), cx);
-# }
+fn example(client: &QueryClient, cx: &mut gpui::App) {
+    // JSON (human-readable) or Bincode (compact); in_cache_dir roots at the OS cache dir.
+    let persister = FilePersister::json("path/to/cache.json");
+    let _handle = client.persist_with(persister, PersistOptions::default(), cx);
+}
 ```
 
 Each save is atomic and durable: it writes a sibling temp file, `fsync`s it (issuing `F_FULLFSYNC` on macOS), renames it over the target, and `fsync`s the parent directory on POSIX, so a crash mid-write never leaves a corrupt cache. Loading is tolerant: a missing file yields an empty snapshot, a corrupt file is logged and treated as empty, and a version mismatch surfaces as a typed `PersistError::VersionMismatch`.

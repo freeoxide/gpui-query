@@ -47,8 +47,8 @@ let custom = RetryPolicy::new(5)
 On a query, set it through `QueryOptions::retry_policy`:
 
 ```rust
+use gpui_query::hook::use_query;
 use gpui_query::{QueryOptions, RetryPolicy};
-# use gpui_query::hook::use_query;
 
 let (_e, _) = use_query(
     QueryOptions::new("flaky-endpoint")
@@ -61,8 +61,8 @@ let (_e, _) = use_query(
 On a mutation, set it through `MutationOptions::retry_policy`:
 
 ```rust
+use gpui_query::hook::use_mutation;
 use gpui_query::{MutationOptions, RetryPolicy};
-# use gpui_query::hook::use_mutation;
 
 let (entity, _sub) = use_mutation(
     MutationOptions::default().retry_policy(RetryPolicy::new(2)),

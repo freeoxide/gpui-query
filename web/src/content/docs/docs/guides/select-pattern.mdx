@@ -42,13 +42,14 @@ The hook wires a `SelectTransform` into the `use_query` lifecycle. It returns a 
 ```rust
 use gpui_query::hook::{use_query_select, QueryOptions};
 use gpui_query::core::SelectTransform;
-# #[derive(Clone, PartialEq)]
-# struct User { name: String }
-# #[derive(Clone, Debug)]
-# struct MyError;
+
+#[derive(Clone, PartialEq)]
+struct User { name: String }
+
+#[derive(Clone, Debug)]
+struct MyError;
 
 struct UserCountView {
-    /// Derived view: just the count.
     count: gpui::Entity<gpui_query::core::MappedQueryResource<Vec<User>, usize, MyError>>,
     _subs: (gpui::Subscription, gpui::Subscription),
 }
@@ -72,9 +73,7 @@ impl UserCountView {
 Reading the derived value applies the transform lazily:
 
 ```rust
-# // (inside a render / event handler that has cx)
-# let count: &gpui::Entity<gpui_query::core::MappedQueryResource<Vec<String>, usize, ()>> = unimplemented!();
-# let cx: &gpui::App = unimplemented!();
+// Inside a render / event handler that has cx:
 let n: Option<usize> = count.read(cx).data();
 ```
 
