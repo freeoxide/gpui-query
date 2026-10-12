@@ -31,7 +31,7 @@ The crate is split into four layers, each behind a feature flag:
 
 | Feature  | Default | Pulls in                                            | What it gives you                                  |
 | -------- | ------- | --------------------------------------------------- | -------------------------------------------------- |
-| `core`   | no      | `serde` only                                        | The transport-agnostic state machine (`QueryResource`, `CachePolicy`, …) with no GPUI dependency. Usable in non-GPUI code or tests. |
+| `core`   | no      | `serde` + `ahash` (no GPUI)                        | The transport-agnostic state machine (`QueryResource`, `CachePolicy`, …) with no GPUI dependency. Usable in non-GPUI code or tests. |
 | `client` | yes     | `core` + `gpui`                                     | The `QueryClient` registry and its type-partitioned buckets. |
 | `hook`   | no      | `client`                                            | The `use_query` / `use_mutation` hooks you call from views. |
 | `persist` | no     | `client` + `hook` + `serde_json` + `thiserror`      | Async persistence: the `Persister` trait, `QueryClient::persist_with`, the free `hydrate` function, and the typed (de)serializer registries. See [Persistence](/docs/guides/persistence). |
@@ -56,11 +56,11 @@ Two standalone crates extend gpui-query without adding dependencies to the core:
 - **`gpui-query-persist`** is a reference disk adapter. `FilePersister` atomically writes a `PersistSnapshot` to disk (JSON or bincode) with a tolerant load. `cargo add gpui-query-persist`. See [Persistence: reference adapter](/docs/guides/persistence#reference-adapter-filepersister).
 - **`gpui-query-http`** turns a server's `Cache-Control` header into a `CachePolicy` ("server wins") and layers an in-memory `HttpCache` over any HTTP backend. `cargo add gpui-query-http`. See [HTTP cache headers](/docs/guides/http-caching).
 
-Both depend on `gpui-query` with a narrow feature set and publish independently.
+`gpui-query-http` depends on `gpui-query` core-only (no GPUI). `gpui-query-persist` enables the full `persist` + `client` + `hook` stack. Both publish independently.
 
 ## Set up the QueryClient
 
-`QueryClient` is a GPUI `Global`. Install it once during app setup. From then on, every hook routes resource creation through it for shared caching, deduplication, and garbage collection.
+`QueryClient` is a GPUI `Global`. Install it once during app setup. From then on, the query hooks (`use_query` and `use_infinite_query`) route resource creation through it for shared caching, deduplication, and garbage collection. `use_mutation` creates a standalone entity and only registers it with the global, so GC still tracks it and `use_mutation_state` can find it.
 
 ```rust
 use gpui_query::client::QueryClient;
@@ -86,7 +86,7 @@ cx.set_global(client);
 ```
 
 :::note
-If a hook runs before a `QueryClient` is installed, it falls back to creating a standalone entity. There is no shared cache, deduplication, or GC. Always install the client during app startup.
+If a query hook (`use_query` and its variants) runs before a `QueryClient` is installed, it panics in debug builds. In release builds it falls back to a standalone entity, with no shared cache, deduplication, or GC. (`use_mutation` and `use_infinite_query` fall back to a standalone entity without panicking.) Always install the client during app startup.
 :::
 
 ## Verify it is reachable

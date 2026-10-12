@@ -4,7 +4,7 @@ title: Observers
 description: "Reactive subscriptions with status deduplication for queries, infinite queries, and mutations"
 ---
 
-Observers bridge gpui-query's resources to GPUI's reactivity. An observer attaches to a resource entity and calls `cx.notify()` to trigger a re-render, but only when the resource's status changes. This is the primitive that keeps `use_query`, `use_infinite_query`, and `use_mutation` from re-rendering your view on every internal state mutation.
+Observers bridge gpui-query's resources to GPUI's reactivity. An observer attaches to a resource entity and calls `cx.notify()` to trigger a re-render, but only when the resource's status or data changes. This is the primitive that keeps `use_query`, `use_infinite_query`, and `use_mutation` from re-rendering your view on every internal state mutation.
 
 ## The Observer type
 
@@ -21,24 +21,30 @@ type InfiniteQueryObserver<T, E>  = Observer<InfiniteQueryResource<T, E>>;  // S
 type MutationObserver<V, T, E>    = Observer<MutationResource<V, T, E>>;    // Status: MutationStatus
 ```
 
-Each resource exposes its status via an inherent `status()` method; the `ObservableResource` trait (pub-crate) surfaces it generically so `Observer<R>` can deduplicate notifications for any resource kind.
+Each resource exposes its status via an inherent `status()` method; the public `ObservableResource` trait surfaces it generically so `Observer<R>` can deduplicate notifications for any resource kind.
 
 ## Status deduplication
 
 Without status deduplication, a raw `cx.observe` would call `cx.notify()` on every entity mutation, including intermediate ones like `increment_retry()` that leave the status at `Loading`. A query retrying three times would re-render the view two or three extra times for nothing.
 
-`Observer` tracks the last status it saw and notifies only on change:
+`Observer` tracks the last status and data epoch it saw and notifies only when either changes:
 
 ```rust
 // (sketch of the dedup logic inside Observer::observe)
 let last_status: Cell<Option<R::Status>> = Cell::new(None);
+let last_epoch: Cell<Option<u64>> = Cell::new(None);
 
 cx.observe(&upgraded, move |_, entity, cx| {
-    let current = entity.read(cx).observable_status();
+    let resource = entity.read(cx);
+    let current_status = resource.observable_status();
+    let current_epoch = resource.data_epoch();
     if notify_on_change {
-        if last_status.get() != Some(current) {
-            last_status.set(Some(current));
-            cx.notify(); // status actually changed
+        let status_changed = last_status.get() != Some(current_status);
+        let data_changed = last_epoch.get() != Some(current_epoch);
+        if status_changed || data_changed {
+            last_status.set(Some(current_status));
+            last_epoch.set(Some(current_epoch));
+            cx.notify(); // status or data actually changed
         }
     } else {
         cx.notify(); // unconditional mode
@@ -46,7 +52,7 @@ cx.observe(&upgraded, move |_, entity, cx| {
 });
 ```
 
-The result: `increment_retry()` / `prepare_retry()` calls (status stays `Loading`) no longer trigger re-renders. Your view re-renders on the transitions that matter: `Idle → LoadingEmpty → Success`, `Success → LoadingWithData → Success`, `Loading → Failure`, and so on.
+The result: `increment_retry()` / `prepare_retry()` calls (status stays `Loading`) no longer trigger re-renders. A same-status data write, such as `set_query_data` refreshing `Success` data, still re-renders: queries and infinite queries track a live data epoch, while `MutationResource` keeps the constant default and stays status-only. Your view re-renders on the transitions that matter: `Idle → LoadingEmpty → Success`, `Success → LoadingWithData → Success`, `Loading → Failure`, and so on.
 
 ## Creating and observing
 
@@ -109,11 +115,11 @@ Use unconditional mode only when you need to react to non-status fields (a custo
 | `use_infinite_query`  | `InfiniteQueryObserver<T, E>` | `QueryStatus` |
 | `use_mutation`        | `MutationObserver<V, T, E>`| `MutationStatus`|
 
-Each hook creates its observer, calls `observe(cx)`, and returns the subscription as the second element of its tuple. The status-dedup is what makes a retrying mutation or a refetching query cheap to render: only terminal status changes reach your view.
+Each hook creates its observer, calls `observe(cx)`, and returns the subscription as the second element of its tuple. The status-dedup is what makes a retrying mutation or a refetching query cheap to render: retry churn never reaches your view.
 
 ## ObservableResource
 
-`ObservableResource` is the pub(crate) trait that lets `Observer<R>` read a status generically. It is not part of the public API, but it is why the three resource kinds share one observer implementation: each resource exposes `status()` with its own associated `Status` type, and `Observer` deduplicates on that. If you write your own resource type that should be observable, it will need the same `status()` method shape, but for application code, the three built-in observers cover every resource the hooks produce.
+`ObservableResource` is the public trait that lets `Observer<R>` read a status generically. It is re-exported at `gpui_query::client::ObservableResource` and the crate root. It is why the three resource kinds share one observer implementation: each resource exposes `status()` with its own associated `Status` type, and `Observer` deduplicates on that. Implementing it requires `observable_status()`; `data_epoch()` defaults to `0`, and a custom resource should override it when same-status data writes should still re-render. For application code, the three built-in observers cover every resource the hooks produce.
 
 ## Next steps
 

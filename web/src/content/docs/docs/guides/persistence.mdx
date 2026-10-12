@@ -22,15 +22,15 @@ The cache stores type-erased buckets, so persistence has to move typed data (`Ve
 | ----- | ---- |
 | `Persister` | Async trait **you implement**: `load() -> Result<PersistSnapshot, PersistError>` and `save(&PersistSnapshot) -> Result<(), PersistError>`. |
 | `PersistSnapshot` / `PersistedEntry` | The on-wire shape: a map of key → `{ value (JSON), cached_at, cache_policy, meta }`. |
-| `QueryClient::persist_with` | A debounced driver that collects a snapshot on every cache mutation and hands it to the persister. Returns a `PersistHandle` drop-guard. |
+| `QueryClient::persist_with` | A debounced driver that reacts to cache mutations, collecting one snapshot per debounce window (bursts coalesce into a single save of the latest state) and handing it to the persister. Returns a `PersistHandle` drop-guard. |
 | `hydrate` (free fn) | Cold-start restore: load a snapshot and re-prime the live cache. |
-| `SerializerRegistry` / `DeserializerRegistry` | Typed `T -> JSON` and `JSON -> T` conversions, registered per `T`. Required for the value-carrying round-trip. |
+| `SerializerRegistry` / `DeserializerRegistry` | Typed `T -> JSON` and `JSON -> T` conversions; serializers keyed by `T`, deserializers are unkeyed steps that `hydrate` tries in registration order. Required for the value-carrying round-trip. |
 | `PersistOptions` / `PersistFilter` | Tuning: which keys (`Exact` / `Prefix` / `All`), max age, debounce. |
 | `PersistError` / `PERSIST_VERSION` | Typed errors; the snapshot format version loaders check. |
 
 ## Register the typed (de)serializers
 
-Only resources whose data type `T` has a registered serializer are emitted, and only types with a registered deserializer come back on `hydrate`. Register both, keyed by the concrete `T` and the `E` you read it under:
+Only resources whose data type `T` has a registered serializer are emitted, and only types with a registered deserializer come back on `hydrate`. Register both. Serializers are keyed by the concrete `T` alone: registering the same `T` under two error types overwrites the first, and the surviving closure applies to every `(T, E)` bucket. Deserializers are not keyed at all; each registration appends a step, and `hydrate` offers every on-disk entry to every step in registration order. The `E` in `register_deserializer` only picks the bucket that gets primed on success:
 
 ```rust
 use gpui_query::client::QueryClient;

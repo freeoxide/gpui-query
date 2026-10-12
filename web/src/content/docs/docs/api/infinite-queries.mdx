@@ -97,11 +97,11 @@ fn on_scroll_to_top(&mut self, cx: &mut Context<Self>) {
 }
 ```
 
-This is useful for chat interfaces or timelines that grow in both directions. Set `FetchDirection::Bidirectional` on the resource so `has_previous_page` defaults correctly.
+This is useful for chat interfaces or timelines that grow in both directions. `has_previous_page` starts `false` in both directions, so setting `FetchDirection::Bidirectional` does not by itself enable backward fetching. Call `set_has_previous_page(true)` or complete a fetch whose result has `has_more = true` before `fetch_previous_page_infinite` will fetch. `Bidirectional` only changes what `reset()` restores the flags to.
 
 ## InfiniteQueryResource\<T, E\>
 
-The core state container. It holds pages in a `VecDeque<T>` and tracks fetch status, error state, and direction flags.
+The core state container. It holds pages in a `VecDeque<Arc<T>>` and tracks fetch status, error state, and direction flags.
 
 ### Construction
 
@@ -127,7 +127,7 @@ Use `new_bidirectional` when you need to prepend pages. The default constructor 
 
 | Method | Returns | Notes |
 |--------|---------|-------|
-| `pages()` | `&VecDeque<T>` | All loaded pages, first to last |
+| `pages()` | `&VecDeque<Arc<T>>` | All loaded pages, first to last |
 | `page_count()` | `usize` | Number of loaded pages |
 | `first_page()` | `Option<&T>` | First loaded page |
 | `last_page()` | `Option<&T>` | Last loaded page |
@@ -136,7 +136,9 @@ Use `new_bidirectional` when you need to prepend pages. The default constructor 
 | `has_data()` | `bool` | True when at least one page is loaded |
 | `is_page_data_valid()` | `bool` | True when loaded pages are safe to use |
 
-`is_page_data_valid()` returns `true` on `Success`, on `LoadingWithData` (previous pages still valid while fetching more), and on `Failure` if pages were already loaded. A page fetch failure does not wipe existing pages. It returns `false` on `Idle` and `Cancelled`.
+`is_page_data_valid()` returns `true` on `Success`, on `LoadingWithData` (previous pages still valid while fetching more), and on `Failure` if pages were already loaded. A page fetch failure does not wipe existing pages. It returns `false` on `LoadingEmpty`, `Idle`, and `Cancelled`.
+
+Each page is stored as one `Arc<T>`, so `first_page_arc()` and `last_page_arc()` hand you a page with a refcount bump instead of a copy.
 
 ### Fetch state
 
@@ -150,9 +152,9 @@ Use `new_bidirectional` when you need to prepend pages. The default constructor 
 
 ### Lifecycle methods
 
-**begin_fetch_next()** and **begin_fetch_previous()** start a page fetch. They return `Option<RequestId>` (or `None` if the direction flag is `false` or a fetch is already in flight under `IgnoreWhileLoading`). Under `LatestWins`, an existing fetch is cancelled and replaced.
+**begin_fetch_next()** and **begin_fetch_previous()** start a page fetch. They return `Option<RequestId>` (or `None` if the requested direction's flag is `false` or a fetch in the same direction is already in flight under `IgnoreWhileLoading`). An in-flight fetch in the opposite direction is cancelled and replaced under both policies. Under `LatestWins`, an existing fetch is cancelled and replaced.
 
-The `_with_id` variants accept a pre-allocated `RequestId` from the `QueryClient` bucket's sequencer to maintain monotonic IDs across the resource's lifetime. The `_auto` variants use an internal sequencer stored on the resource.
+The `_with_id` variants accept a pre-allocated `RequestId` from the `QueryClient` bucket's sequencer to maintain monotonic IDs across the resource's lifetime. Passing `None` to a `_with_id` variant falls back to an internal sequencer stored on the resource (`transient_sequencer`), so a bare `begin_fetch_next_with_id(None, now_ms)` mints its own ID.
 
 **complete_page_success(request_id, page, has_more, is_next, now_ms)** finishes a successful fetch. If the request ID matches the active request, the page is appended (next) or prepended (previous). Returns `true` if accepted, `false` if stale (the request was replaced). Passing `is_next = true` appends; `is_next = false` prepends.
 
@@ -160,12 +162,12 @@ The `_with_id` variants accept a pre-allocated `RequestId` from the `QueryClient
 
 ```rust
 let mut seq = RequestSequencer::new();
-let id = resource.begin_fetch_next(&mut seq, now_ms);
-
-// Later, when the async fetch completes:
-let accepted = resource.complete_page_success(id, page_data, true, true, now_ms);
-if !accepted {
-    // Request was replaced by a newer one. Discard this result.
+if let Some(id) = resource.begin_fetch_next(&mut seq, now_ms) {
+    // Later, when the async fetch completes:
+    let accepted = resource.complete_page_success(id, page_data, true, true, now_ms);
+    if !accepted {
+        // Request was replaced by a newer one. Discard this result.
+    }
 }
 ```
 
@@ -179,9 +181,9 @@ let guard = resource.accept_current_request(request_id);
 
 if let Some(guard) = guard {
     // Phase 2: Use the guard to complete
-    resource.complete_success_with_guard(&guard, page_data, has_more, is_next, now_ms);
+    resource.complete_success_with_guard(guard, page_data, has_more, is_next, now_ms);
     // Or on failure:
-    // resource.complete_failure_with_guard(&guard, error);
+    // resource.complete_failure_with_guard(guard, error);
 }
 ```
 
@@ -189,7 +191,7 @@ The guard proves the request was still current at acceptance time. This is the s
 
 ### Page management
 
-**append_page(page)** adds a page to the end. **prepend_page(page)** adds to the front. Both return `Vec<T>` of evicted pages when `max_pages` is exceeded.
+**append_page(page)** adds a page to the end. **prepend_page(page)** adds to the front. Both return `Vec<Arc<T>>` of evicted pages when `max_pages` is exceeded.
 
 **set_max_pages(max)** changes the cap. Returns evicted pages immediately if the current count exceeds the new limit. A value of `Some(0)` is treated as unbounded (`None`) to prevent accidentally draining all pages.
 
@@ -199,7 +201,7 @@ The guard proves the request was still current at acceptance time. This is the s
 
 **reset()** clears all pages, errors, and fetch state. The resource returns to `Idle`. The `max_pages` setting is preserved. The `has_next_page` flag resets according to `FetchDirection`: `true` for `ForwardOnly`, `false` for `Bidirectional`.
 
-**invalidate()** clears the `last_updated_at` timestamp without touching pages. The data stays in memory but is considered stale, so the next access triggers a refetch.
+**invalidate()** clears the `last_updated_at` timestamp without touching pages. `cache_age_ms()` returns `None` afterwards. No infinite-query code path reads that timestamp to gate or trigger fetching, unlike `QueryResource`'s freshness checks: `begin_fetch` never consults the cache policy. New pages load only when `use_infinite_query` mounts a resource still in `Idle`, or when you explicitly call `fetch_next_page_infinite`/`fetch_previous_page_infinite`.
 
 ## FetchDirection
 
@@ -225,8 +227,7 @@ let opts = InfiniteQueryOptions::new(QueryKey::from(["feed"]))
     .max_pages(10)
     .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
     .request_policy(RequestPolicy::LatestWins)
-    .retry_policy(RetryPolicy::new(3))
-    .gc_time(600_000);
+    .retry_policy(RetryPolicy::new(3));
 ```
 
 | Field | Default | Description |
@@ -236,7 +237,7 @@ let opts = InfiniteQueryOptions::new(QueryKey::from(["feed"]))
 | `cache_policy` | `CachePolicy::default()` | TTL, stale-while-revalidate, or no cache |
 | `request_policy` | `RequestPolicy::default()` | `LatestWins` or `IgnoreWhileLoading` |
 | `retry_policy` | `RetryPolicy::default()` | 3 retries with exponential backoff |
-| `gc_time_ms` | `300_000` | Garbage collection time in milliseconds |
+| `gc_time_ms` | `300_000` | Reserved: the hook never reads it. GC runs off the client-wide `QueryClient::with_gc_time` |
 
 ### max_pages vs unbounded_pages
 

@@ -4,17 +4,16 @@ title: Migrating from v1 to v2
 description: "The breaking and behavioral changes from gpui-query v1 to the options-first v2 API"
 ---
 
-gpui-query v2 (the `0.2.x` line) is an options-first redesign. The hooks keep the same names, but the call signatures, return types, and a number of internal behaviors changed. This page is a checklist for porting a v1 codebase to v2, grouped by what breaks.
+gpui-query v2 (the main crate since `0.1.1`, when the rewrite replaced the v1 API now frozen in `gpui-query-legacy`) is an options-first redesign. The hooks keep the same names, but the call signatures, return types, and a number of internal behaviors changed. This page is a checklist for porting a v1 codebase to v2, grouped by what breaks. The current release is `0.3.0`, and its changelog entry lists only fixes and additive changes, so every step here applies to `0.3.x` unchanged.
 
 ## Summary of what changed
 
 | Area                  | v1                                          | v2                                                   |
 | --------------------- | ------------------------------------------- | --------------------------------------------------- |
 | Primary call style    | Positional args (key, cache, request, fetcher) | Options-first (`QueryOptions::new(key)`, fetcher)   |
-| Hook return type      | `Entity` only                               | `(Entity, Subscription)` tuple                       |
+| `use_mutation` return | `Entity` only                               | `(Entity, Subscription)` tuple                       |
 | Fetcher signal        | Optional                                    | Always receives a `QuerySignal`                      |
 | Error interop         | `QueryError` without `Error` impl            | `QueryError: Display + Error` (`?` and `anyhow`)     |
-| Mutation retries      | Could retry by default                       | Default to **no retries**                            |
 | Infinite `max_pages`  | Unbounded                                    | Defaults to `Some(50)`                               |
 | Mutation GC           | Effectively a no-op                          | Real GC, respects `gc_time_ms`                       |
 | Status dedup          | Re-rendered on every mutation                | `QueryObserver` deduplicates by status               |
@@ -57,7 +56,7 @@ struct MyView {
 }
 ```
 
-This applies to `use_query`, `use_infinite_query`, and `use_mutation`. `use_query_select` returns a triple including a second subscription for the mapped observer; store both.
+The change is `use_mutation`, which returned a bare `Entity` in v1. `use_query` already returned `(Entity, Subscription)`, and `use_infinite_query` returned a triple ending in the `Subscription`; v2 returns the pair and moves the refetch closure out to `fetch_next_page_infinite`. `use_query_select` returns a triple including a second subscription for the mapped observer; store both.
 
 ## 3. Adopt the signal-always fetcher
 
@@ -65,9 +64,9 @@ v2 fetchers always receive a `QuerySignal`. If you have long-running fetches, ch
 
 If you cannot change the fetcher signature, `use_query_unsignalled` keeps the `Fn() -> Fut` (no-signal) shape for backward compatibility. It is not the recommended default.
 
-## 4. Review mutation retry defaults
+## 4. Mutation retry defaults did not change
 
-v1 mutations could retry by default. v2 mutations default to **`RetryPolicy::no_retries()`** because silently retrying a destructive action is dangerous. If your mutation is idempotent and you relied on retries, opt back in explicitly:
+Mutations default to `RetryPolicy::no_retries()` in both v1 and v2, because silently retrying a destructive action is dangerous. What changed in v2 is the call shape: `use_mutation` now takes options first, and `use_mutation((), cx)` keeps the same no-retries, 5-minute GC defaults (see section 5). If your mutation is idempotent and you want retries, opt in explicitly:
 
 ```rust
 use gpui_query::{MutationOptions, RetryPolicy};
@@ -121,19 +120,19 @@ And use `QueryError::sanitized()` at the boundary where you convert server respo
 
 ## 8. Trust status deduplication
 
-v1 re-rendered views on every internal mutation (including retry ticks). v2's `QueryObserver` / `MutationObserver` deduplicates by status, so a retrying query no longer re-renders your view on every attempt, only on terminal status changes. You can remove manual "did the status actually change?" guards from your render logic.
+v1 re-rendered views on every internal mutation (including retry ticks). v2's `QueryObserver` / `MutationObserver` deduplicates by status, so a retrying query no longer re-renders your view on every attempt; since 0.3.0 the query observers also re-render on data-only writes to an already-`Success` entry (`set_query_data`, `hydrate`, prefetch completion), so optimistic updates reach the view while retry ticks stay silent. `MutationObserver` still dedupes by status alone. You can remove manual "did the status actually change?" guards from your render logic.
 
 ## What did not change
 
 - `QueryKey` and the hierarchical key model are unchanged.
-- `QueryKeyFilter` (`Exact` / `Prefix` / `All`) and the bulk operations on `QueryClient` are unchanged.
-- `CachePolicy`, `RequestPolicy`, and their semantics are unchanged.
-- The `QueryClient` as a GPUI `Global`, set via `cx.set_global(QueryClient::new())`, is unchanged.
+- `QueryKeyFilter` (`Exact` / `Prefix` / `All`) is unchanged, but `remove_queries` dropped its `cx` argument: call it as `client.remove_queries(&filter)`. `invalidate_queries` and `reset_queries` keep their v1 `(filter, cx)` signatures, and `cancel_queries` is new in v2.
+- `RequestPolicy` and its semantics are unchanged. `CachePolicy` is not: `StaleWhileRevalidate` gained a `stale_ms` field (v1 had only `ttl_ms`), so v1 constructions of that variant must add it, and v2 serves fresh data within `ttl_ms`, then stale data with a background revalidation until `ttl_ms + stale_ms`. v1 SWR never short-circuited; every fetch ran.
+- The `QueryClient` is still a GPUI `Global`, but the constructor changed: v1's `QueryClient::new(cache_policy, request_policy)` becomes `QueryClient::new()` in v2, so the setup line reads `cx.set_global(QueryClient::new())`. Pass custom defaults via `QueryClient::with_policies(cache_policy, request_policy)`.
 - Cancellation is still cooperative via `QuerySignal`; only the staleness guard is stricter (no more TOCTOU window).
 
 ## The source of truth
 
-If a v1 pattern is not covered here, the source of truth is the crate's own doc comments: every module lists its v2 changes at the top. Run `cargo doc -p gpui-query --open` for the item-level reference.
+If a v1 pattern is not covered here, the source of truth is the "gpui-query-v2 (Experimental Rewrite)" subsection of `[0.1.0]` and the `[0.1.1]` entry in the repository's `CHANGELOG.md`, where the v2 redesign is itemized and the rewrite became the main crate; module doc comments no longer carry v2 change lists. Run `cargo doc -p gpui-query --open` for the item-level reference.
 
 ## Next steps
 

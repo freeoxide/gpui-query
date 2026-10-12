@@ -22,7 +22,7 @@ The four variants of `QueryErrorKind` are:
 
 - `Response` for server-side errors (HTTP 4xx/5xx, application-level rejections)
 - `Transport` for network failures, timeouts, DNS errors
-- `Cancelled` for cooperative cancellation (the query was invalidated before it finished)
+- `Cancelled` for cooperative cancellation (a superseding request under `LatestWins`, a reset, or `cancel_queries`)
 - `Unknown` for anything that does not fit the above
 
 Each variant has a constructor helper so you do not spell out the kind explicitly:
@@ -79,23 +79,23 @@ assert_eq!(
 
 It handles these patterns:
 
-- Database connection strings: `postgres://...`, `mysql://...`, `mongodb://...`, `redis://...`
+- Connection strings: `postgres://...`, `postgresql://...`, `mysql://...`, `mysql2://...`, `mongodb://...`, `mongodb+srv://...`, `redis://...`, `rediss://...`, `amqp://...`, `mssql://...`
 - Bearer tokens and token assignments: `Bearer ...`, `token=...`
-- File paths: `/home/...`, `/Users/...`, `/etc/...`, `/var/...`
+- File paths: `/home/...`, `/users/...`, `/etc/...`, `/var/...`, plus the same segments with Windows backslashes (`\home\...`, `\users\...`, `\etc\...`, `\var\...`)
 - Email addresses
 - Long hex sequences (16+ hex chars, likely API keys or secrets)
 
-Messages longer than 512 characters get truncated with `...[truncated]` appended. The kind is preserved, only the message changes.
+Messages longer than 512 bytes get truncated at the nearest preceding char boundary, with `...[truncated]` appended. The kind is preserved, only the message changes.
 
 ```rust
-let err = QueryError::unknown(&"x".repeat(600));
+let err = QueryError::unknown(&*"x".repeat(600));
 let clean = err.sanitized();
 
 assert!(clean.message().ends_with("...[truncated]"));
 assert_eq!(clean.kind(), QueryErrorKind::Unknown);
 ```
 
-The sanitization runs a scan without depending on the `regex` crate.
+The sanitization runs a scan without depending on the `regex` crate. The connection and path needles match ASCII case-insensitively, so `/Users/...` redacts too.
 
 ## Reading errors from QueryResource
 
@@ -133,31 +133,17 @@ entity.read_with(cx, |resource| {
 [QueryStatus](/docs/api/queries) has three states relevant to errors:
 
 - `Failure` means the query completed with an error. `error()` will return `Some`.
-- `LoadingWithData` means a fetch is in progress, but a previous fetch failed. The stale data from before the error is still available via `data()`. This is the "show old data while retrying" scenario.
-- `Cancelled` means the request was cooperatively cancelled, typically because a new query with the same key superseded it.
+- `LoadingWithData` means a fetch is in progress while data from an earlier fetch is still available via `data()`. Any fetch that starts with existing data enters this state, typically a refetch or a background revalidation, and the previous error is cleared at that moment, so no prior failure is implied. This is the "show old data while refetching" scenario.
+- `Cancelled` means an explicit `cancel()` was called on the resource with an error attached. A new query with the same key superseding the current one does not produce this state: the resource moves straight into the new request's loading state and the superseded fetch's result is dropped.
 
 When a refetch fails, gpui-query keeps the last successful data around. You can show it to the user while also surfacing the error:
 
 ```rust
 entity.read_with(cx, |resource| {
-    if resource.is_loading() && resource.has_data() {
-        // A refetch failed, but we still have previous data
+    if resource.error().is_some() && resource.has_data() {
+        // The refetch failed, but the previous data is still there
         show_stale_data_warning();
         render_from(resource.data().unwrap());
-    }
-});
-```
-
-The `display_data()` method handles this pattern directly. It returns `data()` if present, falling back to `placeholder_data()`. Use it for rendering and your UI stays populated even during error states:
-
-```rust
-entity.read_with(cx, |resource| {
-    if let Some(data) = resource.display_data() {
-        render_list(data);
-    }
-
-    if let Some(err) = resource.error() {
-        show_inline_error(err.sanitized().message());
     }
 });
 ```
@@ -190,9 +176,7 @@ log::error!("query failed: {}", err.sanitized());
 log::error!("query failed: {}", err);
 ```
 
-**Check `has_data()` alongside `error()`.** A resource can have both data and an error at the same time (the `LoadingWithData` state). If you only check `error()`, you might hide good data that is still valid to show.
-
-**Use `display_data()` for rendering.** It returns data if available, falling back to placeholder data. This keeps your UI populated during transient failures. You can layer an error indicator on top.
+**Check `has_data()` alongside `error()`.** A resource can have both data and an error at the same time (the `Failure` state, which keeps the previous data; `LoadingWithData` always has its error cleared on entry). If you only check `error()`, you might hide good data that is still valid to show.
 
 **Match on `QueryErrorKind` to decide what to show.** Transport errors warrant a different UI response than server errors. Cancelled errors usually do not need to be shown at all.
 

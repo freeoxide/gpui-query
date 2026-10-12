@@ -4,7 +4,7 @@ title: Devtools
 description: "Inspect live query and mutation state in gpui-query: ClientDiagnostic snapshots and patterns for building a debug panel."
 ---
 
-gpui-query exposes runtime diagnostics through the [QueryClient](/docs/api/query-client). You get a serializable snapshot of every active query and mutation, which you can log, render in a debug panel, or serialize to JSON for later analysis.
+gpui-query exposes runtime diagnostics through the [QueryClient](/docs/api/query-client). You get a point-in-time snapshot of every active query and mutation, which you can log or render in a debug panel.
 
 ## ClientDiagnostic
 
@@ -12,19 +12,19 @@ Calling `client.diagnostics(cx)` returns a `ClientDiagnostic` struct. It is a po
 
 ```rust
 pub struct ClientDiagnostic {
-    pub total_resources: usize,
-    pub bucket_count: usize,
+    pub query_count: usize,
     pub mutation_count: usize,
     pub queries: Vec<QueryDiagnostic>,
+    pub mutations: Vec<MutationDiagnostic>,
 }
 ```
 
-- **total_resources**: number of active query resources across all type buckets.
-- **bucket_count**: number of type-partitioned buckets. Each unique `(T, E)` pair gets its own bucket.
-- **mutation_count**: number of active mutation resources.
+- **query_count**: number of query cache entries across all type buckets. An upper bound on `queries.len()`: entries whose entities were collected linger in the maps until the next GC sweep.
+- **mutation_count**: number of mutation cache entries, an upper bound on `mutations.len()` for the same reason.
 - **queries**: per-query diagnostics, one entry per resource.
+- **mutations**: per-mutation diagnostics (`MutationDiagnostic`: optional key, status, retry count), one entry per resource.
 
-The struct derives `Clone`, `Debug`, and `Serialize`. You can serialize it to JSON and ship it to a log aggregator or render it in a GPUI debug panel.
+The struct derives `Clone`, `Debug`, and `Default`. You can render it in a GPUI debug panel or log it with `Debug` formatting.
 
 ## QueryDiagnostic
 
@@ -33,16 +33,11 @@ Each entry in `queries` is a `QueryDiagnostic`:
 ```rust
 pub struct QueryDiagnostic {
     pub key: String,
-    pub status: String,
-    pub has_data: bool,
-    pub has_error: bool,
+    pub status: QueryStatus,
     pub cache_policy: String,
-    pub request_policy: String,
+    pub cache_age_ms: Option<u64>,
     pub cache_hits: u64,
-    pub cancelled_count: u64,
-    pub ignored_results: u64,
-    pub last_updated_at_ms: Option<u128>,
-    pub started_at_ms: Option<u128>,
+    pub retry_count: u32,
 }
 ```
 
@@ -51,16 +46,11 @@ The fields:
 | Field | What it tells you |
 |---|---|
 | `key` | The stringified [QueryKey](/docs/api/queries) for this resource. |
-| `status` | Human-readable label from `QueryStatus`: `"Idle"`, `"Loading empty"`, `"Loading with data"`, `"Success"`, `"Failure"`, or `"Cancelled"`. |
-| `has_data` | Whether the resource currently holds cached data. |
-| `has_error` | Whether the resource currently holds an error. |
-| `cache_policy` | Label from the configured `CachePolicy`: `"No cache"`, `"Cache TTL 60s"`, or `"Stale-while-revalidate 60s"`. |
-| `request_policy` | Label from the configured `RequestPolicy`: `"Latest wins"` or `"Ignore while loading"`. |
+| `status` | The `QueryStatus` enum value: `Idle`, `LoadingEmpty`, `LoadingWithData`, `Success`, `Failure`, or `Cancelled`. Call `q.status.label()` for the human-readable string. |
+| `cache_policy` | Label from the configured `CachePolicy`: `"No cache"`, `"Cache TTL 60s"`, or `"Stale-while-revalidate TTL 60s stale 60s"`. |
+| `cache_age_ms` | Age in milliseconds of the last completed request, success or failure. `None` when no completed request is on record: never fetched, seeded via `set_query_data`, or invalidated. That does not mean the resource holds no data. |
 | `cache_hits` | How many times this resource returned cached data instead of fetching. |
-| `cancelled_count` | How many in-flight requests were cancelled (for example, by a `LatestWins` policy replacing them). |
-| `ignored_results` | How many stale or out-of-order responses were discarded. |
-| `last_updated_at_ms` | UNIX timestamp in milliseconds of the last successful data update, if any. |
-| `started_at_ms` | UNIX timestamp in milliseconds of the current or most recent request start, if any. |
+| `retry_count` | How many retries the current or most recent fetch has attempted. |
 
 ## Basic usage
 
@@ -68,46 +58,45 @@ The fields:
 let client = cx.global::<QueryClient>();
 let diag = client.diagnostics(cx);
 
-println!("Active queries: {}", diag.total_resources);
-println!("Buckets: {}", diag.bucket_count);
+println!("Active queries: {}", diag.query_count);
 println!("Mutations: {}", diag.mutation_count);
 
 for q in &diag.queries {
     println!(
-        "  {} - {} (data: {}, error: {}, hits: {})",
-        q.key, q.status, q.has_data, q.has_error, q.cache_hits
+        "  {} - {} (age: {:?}, hits: {}, retries: {})",
+        q.key, q.status.label(), q.cache_age_ms, q.cache_hits, q.retry_count
     );
 }
 ```
 
-## Filtering by type
+## Filtering
 
-If you only care about one type, use `query_diagnostics::<T, E>()`. It returns diagnostics for a single `(T, E)` bucket, or an empty vec if no bucket exists for that type pair.
+`client.diagnostics(cx)` returns a single snapshot covering every type bucket. There is no per-type accessor, so filter client-side over `diag.queries` (or `diag.mutations`) by key prefix:
 
 ```rust
-let user_diags = client.query_diagnostics::<User, QueryError>(cx);
+let diag = client.diagnostics(cx);
+let user_diags: Vec<_> = diag
+    .queries
+    .iter()
+    .filter(|q| q.key.starts_with("users"))
+    .collect();
+
 for q in &user_diags {
-    println!("user query: {} - {}", q.key, q.status);
+    println!("user query: {} - {}", q.key, q.status.label());
 }
 ```
 
-This avoids iterating over unrelated type buckets when you are debugging a specific domain type.
+Diagnostics are type-erased (`key` is a plain string), so a key prefix is the closest thing to per-type scoping when you are debugging a specific domain type.
 
 ## Practical debugging patterns
 
 ### Check whether your TTL is right
 
-Use `last_updated_at_ms` to figure out how old cached data is. Compare it to the current time. If data is consistently stale, your `CachePolicy::Ttl { ttl_ms }` might be too long. If `cache_hits` is zero across the board, your TTL might be too short and every read triggers a refetch.
+Use `cache_age_ms` to figure out how old cached data is. It is already an age in milliseconds, so there is no clock to read. If data is consistently stale, your `CachePolicy::Ttl { ttl_ms }` might be too long. If `cache_hits` is zero across the board, your TTL might be too short and every read triggers a refetch.
 
 ```rust
-let now = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap()
-    .as_millis();
-
 for q in &diag.queries {
-    if let Some(updated) = q.last_updated_at_ms {
-        let age_ms = now - updated;
+    if let Some(age_ms) = q.cache_age_ms {
         println!("{} is {}ms old", q.key, age_ms);
     }
 }
@@ -118,8 +107,10 @@ for q in &diag.queries {
 A high `cache_hits` count means the cache is doing its job. A count of zero on a resource that should be shared means you might be creating duplicate resources with slightly different keys. Check that your key construction is consistent.
 
 ```rust
+use gpui_query::QueryStatus;
+
 for q in &diag.queries {
-    if q.cache_hits == 0 && q.status == "Success" {
+    if q.cache_hits == 0 && q.status == QueryStatus::Success {
         println!("warning: {} has data but zero cache hits", q.key);
     }
 }
@@ -127,38 +118,34 @@ for q in &diag.queries {
 
 ### Spot flaky endpoints
 
-Look at `cancelled_count` and `ignored_results`. A high cancelled count on a resource suggests rapid successive fetches are replacing each other (normal under `RequestPolicy::LatestWins`, but worth investigating if unexpected). High ignored results mean responses are arriving out of order relative to newer requests.
+Look at `retry_count`. A count at or near your `RetryPolicy` cap (3 retries by default) means the fetch keeps failing and the policy keeps re-attempting it, which points at a flaky or down endpoint.
 
 ```rust
 for q in &diag.queries {
-    if q.cancelled_count > 5 {
-        println!("{}: {} cancelled requests", q.key, q.cancelled_count);
+    if q.retry_count > 2 {
+        println!("{}: {} retries", q.key, q.retry_count);
     }
 }
 ```
 
 ### Verify invalidation hit the right keys
 
-After calling `invalidate_queries` on the [QueryClient](/docs/api/query-client), run diagnostics again to confirm the target resources moved to the expected status. If a key is still `"Success"` with stale data, your invalidation filter did not match it.
+After calling `invalidate_queries` on the [QueryClient](/docs/api/query-client), run diagnostics again to see which keys the filter matched. Invalidation never changes status and never drops data, so a matched resource still reads `Success`. The signal is `cache_age_ms`: a matched key now reports `None`, because invalidation clears the last-updated timestamp that the age is computed from.
 
 ```rust
 client.invalidate_queries(&filter, cx);
 
 let diag = client.diagnostics(cx);
 for q in &diag.queries {
-    println!("{} - {}", q.key, q.status);
+    if q.cache_age_ms.is_none() {
+        println!("{} was invalidated", q.key);
+    }
 }
 ```
 
 ## Serialization
 
-Because `ClientDiagnostic` and `QueryDiagnostic` both derive `Serialize`, you can dump the full client state to JSON in one call. This is useful for logging, snapshot tests, or building a debug panel that communicates over IPC.
-
-```rust
-let json = serde_json::to_string_pretty(&client.diagnostics(cx))
-    .expect("diagnostics are serializable");
-println!("{}", json);
-```
+`QueryDiagnostic` derives only `Clone` and `Debug`, and `ClientDiagnostic` adds `Default`; neither implements `Serialize`. If you need JSON for a log aggregator, snapshot tests, or a debug panel that communicates over IPC, map the snapshot into your own serde types first: the snapshot itself exposes `key` and `cache_policy` as plain strings. The crate types behind it, `QueryStatus` and `MutationStatus` (the enums the diagnostics actually carry) plus the related `CachePolicy`, `RequestPolicy`, `QueryKey`, and `QueryError`, all implement `Serialize`/`Deserialize`.
 
 :::tip
 If you are building a devtools panel in GPUI, consider polling `diagnostics()` on a timer. The cost is low: it reads entity state without cloning the actual cached data.

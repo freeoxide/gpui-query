@@ -65,7 +65,7 @@ Adopt a convention where each segment narrows the scope: `["resource", "id", "vi
 
 ## Using keys with hooks
 
-The options-first hooks accept anything that converts `Into<QueryKey>`, so you can pass a bare string for the simple case or a structured key for a scoped resource:
+The options-first query hooks (`use_query`, `use_query_with_policy`, `use_query_select`, `use_query_manual_opts`, `use_query_unsignalled_opts`) take `impl Into<QueryOptions>`, so you can pass a bare string for the simple case or a structured key for a scoped resource. `use_infinite_query` is the exception: it takes `InfiniteQueryOptions` by value, so build one with `InfiniteQueryOptions::new(QueryKey::from([...]))` rather than passing a key directly. `&str`, `String`, `QueryKey`, `QueryOptions`, and `(QueryKey, CachePolicy, RequestPolicy)` tuples all convert; array and `Vec` keys convert only into `QueryKey`, so pass them as `QueryKey::from(...)` or build them through `QueryOptions::new(...)`:
 
 ```rust
 use gpui_query::hook::use_query;
@@ -134,8 +134,8 @@ client.remove_queries(&QueryKeyFilter::All);
 
 ### Choosing a filter
 
-- **`Exact`** when you know the full key (for example, after a mutation that updates a single record). `invalidate_queries(Exact(&["users", "42"]))` refetches only that user.
-- **`Prefix`** when a mutation affects a family of resources. For example, after creating a user, `invalidate_queries(Prefix(&["users"]))` refetches the users list and every cached user.
+- **`Exact`** when you know the full key (for example, after a mutation that updates a single record). `invalidate_queries(Exact(&["users", "42"]))` marks only that user stale; it refetches on its next access.
+- **`Prefix`** when a mutation affects a family of resources. For example, after creating a user, `invalidate_queries(Prefix(&["users"]))` marks the users list and every cached user stale; each refetches on its next access, since invalidation itself starts no request.
 - **`All`** for global resets, most commonly on logout: `remove_queries(All)` clears the cache, and `reset_queries(All)` clears data and cancels in-flight requests.
 
 ## Patterns
@@ -149,7 +149,7 @@ let list  = QueryKey::from(["users"]);             // the list
 let detail= QueryKey::from(["users", id.as_str()]); // one user
 ```
 
-After an update mutation, `invalidate_queries(Prefix(&["users"]))` refreshes the list and any cached detail pages in one call.
+After an update mutation, `invalidate_queries(Prefix(&["users"]))` marks the list and any cached detail pages stale in one call; the next access to each refetches.
 
 ### Dynamic segments
 

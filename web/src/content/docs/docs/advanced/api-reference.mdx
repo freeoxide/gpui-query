@@ -18,7 +18,7 @@ use gpui_query::{
 
 ## core: Serde-only state machine
 
-The `core` layer has no GPUI dependency. Everything here is `Serialize + Deserialize` (unless noted) and safe to persist.
+The `core` layer has no GPUI dependency. The data-carrying types are `Serialize + Deserialize` and safe to persist: `QueryKey`, `CachePolicy`, `RequestPolicy`, `RetryPolicy`, `QueryStatus`, `MutationStatus`, `RequestId`, `RequestSequencer`, `QueryError`, `QueryErrorKind`, `QueryResource`, `MutationResource`, `InfiniteQueryResource`, `FetchDirection`, `NetworkMode`, `RefetchTrigger`, and `QueryTimestamp` (`QueryKey` and `QueryError` via manual impls). `QueryKeyFilter`, `QueryFetchMode`, `QueryBeginResult`, `QuerySignal`, `SelectTransform`, `MappedQueryResource`, `Fetched`, and `RequestGuard` are runtime-only and not serde.
 
 ### Keys and filters
 
@@ -40,12 +40,17 @@ The `core` layer has no GPUI dependency. Everything here is `Serialize + Deseria
 | `QueryBeginResult`| enum   | `Started` / `CacheHit` / `StaleCacheHit` / `IgnoredWhileLoading`. |
 | `RequestId`       | struct | Monotonic per-resource request id.                 |
 | `QuerySignal`     | struct | Cooperative-cancellation signal handed to fetchers. |
+| `NetworkMode`     | enum   | `Online` (default) / `Always` / `OfflineFirst`. Forward compatibility only; network detection is not implemented yet. |
+| `RefetchTrigger`  | enum   | `Always` (default) / `IfStale` / `Never`. Inert config: focus/reconnect refetching is not implemented yet. |
+| `FetchDirection`  | enum   | `ForwardOnly` (default) / `Bidirectional`. Pagination direction for infinite queries. |
+| `QueryTimestamp`  | struct | Milliseconds since the UNIX epoch, set from the application's clock via `from_millis`. |
+| `RequestGuard`    | struct | Single-use token moved into a `complete_*` call, enforcing accept-then-complete at the type level. |
 
 ### Errors
 
 | Item             | Kind   | Notes                                            |
 | ---------------- | ------ | ----------------------------------------------- |
-| `QueryError`     | struct | Default error type. `Display + Error`, `Arc<str>` message. Constructors: `response` / `transport` / `cancelled` / `unknown` / `sanitized`. |
+| `QueryError`     | struct | Default error type. `Display + Error`, `Arc<str>` message. Constructors: `new` / `response` / `transport` / `cancelled` / `unknown`; `sanitized()` is a `&self` method returning a copy with the message redacted. |
 | `QueryErrorKind` | enum   | `Cancelled` / `Response` / `Transport` / `Unknown`. |
 
 ### Resources
@@ -63,6 +68,8 @@ The `core` layer has no GPUI dependency. Everything here is `Serialize + Deseria
 | Item                | Kind   | Notes                                            |
 | ------------------- | ------ | ----------------------------------------------- |
 | `QueryClient`       | struct | `Global` registry. `resource`, `query`, `get_query_data`, `set_query_data`, `with_query_data`, `invalidate_queries`, `cancel_queries`, `reset_queries`, `remove_queries`, `prepare_fetch_query`, `prepare_prefetch_query`, `gc`, `gc_with_time`, `diagnostics`. **Persistence (`persist`):** `persist_with`, `collect_persist_snapshot`, `register_serializer`, `register_deserializer`. |
+| `QueryBucket<T,E>` / `InfiniteQueryBucket<T,E>` / `MutationBucket<V,T,E>` | structs | The type-partitioned buckets `QueryClient` keeps per resource type. |
+| `ObservableResource` | trait | Surfaces a resource's `status()` generically so `Observer<R>` can dedup for any resource kind. |
 | `Observer<R>`       | struct | Generic status-deduplicating observer.          |
 | `QueryObserver<T,E>` | alias  | `Observer<QueryResource<T, E>>`.                |
 | `InfiniteQueryObserver<T,E>` | alias | `Observer<InfiniteQueryResource<T, E>>`.     |
@@ -73,28 +80,32 @@ The `core` layer has no GPUI dependency. Everything here is `Serialize + Deseria
 | `PersistOptions` / `PersistFilter` (`persist`) | struct / enum | `persist_with` tuning: `filter` (`Exact` / `Prefix` / `All`), `max_age`, `debounce`. |
 | `PersistHandle` / `NoopPersister` (`persist`) | struct / struct | Drop-guard from `persist_with` (drop stops new saves) / no-op backend for tests. |
 | `SerializerRegistry` (`persist`) | struct | Typed `T -> serde_json::Value` registry driving snapshot collection. Register serializers *and* deserializers via `QueryClient::register_serializer` / `register_deserializer`. |
-| `PersistError` / `PERSIST_VERSION` (`persist`) | enum / const | `Io` / `Serialize` / `Deserialize` / `VersionMismatch` / `BadPath` / `Permission`; snapshot format version (`1`). |
+| `PersistError` / `PERSIST_VERSION` (`persist`) | enum / const | `Io` / `Serialize` / `Deserialize` / `VersionMismatch` / `BadPath` / `Permission`; snapshot format version (`2`, bumped in 0.3.0 when `QueryKey::to_path` escaping made key paths injective). Snapshots stamped with any other version fail to load with `VersionMismatch`. |
 | `hydrate` (`persist`) | free fn | `async hydrate(client, &persister, &filter, max_age, cx) -> Result<PersistSnapshot, PersistError>`; cold-start restore. |
 | `Fetched<T>` (`core`; meta under `persist`) | struct | Fetcher return wrapper for server-derived cache policy: `new`, `with_policy`, `with_meta`. |
-| `PreparedFetch<T,E>` | struct | Imperative fetch handle: `entity`, `signal`, `request_id`, `now_ms`. |
+| `PreparedFetch<T,E>` | struct | Imperative fetch handle. Public fields: `entity`, `request_id`, `signal`; `now_ms` is internal (`pub(crate)`, reused by `complete_success` / `complete_failure`). |
 | `QueryDiagnostic` / `MutationDiagnostic` / `ClientDiagnostic` | structs | DevTools snapshot types. |
-| `DehydratedState` / `DehydratedEntry` | structs | Legacy metadata-only snapshot (the `dehydrate`/`restore` skeleton). Prefer the value-carrying `persist` types above. |
-| `QueryPersister` | trait | Legacy sync persister (`load -> Vec<DehydratedEntry>`, `save(Vec<DehydratedEntry>)`). Superseded by `Persister`. |
+| `DehydratedState` / `DehydratedEntry` (`persist`) | structs | Legacy metadata-only snapshot (the `dehydrate`/`restore` skeleton). Prefer the value-carrying `persist` types above. |
+| `QueryPersister` (`persist`) | trait | Legacy sync persister (`load -> Vec<DehydratedEntry>`, `save(Vec<DehydratedEntry>)`). Superseded by `Persister`. |
+| `CacheMutation` (`persist`) | struct | Zero-sized `Global` marker bumped on cache writes; `observe_global` listeners (the `persist_with` driver) react to it. |
+| `current_time_ms` | free fn | Wall-clock ms since the Unix epoch; pre-epoch clock readings clamp to `0`. |
 
 ## hook: Ergonomic subscriptions
 
-All hooks return `(Entity<Resource>, Subscription)` (or a triple for `use_query_select`). Store both.
+The subscription-bearing hooks (`use_query` and its variants, `use_infinite_query`, `use_mutation`) return `(Entity<Resource>, Subscription)`; `use_query_select` returns a triple. Store both. `use_mutation_state` instead returns `Vec<Entity<MutationResource<V,T,E>>>`, and the imperative `fetch_*` / `mutate*` helpers return `()`.
 
 | Item                       | Returns                                                    | Notes                                   |
 | -------------------------- | ---------------------------------------------------------- | --------------------------------------- |
 | `use_query`                | `(Entity<QueryResource<T,E>>, Subscription)`               | Primary query hook, signal-always.      |
 | `use_query_manual` / `_opts` | same                                                       | Lower-level: explicit params.           |
 | `use_query_unsignalled` / `_opts` | same                                                | Fetcher takes no signal (legacy).       |
+| `use_query_with_policy`    | same                                                       | Like `use_query`, but the fetcher returns `Fetched<T>`, so a server-derived `CachePolicy` overrides the stored one on success. |
 | `use_query_select`         | `(Entity<MappedQueryResource<T,U,E>>, Entity<QueryResource<T,E>>, (Subscription, Subscription))` | `select` pattern. |
 | `use_infinite_query`       | `(Entity<InfiniteQueryResource<T,E>>, Subscription)`       | Pagination / load-more.                 |
 | `fetch_next_page_infinite` | `()`                                                       | Grow an infinite query forward.         |
 | `fetch_previous_page_infinite` | `()`                                                   | Grow an infinite query backward.        |
 | `fetch_query` / `fetch_query_with_signal` | `()`                                           | Refetch on demand.                      |
+| `fetch_query_with_policy`  | `()`                                                       | `fetch_query` whose fetcher may return `Fetched<T>` to override the resource's policy. |
 | `use_mutation`             | `(Entity<MutationResource<V,T,E>>, Subscription)`          | Primary mutation hook.                  |
 | `use_mutation_state`       | `Vec<Entity<MutationResource<V,T,E>>>`                     | All mutations of a type triple.         |
 | `mutate`                   | `()`                                                       | Trigger with owned `V`.                 |
