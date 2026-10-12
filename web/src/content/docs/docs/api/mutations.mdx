@@ -17,7 +17,7 @@ pub fn use_mutation<V, T, E, C>(
 ) -> (Entity<MutationResource<V, T, E>>, Subscription)
 ```
 
-Creates a new `MutationResource` entity and returns it together with the `Subscription` that keeps its observer alive; store both on your view struct. The entity starts in the `Idle` state configured from the options: pass `()` for the defaults (no retries, 5 minute GC) or a `MutationOptions` to change them. Read from the entity during render to show loading spinners, error messages, or success state.
+Creates a new `MutationResource` entity and returns it together with the `Subscription` that keeps its observer alive; store both on your view struct. The entity starts in the `Idle` state: pass `()` for the default retry behavior (no retries) or a `MutationOptions` to change it. `use_mutation` reads only `retry_policy` from the options; mutation garbage collection is governed by the `QueryClient` global's GC time (default 5 minutes, set with `QueryClient::with_gc_time`). Read from the entity during render to show loading spinners, error messages, or success state.
 
 ```rust
 use gpui::{Entity, Subscription};
@@ -51,7 +51,7 @@ pub fn mutate<V, T, E, C, F, Fut>(
 
 Triggers a mutation on the entity. It transitions the resource to `Loading`, spawns an async task running your mutator closure, and handles the outcome (including retries if the entity has a retry policy).
 
-The `mutator` closure receives the variables and must return a `Future<Output = Result<T, E>>`. Each call to `mutate` overwrites any previous state on the entity: variables, error, and data are reset.
+The `mutator` closure receives the variables and must return a `Future<Output = Result<T, E>>`. A call while the entity is already loading is ignored. Otherwise it stores the new variables, clears the error, and resets the retry count; previous success data stays readable until the new attempt settles (replaced on success, cleared on failure or cancel).
 
 ```rust
 use gpui_query::{use_mutation, mutate};
@@ -70,7 +70,7 @@ mutate(&self.create_user, NewUser { name: "Alice" }, |vars| async move {
 
 ### Concurrency
 
-There is no built-in guard against calling `mutate` while a previous mutation on the same entity is still in flight. The second call overwrites the entity's state immediately. If you need to prevent concurrent mutations, check `entity.read(cx).is_loading()` before calling `mutate`.
+A call made while the entity is still `Loading` is a no-op: the built-in `is_loading()` guard ignores it and the in-flight mutation keeps running. You don't need a manual `entity.read(cx).is_loading()` check to prevent concurrent mutations. `mutate_with_callbacks`, `mutate_by_ref`, and `mutate_arc` behave the same way.
 
 ## `mutate_with_callbacks`
 
@@ -84,7 +84,7 @@ pub fn mutate_with_callbacks<V, T, E, C, F, Fut>(
 )
 ```
 
-Identical to `mutate` but accepts a `MutationCallbacks` struct that fires on the final outcome. Callbacks run after all retries are exhausted (on failure) or on first success. They do not fire on intermediate retry attempts.
+Identical to `mutate` but accepts a `MutationCallbacks` struct that fires on the final outcome. Callbacks run on the terminal outcome: first success, exhausted retries, or a mutation ended early by `cancel()`, `reset()`, or the entity being dropped. They do not fire on intermediate retry attempts.
 
 This is where you invalidate query caches after a successful write:
 
@@ -110,6 +110,43 @@ mutate_with_callbacks(
 ```
 
 See the `MutationCallbacks` section for the full callback API.
+
+## `mutate_by_ref`
+
+```rust
+pub fn mutate_by_ref<V, T, E, C, F, Fut>(
+    entity: &Entity<MutationResource<V, T, E>>,
+    variables: V,
+    mutator: F,
+    cx: &mut Context<C>,
+)
+```
+
+Same trigger as `mutate`, but the mutator receives `&V` borrowed from the stored `Arc<V>`, so there is no `V::clone` per attempt. `V: Clone` is still required, because `begin` stores an owned copy.
+
+```rust
+use gpui_query::mutate_by_ref;
+
+mutate_by_ref(&self.create_user, NewUser { name: "Alice" }, |vars| {
+    let name = vars.name.clone();
+    async move { Ok::<User, MyError>(create_user(name).await) }
+}, cx);
+```
+
+The returned future must be `'static`, so clone what you need out of `vars` before the `async move` block.
+
+## `mutate_arc`
+
+```rust
+pub fn mutate_arc<V, T, E, C, F, Fut>(
+    entity: &Entity<MutationResource<V, T, E>>,
+    variables: Arc<V>,
+    mutator: F,
+    cx: &mut Context<C>,
+)
+```
+
+`mutate_by_ref` taking `Arc<V>` directly, so callers can share one variables buffer across calls. Both variants take the same `Fn(&V)` mutator, and neither accepts `MutationCallbacks`.
 
 ## `use_mutation_state`
 
@@ -149,7 +186,9 @@ Every mutation goes through these states in order:
 2. **Loading**: `begin(variables)` was called. The variables are stored, the error is cleared, and a fresh cancellation signal is created.
 3. **Success** or **Failure**: the async task completes. `complete_success(data)` stores the result and clears the error. `complete_failure(error)` stores the error and increments the retry counter.
 
-If the entity has a retry policy and retries remain after a failure, the internal loop calls `retry()` to transition back to `Loading` and runs the mutator again.
+If the entity has a retry policy and retries remain after a failure, the internal loop keeps the mutation in `Loading` via `increment_retry()` and `prepare_retry()` (observers never see a transient `Failure` between attempts) and runs the mutator again. `complete_failure()` runs only when retries are exhausted. `retry()` is a public manual `Failure` to `Loading` helper, not what the loop uses.
+
+The loop calls `reset_retry_count()` right after the terminal `complete_success` and `complete_failure`, undoing `complete_failure`'s increment. A mutation driven through `mutate` or any of its variants always reads `retry_count() == 0` once settled; the counter is non-zero only mid-flight between retry attempts, or when you drive the resource by hand.
 
 ### Accessors
 
@@ -159,7 +198,7 @@ If the entity has a retry policy and retries remain after a failure, the interna
 | `data()` | `Option<&T>` | Most recent success data |
 | `error()` | `Option<&E>` | Most recent error |
 | `variables()` | `Option<&V>` | Current or most recent variables |
-| `retry_count()` | `u32` | How many retries have been attempted |
+| `retry_count()` | `u32` | How many retries have been attempted; the internal loop resets it to 0 once the mutation settles, so it reads non-zero only mid-flight or when you drive the resource by hand |
 | `cancelled_count()` | `u64` | How many times this mutation has been cancelled |
 | `retry_policy()` | `&RetryPolicy` | The retry policy for this resource |
 | `set_retry_policy(policy)` | `()` | Replaces the retry policy for this resource |
@@ -182,9 +221,9 @@ If the entity has a retry policy and retries remain after a failure, the interna
 
 **`retry() -> bool`** attempts to transition from `Failure` back to `Loading`. Only succeeds when `should_retry()` is `true` and the current status is `Failure`. Preserves the original variables and creates a fresh signal. Returns `true` if the retry was initiated.
 
-**`cancel(error)`** forces the mutation into `Failure` with the given error. Clears any stored data and cancels the signal so in-flight async work can observe it.
+**`cancel(error)`** only acts while the status is `Loading`: it sets `Failure` with the given error, clears stored data, increments `cancelled_count`, and cancels the signal so in-flight async work can observe it. In any other status it returns without changing state.
 
-**`reset()`** returns the resource to `Idle` and clears everything: data, error, variables, retry count, signal, and timestamp.
+**`reset()`** returns the resource to `Idle` and clears everything: data, error, variables, retry count, cancelled count, signal, and timestamp.
 
 **`with_key(key)`** associates a `QueryKey` with this mutation for cache correlation. Returns `self` for builder-style chaining.
 
@@ -208,7 +247,7 @@ Options `use_mutation` accepts through `Into`: pass `()` for the defaults in the
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `retry_policy` | `RetryPolicy` | `RetryPolicy::no_retries()` | Controls automatic retry on failure |
-| `gc_time_ms` | `u64` | `300_000` (5 minutes) | How long idle mutation resources survive before garbage collection |
+| `gc_time_ms` | `u64` | `300_000` (5 minutes) | Reserved: stored but not consumed today. Mutation GC runs off `QueryClient::with_gc_time`; `Idle`/`Failure` mutations survive that gc time, `Success` mutations twice it |
 
 Builder methods:
 
@@ -239,11 +278,11 @@ let callbacks = MutationCallbacks::new()
     });
 ```
 
-Each field is an `Option<Box<dyn Fn(&T) + 'static>>` (or the equivalent for the error and settled variants).
+Each field is an `Option<Arc<...>>`: `on_success` is `Option<Arc<dyn Fn(&T) + Send + Sync>>`, `on_error` is `Option<Arc<dyn Fn(&E) + Send + Sync>>`, and `on_settled` is `Option<Arc<dyn Fn(Option<&T>, Option<&E>) + Send + Sync>>`. The builder methods accept any closure that is `Fn(..) + Send + Sync + 'static` and wrap it in an `Arc`.
 
 - **`on_success`** receives `&T`. Fires once on first success.
-- **`on_error`** receives `&E`. Fires once after all retries are exhausted.
-- **`on_settled`** receives `Option<&T>` and `Option<&E>`. Exactly one will be `Some`. Fires after either `on_success` or `on_error`.
+- **`on_error`** receives `&E`. Fires once when the mutation ends in failure, whether retries were exhausted or the mutation was cancelled, reset, or dropped early.
+- **`on_settled`** receives `Option<&T>` and `Option<&E>`. Exactly one is `Some` on a normal success or failure; both can be `None` when the entity was dropped or reset mid-mutation. Fires after either `on_success` or `on_error`.
 
 Callbacks fire on the final outcome only. Intermediate retry attempts do not trigger callbacks.
 

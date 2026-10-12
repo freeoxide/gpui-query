@@ -105,7 +105,7 @@ What you got for free:
 | Cache                  | None / hand-rolled          | `QueryClient` + `CachePolicy`, shared across views |
 | Dedup of identical in-flight requests | None        | `IgnoreWhileLoading` request policy                |
 | Retry on failure       | Hand-rolled loop            | `RetryPolicy` (3 retries, exponential, default)    |
-| Re-render on status change only | Every `cx.notify` counts | `QueryObserver` status dedup                  |
+| Re-render filtering | Every `cx.notify` counts | `QueryObserver` skips same-status bookkeeping, wakes on status or data change |
 | Navigating back        | Refetch                     | Cache hit within TTL                               |
 
 ## When the raw approach is enough

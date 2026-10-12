@@ -86,11 +86,11 @@ pub trait HttpBackend: Send + Sync {
         &self,
         url: &str,
         conditionals: Conditionals,
-    ) -> impl Future<Output = Result<BackendResponse, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<BackendResponse, Self::Error>> + MaybeSend;
 }
 ```
 
-Dispatch is static (`HttpCache<B: HttpBackend>`), so there is no `Box<dyn>` overhead, and the cache never requires `tokio`.
+The future is bound by `MaybeSend` (re-exported from `gpui_query_http`): exactly `Send` on native targets, a no-op bound on `wasm32`, so browser backends whose JS-interop futures are `!Send` still implement `HttpBackend`. Dispatch is static (`HttpCache<B: HttpBackend>`), so there is no `Box<dyn>` overhead, and the cache never requires `tokio`.
 
 ## Persisting ETags for cheap 304s
 

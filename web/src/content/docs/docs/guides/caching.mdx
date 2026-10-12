@@ -16,9 +16,9 @@ There are three variants of `CachePolicy`. The default is `Ttl { ttl_ms: 60_000 
 CachePolicy::NoCache
 ```
 
-Every access triggers a fresh fetch. No cached data is stored or returned. Use this for data that changes constantly and where showing a stale value is worse than showing nothing.
+Every access triggers a fresh fetch. Data from a successful fetch is stored on the resource, but never served as a cache hit on a later access. Use this for data that changes constantly and where showing a stale value is worse than showing nothing.
 
-The practical effect: `begin_request` always returns `Started`, never `CacheHit`.
+The practical effect: `begin_request` never returns `CacheHit`. Under `IgnoreWhileLoading` with a request already in flight it still returns `IgnoredWhileLoading`.
 
 ### Ttl
 
@@ -53,16 +53,18 @@ Use this when your UI benefits from showing slightly outdated data rather than f
 - **`is_fresh(age_ms)`** - returns `true` when `age_ms` is within the TTL window
 - **`is_stale_but_serveable(age_ms)`** - returns `true` when the age is past TTL but within the stale window (only `StaleWhileRevalidate`)
 - **`is_expired(age_ms)`** - returns `true` when the age exceeds the total valid window. `NoCache` always returns `true`
-- **`can_short_circuit(age_ms)`** - whether the policy can skip a fetch entirely (true for `Ttl` and `StaleWhileRevalidate` when data is fresh)
-- **`can_serve_stale(age_ms)`** - whether stale data can be returned (true only for `StaleWhileRevalidate`)
+- **`can_short_circuit()`** - whether the policy can ever skip a fetch (true for `Ttl` and `StaleWhileRevalidate`; a pure policy check with no freshness condition)
+- **`can_serve_stale()`** - whether stale data can be served (true only for `StaleWhileRevalidate`)
 - **`total_valid_ms()`** - returns `ttl_ms + stale_ms` for SWR, `ttl_ms` for `Ttl`, `None` for `NoCache`
+
+The freshness half of those two decisions lives in the resource: `should_short_circuit_cache(now_ms)` and `should_serve_stale_and_revalidate(now_ms)` combine the policy checks with the age of the data.
 
 ## Setting the policy
 
 Pass the policy when creating a `QueryClient` to set the app-wide default.
 
 ```rust
-cx.set_global(QueryClient::new(
+cx.set_global(QueryClient::with_policies(
     CachePolicy::StaleWhileRevalidate { ttl_ms: 30_000, stale_ms: 60_000 },
     RequestPolicy::LatestWins,
 ));
@@ -131,17 +133,19 @@ pub enum QueryBeginResult {
 - **`Normal`** (default) - respects the cache policy. Returns `CacheHit` if fresh.
 - **`Force`** - bypasses cache freshness. Always starts a new fetch. Still respects `IgnoreWhileLoading` if a request is already in flight.
 
-Use `Force` when the user explicitly requests fresh data (pull-to-refresh, a manual reload button).
+Use `Force` when a query's first fetch must bypass freshness checks. The hooks only fetch from `Idle`, so forcing a query that is already `Success` starts nothing. For pull-to-refresh or a manual reload button, drive the fetch yourself with `prepare_fetch_query` (below).
 
 ```rust
-client.force_fetch_query::<UserData, MyError>(
-    QueryKey::from(["users", "42"]),
-    cache_policy,
-    request_policy,
-    now_ms,
+use gpui_query::{use_query, QueryKey, QueryOptions};
+
+let (entity, _sub) = use_query(
+    QueryOptions::new(QueryKey::from(["users", "42"])).force(),
+    |_signal| async move { fetch_user(42).await },
     cx,
 );
 ```
+
+For a manual forced fetch outside the hooks, `client.prepare_fetch_query::<UserData, MyError>(key, cx)` takes only the key and `cx`, runs with the client's default policies, and returns `Option<PreparedFetch<T, E>>`. It returns `None` when `IgnoreWhileLoading` defers to a request already in flight.
 
 ## Bulk operations on QueryClient
 
@@ -152,7 +156,7 @@ The [QueryClient](/docs/api/query-client) has bulk methods that operate across a
 `invalidate_queries` clears cache freshness on matching resources. The next access to those queries will trigger a refetch. It does not cancel in-flight requests.
 
 ```rust
-let client = cx.global::<QueryClient>();
+let client = cx.global_mut::<QueryClient>();
 client.invalidate_queries(
     &QueryKeyFilter::Prefix(&QueryKey::from(["users"])),
     cx,
@@ -163,10 +167,10 @@ This is the standard pattern after a mutation: invalidate the affected query pre
 
 ### Removal
 
-`remove_queries` drops matching resources from the registry entirely. Unlike invalidation, which keeps the entity and expires its cache, removal deletes the entity.
+`remove_queries` drops matching resources from the registry entirely. Unlike invalidation, which keeps the entity and expires its cache, removal deletes the registry entry only; the entity itself stays alive until the last strong handle elsewhere (such as a view holding the `Entity` returned by `use_query`) is dropped.
 
 ```rust
-client.remove_queries(&QueryKeyFilter::All, cx);
+client.remove_queries(&QueryKeyFilter::All);
 ```
 
 ### QueryKeyFilter variants
@@ -190,7 +194,7 @@ client.set_query_data::<Vec<User>, MyError>(
 );
 ```
 
-There is no dedicated rollback method. Capture the previous value with `get_query_data` before the optimistic write, then restore it if the mutation fails:
+`QueryClient` has no dedicated rollback method. Capture the previous value with `get_query_data` before the optimistic write, then restore it if the mutation fails:
 
 ```rust
 let client = cx.global_mut::<QueryClient>();
@@ -207,24 +211,20 @@ Restoring through `set_query_data` notifies observers and marks the persist snap
 
 ## Garbage collection
 
-Queries that no component is observing will linger in memory until garbage collection picks them up. The `gc` method on [QueryClient](/docs/api/query-client) removes resources that have been idle longer than `gc_time_ms`.
+Buckets hold only weak entity handles, so a query no component is observing has its resource freed by GPUI refcounting as soon as the last handle drops; garbage collection then prunes the leftover registry entries. The `gc` method on [QueryClient](/docs/api/query-client) collects `Idle`, `Failure`, and `Cancelled` resources that have been idle longer than `gc_time_ms` (clamped to a 1 second floor), keeps `Success` resources for twice that or as long as a stale-while-revalidate policy can still serve them, and never collects a resource with a fetch in flight.
 
 ```rust
-let client = cx.global::<QueryClient>();
-client.gc(cx, now_ms);
+let client = cx.global_mut::<QueryClient>();
+client.gc(cx);
 ```
 
-The default GC time is 5 minutes (300,000 ms). You can change this per query through `QueryOptions`:
+If you already hold a timestamp, `client.gc_with_time(now_ms, cx)` skips the clock read.
 
-```rust
-let opts = QueryOptions::new(key).gc_time_ms(10 * 60 * 1_000); // 10 minutes
-```
-
-Or change the client-wide default during construction:
+The default GC time is 5 minutes (300,000 ms), and it is a client-wide setting: change it with `QueryClient::with_gc_time`. The `gc_time_ms` field on `QueryOptions`, written through the `.gc_time()` builder, is reserved and has no effect today.
 
 ```rust
 cx.set_global(
-    QueryClient::new(cache_policy, request_policy)
+    QueryClient::with_policies(cache_policy, request_policy)
         .with_gc_time(10 * 60 * 1_000),
 );
 ```
@@ -282,7 +282,7 @@ A typical setup looks like this:
 ```rust
 // App-wide defaults: 30s TTL with 60s stale window, latest-wins dedup, 10-minute GC
 cx.set_global(
-    QueryClient::new(
+    QueryClient::with_policies(
         CachePolicy::StaleWhileRevalidate { ttl_ms: 30_000, stale_ms: 60_000 },
         RequestPolicy::LatestWins,
     )

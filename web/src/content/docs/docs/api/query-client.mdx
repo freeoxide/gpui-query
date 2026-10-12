@@ -11,42 +11,36 @@ description: "QueryClient API reference for gpui-query: the global registry that
 ## Setup
 
 ```rust
-use gpui_query::{CachePolicy, QueryClient, RequestPolicy, RetryPolicy};
+use gpui_query::{CachePolicy, QueryClient, RequestPolicy};
 
-let client = QueryClient::new(
+let client = QueryClient::with_policies(
     CachePolicy::Ttl { ttl_ms: 60_000 },
     RequestPolicy::LatestWins,
 )
-.with_gc_time(300_000)       // 5 minutes (this is the default)
-.with_retry_policy(
-    RetryPolicy::new(3)
-        .with_delay(1000)
-        .with_exponential_backoff()
-        .with_max_delay(30_000),
-);
+.with_gc_time(300_000);      // 5 minutes (this is the default)
 
 cx.set_global(client);
 ```
 
-`QueryClient::new` takes two required arguments: a default `CachePolicy` and a default `RequestPolicy`. Every [query resource](/docs/api/queries) created through `resource()` inherits these unless you override them per-resource.
+`QueryClient::new()` takes no arguments. The default policies are already `CachePolicy::Ttl { ttl_ms: 60_000 }` and `RequestPolicy::LatestWins`; use `QueryClient::with_policies(cache_policy, request_policy)` when you want different defaults. Every [query resource](/docs/api/queries) created through `resource()` inherits these unless you override them per-resource. The client holds no default retry policy: mutation retries are set per resource with `MutationOptions::retry_policy` (default `no_retries()`) passed to `use_mutation`.
 
 ### Constructor
 
 | Method | Description |
 |--------|-------------|
-| `new(cache_policy, request_policy)` | Create a client with default policies |
-| `.with_gc_time(ms)` | Set garbage collection interval (default: 300,000 ms) |
-| `.with_retry_policy(policy)` | Set default retry policy for mutations |
+| `new()` | Create a client with the default policies (`Ttl { ttl_ms: 60_000 }`, `LatestWins`) |
+| `with_policies(cache_policy, request_policy)` | Create a client with custom default policies |
+| `.with_gc_time(ms)` | Set the garbage-collection age cutoff: idle resources older than this are collected (default: 300,000 ms; Success resources survive twice as long, values below 1,000 ms are clamped) |
 
 ## Typed query access
 
 ### `resource`
 
 ```rust
-fn resource<T, E>(&mut self, key: QueryKey, cx: &mut App) -> Entity<QueryResource<T, E>>
+fn resource<T, E>(&mut self, key: impl Into<QueryKey>, cx: &mut App) -> Entity<QueryResource<T, E>>
 ```
 
-Get or create a `QueryResource<T, E>` entity for the given key. If a resource already exists for that key and type pair, it returns the existing entity. Otherwise it creates a new one with the client's default policies.
+Get or create a `QueryResource<T, E>` entity for the given key. The key is generic: `&str`, `String`, `[&str; N]`, `Vec<&str>`, `Vec<String>`, and `QueryKey` all convert. If a resource already exists for that key and type pair, it returns the existing entity. Otherwise it creates a new one with the client's default policies.
 
 ```rust
 let client = cx.global_mut::<QueryClient>();
@@ -61,7 +55,7 @@ let user = client.resource::<User, MyError>(
 ```rust
 fn resource_with_policies<T, E>(
     &mut self,
-    key: QueryKey,
+    key: impl Into<QueryKey>,
     cache_policy: CachePolicy,
     request_policy: RequestPolicy,
     cx: &mut App,
@@ -70,61 +64,72 @@ fn resource_with_policies<T, E>(
 
 Same as `resource`, but with explicit per-resource policies that override the client defaults.
 
-### `contains`
+### `query`
 
 ```rust
-fn contains<T, E>(&self, key: &QueryKey) -> bool
+fn query<T, E>(&self, key: &QueryKey) -> Option<Entity<QueryResource<T, E>>>
 ```
 
-Check whether a resource exists for the given key and type pair. Does not create anything.
+Read-only lookup: return the existing resource for the given key and type pair, or `None` if none exists. Creates nothing.
 
-### `fetch_query` and `force_fetch_query`
+### `all_queries`
 
 ```rust
-fn fetch_query<T, E>(
-    &mut self,
-    key: QueryKey,
-    cache_policy: CachePolicy,
-    request_policy: RequestPolicy,
-    now_ms: u128,
-    cx: &mut App,
-) -> Option<(Entity<QueryResource<T, E>>, RequestId)>
+fn all_queries<T, E>(&self) -> Vec<Entity<QueryResource<T, E>>>
 ```
 
-Imperatively begin a fetch. Creates the resource if needed, then starts a request using the resource's co-located sequencer. Returns `None` (short-circuits) when the cache is fresh or a request is already in flight with `IgnoreWhileLoading`.
+Return all query entities for a specific `(T, E)` type pair. Returns an empty vec if no bucket exists for that type.
 
-`force_fetch_query` works the same way but bypasses cache freshness checks. It still respects `IgnoreWhileLoading`.
-
-### `prefetch_query`
+### `get_query_data`
 
 ```rust
-fn prefetch_query<T, E>(
-    &mut self,
+fn get_query_data<T, E>(&self, key: &QueryKey, cx: &App) -> Option<T>
+```
+
+Clone the stored data for the given key. Returns `None` if no resource exists for the key, the entity was collected, or the resource has not completed a fetch.
+
+### `with_query_data`
+
+```rust
+fn with_query_data<T, E, R>(
+    &self,
     key: &QueryKey,
+    cx: &App,
+    f: impl FnOnce(&T) -> R,
+) -> Option<R>
+```
+
+Zero-clone counterpart to `get_query_data`: `f` receives `&T` for the duration of the call. Same `None` conditions.
+
+### `prepare_fetch_query`
+
+```rust
+fn prepare_fetch_query<T, E>(
+    &mut self,
+    key: impl Into<QueryKey>,
+    cx: &mut App,
+) -> Option<PreparedFetch<T, E>>
+```
+
+Imperatively begin a fetch. Creates the resource if needed, then starts a request that always runs in `Force` mode, so it never short-circuits on a fresh cache and no separate force variant exists. Returns `None` only when the request policy ignored the start (`IgnoreWhileLoading`). No observer is attached.
+
+The returned `PreparedFetch` carries the public fields `entity`, `request_id`, and `signal` (an owned `QuerySignal`). Run your async fetcher with the signal, then complete the request via `prepared.complete_success(data, cx)` or `prepared.complete_failure(e, cx)`.
+
+For refetches on an entity that already has an observer attached, use the hook-layer free function `gpui_query::fetch_query(entity, fetcher, cx)` (plus `fetch_query_with_policy` and `fetch_query_with_signal`).
+
+### `prepare_prefetch_query`
+
+```rust
+fn prepare_prefetch_query<T, E>(
+    &mut self,
+    key: impl Into<QueryKey>,
     cache_policy: CachePolicy,
     request_policy: RequestPolicy,
-    now_ms: u128,
     cx: &mut App,
-) -> bool
+) -> Option<PreparedFetch<T, E>>
 ```
 
-Prefetch a query in the background. Returns `true` if a new request was started, `false` if the cache was fresh or the request was short-circuited. Useful for warming the cache before a user navigates to a new view.
-
-### `cancel_query`
-
-```rust
-fn cancel_query<T, E>(&mut self, key: &QueryKey, error: E, cx: &mut App) -> bool
-```
-
-Cancel the active request for a specific resource. The error value is stored as the resource's error. Returns `true` if there was an active request to cancel.
-
-### `signal_for`
-
-```rust
-fn signal_for<T, E>(&self, key: &QueryKey, cx: &App) -> Option<QuerySignal>
-```
-
-Get a clone of the cancellation signal for a resource. Pass this to an async fetcher so it can observe cooperative cancellation.
+Prefetch a query in the background. `T` and `E` require `Clone + Send + Sync + 'static`; the timestamp is captured internally, so there is no `now_ms` parameter. `None` means a fresh cache hit (read the cached value via `get_query_data`) or that the request policy ignored the start. `Some(prepared)` binds the request: run your async fetcher with `prepared.signal` and complete it via `prepared.complete_success(data, cx)` / `prepared.complete_failure(e, cx)`. Useful for warming the cache before a user navigates to a new view.
 
 ## Optimistic updates
 
@@ -151,7 +156,7 @@ client.set_query_data::<Vec<User>, MyError>(
 
 ### Rolling back an optimistic update
 
-There is no dedicated rollback method. Capture the previous value with `get_query_data` (returns `None` when no data is stored) before the optimistic write, then restore it with `set_query_data` if the mutation fails:
+`QueryClient` has no dedicated rollback method. Capture the previous value with `get_query_data` (returns `None` when no data is stored) before the optimistic write, then restore it with `set_query_data` if the mutation fails:
 
 ```rust
 let client = cx.global_mut::<QueryClient>();
@@ -212,38 +217,46 @@ client.invalidate_queries(
 fn reset_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App)
 ```
 
-Clear data and error state on matching resources, resetting them to idle. The entity itself is kept in the registry. Active requests are not cancelled.
+Clear data and error state on matching resources, resetting them to idle while keeping the entity registered. Each resource's in-flight signal is cancelled, so cooperative fetchers abort early and late results are ignored. Contrast `invalidate_queries`, which only clears cache freshness and leaves active requests running.
 
 ### `remove_queries`
 
 ```rust
-fn remove_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App)
+fn remove_queries(&mut self, filter: &QueryKeyFilter)
 ```
 
-Remove matching resources from the registry entirely. This drops the entities and their co-located sequencers. Unlike `reset_queries`, the resources are gone and will need to be re-created if accessed again.
+Remove matching resources from the registry entirely. This drops each registry entry, the weak entity reference and its co-located sequencer; an entity still held by a mounted view through a strong `Entity` handle survives until its last handle is released. Unlike `reset_queries`, removed keys are no longer registered, and accessing one again creates the resource fresh with a new sequencer. Only query and infinite-query buckets are swept; mutation buckets are left untouched.
 
 ```rust
 // Remove everything
-client.remove_queries(&QueryKeyFilter::All, cx);
+client.remove_queries(&QueryKeyFilter::All);
+```
+
+### `cancel_queries`
+
+```rust
+fn cancel_queries(&mut self, filter: &QueryKeyFilter, cx: &mut App)
+```
+
+Cancel the in-flight signal of matching loading requests and ignore their late results. No `QueryError::cancelled` error is set; the resource's status and error are left untouched. Use `QueryKeyFilter::Exact(&key)` to cancel a single key.
+
+```rust
+client.cancel_queries(&QueryKeyFilter::Exact(&key), cx);
 ```
 
 ## Mutation management
 
-### `mutation_resource`
+### `register_mutation`
 
 ```rust
-fn mutation_resource<V, T, E>(
+fn register_mutation<V, T, E>(
     &mut self,
-    key: &QueryKey,
-    cx: &mut App,
-) -> Entity<MutationResource<V, T, E>>
+    entity: &Entity<MutationResource<V, T, E>>,
+    cx: &App,
+)
 ```
 
-Get or create a `MutationResource<V, T, E>` entity. The three type parameters are: `V` (variables/input), `T` (success result), and `E` (error type). Uses the client's default retry policy.
-
-### `mutation_resource_with_policy`
-
-Same as `mutation_resource` but with an explicit `RetryPolicy`.
+Register an already-created mutation entity in the client's `(V, T, E)` bucket. The three type parameters are: `V` (variables/input), `T` (success result), and `E` (error type). `use_mutation` calls this automatically, so you rarely call it by hand. The retry policy is set per mutation through `MutationOptions` (default no retries, override with `.retry_policy(...)`), not by the client.
 
 ### `all_mutations`
 
@@ -253,40 +266,37 @@ fn all_mutations<V, T, E>(&self) -> Vec<Entity<MutationResource<V, T, E>>>
 
 Return all mutation entities for a specific `(V, T, E)` type triple. Returns an empty vec if no mutations of that type exist.
 
-### `gc_mutations`
-
-```rust
-fn gc_mutations(&mut self, cx: &mut App, now_ms: u128)
-```
-
-Garbage-collect idle mutation resources across all type buckets. Mutations with active requests are kept.
-
 ## Garbage collection
 
 ### `gc`
 
 ```rust
-fn gc(&mut self, cx: &mut App, now_ms: u128)
+fn gc(&mut self, cx: &App)
 ```
 
-Collect idle query resources older than the client's `gc_time_ms`. Resources with active requests are never collected. Call this periodically (every 30 seconds is reasonable) with the current timestamp.
+Collect idle query and mutation resources older than the client's `gc_time_ms`, reading the clock itself. Resources with active requests are never collected: `Loading` mutations always survive, `Success` mutations survive twice the gc time, and `Idle`/`Failure` mutations survive the gc time (floored at 1 second during GC). There is no separate mutation GC pass; `gc` sweeps mutation buckets too. Call this periodically (every 30 seconds is reasonable).
 
 ```rust
 let client = cx.global_mut::<QueryClient>();
-let now = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap()
-    .as_millis();
-client.gc(cx, now);
+client.gc(cx);
 ```
 
-### `clear`
+### `gc_with_time`
 
 ```rust
-fn clear(&mut self)
+fn gc_with_time(&mut self, now_ms: u64, cx: &App)
 ```
 
-Remove all query and mutation resources from all buckets. Useful in tests.
+Same sweep with a caller-supplied timestamp, for when you already hold a time value.
+
+```rust
+let client = cx.global_mut::<QueryClient>();
+let now_ms = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap()
+    .as_millis() as u64;
+client.gc_with_time(now_ms, cx);
+```
 
 ## Diagnostics
 
@@ -296,38 +306,21 @@ Remove all query and mutation resources from all buckets. Useful in tests.
 fn diagnostics(&self, cx: &App) -> ClientDiagnostic
 ```
 
-Return a serializable snapshot of the entire client state. Useful for devtools panels or logging.
+Return a `Clone + Debug` snapshot of the entire client state as plain data structs; implement your own serialization or logging on top. Useful for devtools panels or logging. This is the only diagnostics entry point on `QueryClient`; per-type and per-bucket counts are not exposed.
 
 `ClientDiagnostic` contains:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `total_resources` | `usize` | Query resources across all type buckets |
-| `bucket_count` | `usize` | Number of type-partitioned buckets |
+| `query_count` | `usize` | Query and infinite-query resources across all type buckets |
 | `mutation_count` | `usize` | Total mutation resources |
-| `queries` | `Vec<QueryDiagnostic>` | Per-query details |
-
-### `query_diagnostics`
-
-```rust
-fn query_diagnostics<T, E>(&self, cx: &App) -> Vec<QueryDiagnostic>
-```
-
-Get diagnostics for one specific `(T, E)` type pair. Returns an empty vec if no bucket exists for that type.
-
-### `total_count` and `bucket_count`
-
-```rust
-fn total_count(&self) -> usize
-fn bucket_count(&self) -> usize
-```
-
-Quick accessors for the total number of query resources and the number of type buckets.
+| `queries` | `Vec<QueryDiagnostic>` | Per-query details, covering both query and infinite-query resources; `QueryDiagnostic` has no field distinguishing the two |
+| `mutations` | `Vec<MutationDiagnostic>` | Per-mutation details |
 
 ## How type partitioning works
 
 Rust's type system treats `Entity<QueryResource<User>>` and `Entity<QueryResource<Post>>` as different types. You cannot store them in the same `HashMap`. `QueryClient` solves this by partitioning resources into type-specific buckets keyed by `TypeId` of `(T, E)`.
 
-Each bucket is stored as `Box<dyn QueryBucketTrait>`. Bulk operations like `invalidate_queries` iterate across all buckets through this trait, without needing to know the concrete types. Typed access methods like `resource::<User, MyError>()` downcast to the correct bucket.
+Each bucket is stored as a type-erased `Box<dyn ErasedBucket>` trait object keyed by `TypeId` of `(T, E)`; mutation buckets use the analogous `ErasedMutationBucket`. Both erased traits are crate-private implementation details, not public API. Bulk operations like `invalidate_queries` iterate across all buckets through the trait, without needing to know the concrete types. Typed access methods like `resource::<User, MyError>()` downcast to the correct bucket.
 
 This means `invalidate_queries` with `QueryKeyFilter::All` will touch every query regardless of its data type, which is usually what you want after a logout or a global state reset.

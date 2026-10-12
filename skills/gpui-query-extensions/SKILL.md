@@ -58,7 +58,7 @@ The snapshot value is an opaque `serde_json::Value`; the typed round-trip is dri
 Main crate, `gpui_query::client::*` (re-exported at the crate root via `pub use client::*`).
 
 ```rust
-pub const PERSIST_VERSION: u32 = 1;
+pub const PERSIST_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PersistError {
