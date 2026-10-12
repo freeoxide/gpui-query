@@ -35,15 +35,11 @@ use gpui_query_persist::FilePersister;
 Application::new().run(|cx| {
     cx.set_global(QueryClient::new());
 
-    // JSON at an explicit path:
     let persister = FilePersister::json("cache/gpui-query.json");
-    // ...or rooted at the OS cache dir:
-    // let persister = FilePersister::in_cache_dir("my-app").unwrap();
 
     let _handle = cx.update_global::<QueryClient, _>(|client, cx| {
         client.persist_with(persister, PersistOptions::default(), cx)
     });
-    // ... your views
 });
 ```
 
@@ -54,17 +50,14 @@ use gpui_query::client::PersistError;
 use gpui_query_persist::{FilePersister, PersistFormat};
 
 fn example() -> Result<(), PersistError> {
-    // Pick a format explicitly:
     FilePersister::new("path/to/cache.bin", PersistFormat::Bincode);
 
-    // JSON / bincode shortcuts:
     FilePersister::json("path/to/cache.json");
     FilePersister::bincode("path/to/cache.bin");
 
     // Rooted at the OS cache dir: <cache_dir>/<app_name>/gpui-query-cache.json
-    FilePersister::in_cache_dir("my-app")?; // -> Result<Self, PersistError>
+    FilePersister::in_cache_dir("my-app")?;
 
-    // Inspect the on-disk path:
     FilePersister::json("path/to/cache.json").path(); // -> &Path
 
     Ok(())

@@ -39,7 +39,6 @@ use gpui_query::QueryClient;
 
 Application::new().run(|cx| {
     cx.set_global(QueryClient::new());
-    // ... your views
 });
 ```
 

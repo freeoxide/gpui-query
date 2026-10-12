@@ -49,7 +49,6 @@ use gpui_query::QueryClient;
 
 Application::new().run(|cx| {
     cx.set_global(QueryClient::new());
-    // ... your views
 });
 ```
 
@@ -77,7 +76,6 @@ fn setup_query(
     use_query(
         "users",
         |signal| async move {
-            // Your async fetch. Check signal.is_cancelled() for cooperative cancellation.
             let users = fetch_users().await?;
             Ok::<Vec<User>, MyError>(users)
         },
@@ -155,11 +153,9 @@ where
     F: Fn(QuerySignal) -> Fut + Copy + Send + 'static,
     Fut: std::future::Future<Output = Result<Vec<User>, MyError>> + Send + 'static,
 {
-    // Simple key
     let (entity, sub) = use_query("users", fetcher, cx);
     let _ = (entity, sub);
 
-    // With options
     let (entity, sub) = use_query(
         QueryOptions::new("users")
             .cache_policy(CachePolicy::Ttl { ttl_ms: 300_000 })
@@ -201,12 +197,10 @@ fn example<C: 'static>(cx: &mut Context<C>) {
     let (entity, sub) = use_mutation((), cx);
     let _ = sub;
 
-    // Trigger the mutation
     mutate(&entity, NewUser { name: "Alice" }, |vars| async move {
         Ok::<User, MyError>(create_user(vars).await)
     }, cx);
 
-    // With success/error/settled callbacks
     let variables = NewUser { name: "Ada" };
     let mutator = |vars: NewUser| async move { Ok::<User, MyError>(create_user(vars).await) };
     mutate_with_callbacks(
@@ -214,7 +208,7 @@ fn example<C: 'static>(cx: &mut Context<C>) {
         variables,
         mutator,
         MutationCallbacks::new()
-            .on_success(|data| { /* invalidate user queries */ })
+            .on_success(|_data| {})
             .on_error(|err| eprintln!("mutation failed: {err:?}")),
         cx,
     );
@@ -296,10 +290,8 @@ struct MyError;
 
 fn example(cx: &mut App, new_user: User) {
     cx.update_global::<QueryClient, _>(|client, cx| {
-        // Invalidate all queries with a matching key prefix
         client.invalidate_queries(&QueryKeyFilter::Prefix(&QueryKey::from(["users"])), cx);
 
-        // Remove everything
         client.remove_queries(&QueryKeyFilter::All);
 
         // Optimistic update; the previous value is kept for the resource's
@@ -340,7 +332,7 @@ use gpui_query::client::{
     hydrate, PersistError, PersistFilter, PersistOptions, Persister, PersistSnapshot, QueryClient,
 };
 
-struct MyPersister; // your backend: file, db, kv, …
+struct MyPersister;
 
 impl Persister for MyPersister {
     async fn load(&self) -> Result<PersistSnapshot, PersistError> {
@@ -353,10 +345,8 @@ impl Persister for MyPersister {
 }
 
 async fn example(mut client: &mut QueryClient, cx: &mut App) {
-    // Debounced saves: coalesces bursts of cache mutations into one snapshot.
     let _handle = client.persist_with(MyPersister, PersistOptions::default(), cx);
 
-    // Cold start: re-prime the cache from the persister (needs &mut QueryClient).
     hydrate(
         &mut client, &MyPersister, &PersistFilter::All, Duration::from_secs(86_400), cx,
     )

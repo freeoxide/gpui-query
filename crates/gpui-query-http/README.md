@@ -103,7 +103,6 @@ impl HttpBackend for MyBackend {
         _url: &str,
         _conditionals: Conditionals,
     ) -> impl Future<Output = Result<BackendResponse, MyError>> + MaybeSend {
-        // perform the conditional GET (stubbed here)
         async { Err(MyError) }
     }
 }

@@ -272,13 +272,12 @@ fn render_users(cx: &mut gpui::Context<impl 'static>) {
             .cache_policy(CachePolicy::Ttl { ttl_ms: 60_000 })
             .request_policy(RequestPolicy::LatestWins),
         |signal| async move {
-            let resp: Vec<User> = fetch_users().await?;          // your async
+            let resp: Vec<User> = fetch_users().await?;
             if signal.is_cancelled() { return Err(QueryError::cancelled("aborted")); }
             Ok(Fetched::new(Users(resp)))
         },
         cx,
     );
-    // entity.read(cx).data() / .status() ...
 }
 
 async fn fetch_users() -> Result<Vec<User>, QueryError> { Ok(vec![]) }
