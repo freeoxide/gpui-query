@@ -27,8 +27,9 @@ Thumbs.db
 # z-flow state
 .zflow/
 
-# z-flashflow state
-.z-flashflow/
+# audit / mutation-testing artifacts
+out/
+mutants.out/
 
 # Local Playwright/MCP artifacts
 .playwright-mcp/
