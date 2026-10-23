@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-23
+
+> A docs-only release. The README examples stop relying on rustdoc hidden lines, so the Quick start on crates.io reads as plain Rust instead of a wall of `#` prefixes.
+
+### Changed
+
+- The README code examples were written in the rustdoc hidden-line style: lines starting with `# ` that rustdoc strips when it renders doc examples. crates.io renders crate READMEs as plain markdown and prints every one of those lines, so the Quick start carried a stack of `#`-prefixed imports above each snippet. The published snippets are self-contained Rust now: real `use` items and the helper types written out, nothing hidden. The fences still compile as doctests, so drift from the API still fails CI.
+- The Starlight pages, the Claude Code skill packs, and the web README got the same fence pass, and an API-currency audit corrected 80 stale claims across the site.
+- Test modules lost about 1,100 duplicate lines across the core, client, hook, and persist suites; the GC-window and snapshot edge cases they shadowed are covered directly. No runtime code changed, so behavior and the public API match 0.3.0.
+
 ## [0.3.0] - 2026-10-02
 
 > A campaign pass over the query lifecycle: direct cache writes now reach the UI, GC and eviction stop dropping live entries, request ids survive bucket churn, error redaction covers the connection strings it missed, and persistence gains dirty tracking, ordered saves, and collision-free key paths.
