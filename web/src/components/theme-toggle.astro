@@ -1,9 +1,7 @@
 ---
-// Theme toggle — vanilla port of theme-toggle.tsx. Clicking toggles the `.dark`
-// class on <html>, persists localStorage("theme"), updates the theme-color meta,
-// and animates the icon. The no-flash <script> in BaseLayout already applied the
-// stored theme before paint; icon visibility is driven purely by CSS (`.dark`
-// ancestor) so there is no wrong-icon flash and no JS needed to pick the glyph.
+// Clicking toggles `.dark` on <html>, persists localStorage("theme"), and
+// updates the theme-color meta. BaseLayout's no-flash script applied the stored
+// theme before paint; the icon glyph is picked purely by CSS (`.dark` ancestor).
 ---
 <button
   type="button"

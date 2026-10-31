@@ -1,8 +1,7 @@
 ---
-// Firebase Analytics — vanilla port of firebase-analytics.tsx. Renders nothing;
-// a deferred <script> monkey-patches history.{push,replace}State and listens for
-// popstate to log a page view after every navigation (lazy-imports the firebase
-// helper so the SDK isn't pulled into the entry chunk).
+// Renders nothing; a deferred <script> monkey-patches history.{push,replace}State
+// and listens for popstate to log a page view after every navigation
+// (lazy-imports the firebase helper so the SDK isn't pulled into the entry chunk).
 ---
 
 <script>

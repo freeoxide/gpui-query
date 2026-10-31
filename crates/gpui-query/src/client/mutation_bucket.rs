@@ -132,9 +132,8 @@ impl<
     }
 
     /// Loading always survives; `Success` survives
-    /// `SUCCESS_GC_MULTIPLIER * gc_time_ms`, `Idle`/`Failure` survive
-    /// `gc_time_ms`. Dead weak refs are dropped regardless of the loading
-    /// mirror.
+    /// `SUCCESS_GC_MULTIPLIER * gc_time_ms`, other statuses survive
+    /// `gc_time_ms`. Dead weak refs are dropped regardless of the loading mirror.
     fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_threshold = gc_time_ms.max(MIN_GC_TIME_MS);
         let success_threshold = gc_threshold.saturating_mul(SUCCESS_GC_MULTIPLIER as u64);

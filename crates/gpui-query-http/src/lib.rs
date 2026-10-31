@@ -126,8 +126,8 @@ pub fn cache_policy_from_headers(headers: &HeaderMap) -> Result<CachePolicy, Par
     }
 }
 
-/// Splits a `Cache-Control` value on commas outside quoted-strings, so a
-/// quoted argument containing `,` cannot smuggle in extra directives.
+// Splits a `Cache-Control` value on commas outside quoted-strings, so a
+// quoted argument containing `,` cannot smuggle in extra directives.
 fn split_cache_directives(raw: &str) -> impl Iterator<Item = &str> {
     let mut pos = 0;
     std::iter::from_fn(move || {

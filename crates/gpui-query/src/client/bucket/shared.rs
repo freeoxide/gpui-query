@@ -385,10 +385,9 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         self.entries.retain(|k, _| !filter.matches(k));
     }
 
-    /// Loading always survives; `Success` survives while its cache policy
-    /// can still serve it and until `SUCCESS_GC_MULTIPLIER * gc_time_ms`;
-    /// `Idle`/`Failure`/`Cancelled` survive `gc_time_ms`. Entries without a
-    /// completion timestamp age from the entry's `updated_at` baseline.
+    /// Loading always survives; `Success` survives while its cache policy can
+    /// still serve it and until `SUCCESS_GC_MULTIPLIER * gc_time_ms`; other
+    /// statuses survive `gc_time_ms`, aging from `updated_at` if never completed.
     pub(crate) fn gc(&mut self, now_ms: u64, gc_time_ms: u64, cx: &App) {
         let gc_threshold = gc_time_ms.max(MIN_GC_TIME_MS);
         let success_threshold = gc_threshold.saturating_mul(SUCCESS_GC_MULTIPLIER as u64);
@@ -466,10 +465,9 @@ impl<R: BucketResource + 'static> ResourceBucket<R> {
         }
     }
 
-    /// Filter, max-age, and the caller's last-flushed data epochs all run
-    /// before the serializer so skipped entries cost nothing. Only `Success`
-    /// entries are collected; entries whose epoch matches `flushed` are
-    /// reported as reused paths instead of re-serialized.
+    /// Filter, max-age, and the caller's last-flushed epochs all run before the
+    /// serializer so skipped entries cost nothing. Only `Success` entries are
+    /// collected; epoch matches come back as reused paths, not re-serialized.
     #[cfg(feature = "persist")]
     pub(crate) fn collect_persistable_into<S>(
         &self,

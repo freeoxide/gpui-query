@@ -46,11 +46,8 @@ impl<T> FetchedLike<T> for Fetched<T> {
 }
 
 /// Freshness check, `Loading` transition, and signal read in one
-/// `entity.update`; `(None, None)` means no fetch: `CacheHit`,
-/// `IgnoredWhileLoading`, or a revalidate already in flight.
-///
-/// With a [`QueryClient`], the bucket sequencer mints the `RequestId`, shared
-/// with `prepare_fetch_query` so the two never collide for the same key.
+/// `entity.update`; `(None, None)` means no fetch. The bucket sequencer
+/// mints the `RequestId`, shared with `prepare_fetch_query` (no collision).
 pub(crate) fn begin_request_on_entity<T, E, C>(
     entity: &Entity<QueryResource<T, E>>,
     cx: &mut Context<C>,
@@ -97,8 +94,7 @@ where
 
 /// Shared retry loop; with `signal = Some`, a fresh signal is re-read after
 /// each delay, and the loop stops once a newer request supersedes this one.
-/// `cx.notify()` fires only on accepted results; retry counters stay in
-/// `Loading` (the observer dedupes on status or data epoch).
+/// `cx.notify()` fires only on accepted results (observer dedupes retries).
 async fn run_query_retry_loop<T, E, Out, F, Fut>(
     fetcher: F,
     request_id: RequestId,

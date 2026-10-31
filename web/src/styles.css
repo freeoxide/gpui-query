@@ -120,7 +120,6 @@
   }
 }
 
-/* ── Landing: instrument-panel decor ─────────────────────────────── */
 .bg-dot-grid {
   background-image: radial-gradient(
     color-mix(in oklab, var(--color-foreground) 14%, transparent) 1px,
@@ -226,7 +225,6 @@
   }
 }
 
-/* ── Scroll Reveal System ────────────────────────────────────────── */
 :root {
   --ease-reveal: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out-expo: cubic-bezier(0.12, 0, 0.39, 0);
@@ -291,8 +289,6 @@
     transition: none;
   }
 }
-
-/* ── Landing previews (/v1 /v2 /v3) ──────────────────────────────── */
 
 /* V1 — cursor-reactive line grid */
 .v1-grid-base {

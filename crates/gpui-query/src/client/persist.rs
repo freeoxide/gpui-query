@@ -256,10 +256,9 @@ impl QueryClient {
         snapshot
     }
 
-    /// Walks the query buckets once, serializing only entries whose data
-    /// epoch differs from `flushed` (their last-flushed value). Live entries
-    /// already flushed come back as reused paths; the caller merges fresh
-    /// and reused entries over its accumulated store.
+    /// One walk over the buckets: live entries whose data epoch differs from
+    /// `flushed` are serialized, already-flushed ones come back as reused
+    /// paths; the caller merges fresh and reused entries over its store.
     pub(crate) fn collect_persist_delta(
         &self,
         filter: &PersistFilter,
@@ -420,10 +419,9 @@ impl QueryClient {
     }
 }
 
-/// Per-driver flush state: the owning entity id and data epoch each path was
-/// last flushed at, plus the full store as of the last save. Main-thread
-/// only; the mutex guards the save handoff and the in-flight/queued pair
-/// that keeps saves ordered.
+/// Per-driver flush state: owning entity id + data epoch per path, plus the
+/// full store as of the last save. Main-thread only; the mutex guards the
+/// save handoff and the in-flight/queued pair that orders saves.
 struct PersistFlushState {
     flushed: HashMap<String, (gpui::EntityId, u64)>,
     store: Arc<PersistSnapshot>,

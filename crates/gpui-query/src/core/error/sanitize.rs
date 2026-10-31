@@ -134,7 +134,9 @@ fn redact_tokens(input: Cow<'_, str>) -> Cow<'_, str> {
     result.into()
 }
 
-/// Grammar `keyword [ws|:|=]* token`; `token` requires at least one `:`/`=` in the run while `bearer` accepts any, and the tuple is (verbatim prefix end, resume index past the redacted token).
+/// Grammar `keyword [ws|:|=]* token`; `token` requires at least one `:`/`=` in
+/// the run while `bearer` accepts any. Returns (verbatim prefix end, resume
+/// index past the redacted token).
 fn try_match_token(chars: &[char], lower: &[char], i: usize) -> Option<(usize, usize)> {
     let (keyword_len, sep_required) = if lower_matches_at(lower, i, "bearer") {
         (6, false)
@@ -218,7 +220,9 @@ fn is_email_local(c: char) -> bool {
     c.is_alphanumeric() || "_.%+-".contains(c)
 }
 
-/// TLD contract: >= 2 chars, all-alphanumeric, letter-first or >= 2 letters (`c0m`/`c0`/`0rg` redact; `2x`, `1.2.10` pass); the TLD slice is bounded by the last domain dot, falling back to `@` for dotless domains (`user@intranet` redacts), and a trailing FQDN dot is trimmed for the slice but stays inside the redaction.
+/// TLD contract: >= 2 chars, all-alphanumeric, letter-first or >= 2 letters
+/// (`c0m`/`c0`/`0rg` redact; `2x`, `1.2.10` pass); the slice is bounded by the
+/// last domain dot (dotless `user@intranet` redacts; trailing FQDN dot trimmed).
 fn try_match_email(chars: &[char], start: usize) -> Option<usize> {
     let len = chars.len();
     if start >= len {

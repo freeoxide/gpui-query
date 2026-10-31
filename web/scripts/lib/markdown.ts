@@ -136,14 +136,13 @@ export function markdownToPlain(md: string): string {
 
   let text = out.join("\n");
 
-  // --- protect inline code before any inline transform ---
   const codes: string[] = [];
   text = text.replace(/`([^`]+)`/g, (_m, c: string) => {
     codes.push(c);
     return `${NUL}${codes.length - 1}${NUL}`;
   });
 
-  // --- inline transforms (prose only; code is sentinel-guarded) ---
+  // Prose only — code spans are sentinel-guarded above.
   // Images ![alt](url) -> alt.
   text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1");
   // Links [text](url) -> "text (url)". For mailto:, the label is already the
@@ -169,7 +168,7 @@ export function markdownToPlain(md: string): string {
     "",
   );
 
-  // --- restore code (inline first, then fenced blocks), verbatim ---
+  // Restore code verbatim: inline spans first, then fenced blocks.
   text = text.replace(new RegExp(`${NUL}(\\d+)${NUL}`, "g"), (_m, i: string) => codes[Number(i)] ?? "");
   text = text.replace(new RegExp(`${US}(\\d+)${US}`, "g"), (_m, i: string) => blocks[Number(i)] ?? "");
 

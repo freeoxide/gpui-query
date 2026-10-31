@@ -202,9 +202,9 @@ fn policy_from_meta(meta: &CacheMeta) -> CachePolicy {
     }
 }
 
-/// RFC 9111 §4.3.4: a `304` updates stored fields and restarts freshness;
-/// a `no-store`/`no-cache`/malformed `Cache-Control` on it leaves the entry
-/// untouched.
+// RFC 9111 §4.3.4: a `304` updates stored fields and restarts freshness;
+// a `no-store`/`no-cache`/malformed `Cache-Control` on it leaves the entry
+// untouched.
 fn refreshed_meta(headers: &HeaderMap, old: &CacheMeta) -> Option<CacheMeta> {
     let policy = if headers.contains_key(http::header::CACHE_CONTROL) {
         match cache_policy_from_headers(headers) {
