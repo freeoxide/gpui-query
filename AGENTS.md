@@ -6,7 +6,7 @@ Async state management for [GPUI](https://github.com/zed-industries/zed/tree/mai
 
 Workspace (`resolver = "3"`, edition 2024) with three published members:
 
-- `crates/gpui-query`: main crate (v0.3.0), four gated layers (see Feature matrix).
+- `crates/gpui-query`: main crate (v0.3.1), four gated layers (see Feature matrix).
 - `crates/gpui-query-http`: satellite (v0.1.0), RFC 9111 `Cache-Control` → `CachePolicy`, URL-keyed `HttpCache<B>` over a pluggable `HttpBackend`. GPUI-free.
 - `crates/gpui-query-persist`: satellite (v0.1.0), reference atomic disk `FilePersister` (JSON/bincode) implementing the main crate's async `Persister`.
 - `crates/gpui-query-legacy`: DEPRECATED and EXCLUDED from the workspace (`exclude = [...]`). Frozen artifact; publish only via its own workflow.
@@ -46,10 +46,10 @@ Main crate, strictly additive (`core` ← `client` ← `hook` ← `persist`):
 
 | Layer | Cargo line |
 |---|---|
-| core only (no GPUI) | `gpui-query = { version = "0.3.0", default-features = false, features = ["core"] }` |
-| client (DEFAULT) | `gpui-query = "0.3.0"` |
-| hooks | `gpui-query = { version = "0.3.0", features = ["hook"] }` |
-| persistence | `gpui-query = { version = "0.3.0", features = ["persist"] }` |
+| core only (no GPUI) | `gpui-query = { version = "0.3.1", default-features = false, features = ["core"] }` |
+| client (DEFAULT) | `gpui-query = "0.3.1"` |
+| hooks | `gpui-query = { version = "0.3.1", features = ["hook"] }` |
+| persistence | `gpui-query = { version = "0.3.1", features = ["persist"] }` |
 
 ```
 default = ["client"]
