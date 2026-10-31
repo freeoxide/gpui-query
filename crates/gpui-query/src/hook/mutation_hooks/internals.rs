@@ -10,10 +10,9 @@ use super::super::options::MutationCallbacks;
 
 use crate::hook::read_entity;
 
-/// Retries via `increment_retry()` + `prepare_retry()` so observers never see
-/// a transient Failure between attempts; only exhausted retries produce a
-/// terminal `complete_failure()`. Stops once the mutation leaves Loading
-/// (cancelled or reset); intermediate calls don't notify (observer dedupes).
+/// Retries via `increment_retry()` + `prepare_retry()` so observers never
+/// see a transient Failure between attempts; only exhausted retries reach
+/// `complete_failure()`. Stops once Loading ends; intermediate calls don't notify.
 pub(super) async fn run_mutation_loop<V, T, E, F, Fut>(
     weak: &gpui::WeakEntity<MutationResource<V, T, E>>,
     variables: Arc<V>,

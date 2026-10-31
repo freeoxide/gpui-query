@@ -32,11 +32,9 @@ impl PageDirection {
     }
 }
 
-/// Two-phase completion so a superseded request never writes; a cancelled or
-/// superseded fetch stops retrying after the delay; the cursor is read once,
-/// which stays accurate across retries because hook-driven page changes end
-/// this request, though a manual `append_page`/`prepend_page` between
-/// attempts is not covered and the next retry fetches on the old cursor.
+/// Two-phase completion so a superseded request never writes; a cancelled
+/// or superseded fetch stops retrying after the delay. The cursor is read
+/// once; manual `append_page`/`prepend_page` between retries isn't covered.
 pub(super) async fn run_fetch_page_with_id<T, E, F, Fut>(
     entity: &gpui::WeakEntity<InfiniteQueryResource<T, E>>,
     fetcher: &F,

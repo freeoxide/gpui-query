@@ -3,8 +3,6 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import { getCollection } from "astro:content";
 import { blogIndexMeta } from "../lib/page-meta";
 
-// Replaces the frontmatter-only glob in lib/blog.ts with an Astro content
-// collection query. Posts are sorted newest-first (same as getAllBlogPosts).
 const posts = (await getCollection("blog")).sort(
   (a, b) => b.data.date.getTime() - a.data.date.getTime()
 );

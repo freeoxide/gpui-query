@@ -7,20 +7,6 @@ interface SoftwareSourceCodeData {
   license?: string;
 }
 
-interface TechArticleData {
-  headline: string;
-  description: string;
-  author?: string;
-  datePublished?: string;
-  url?: string;
-}
-
-interface HowToData {
-  name: string;
-  description: string;
-  steps: Array<{ name: string; text: string }>;
-}
-
 interface FAQData {
   questions: Array<{ question: string; answer: string }>;
 }
@@ -53,40 +39,6 @@ export function softwareSourceCode(data: SoftwareSourceCodeData) {
     codeRepository: data.codeRepository,
     programmingLanguage: data.programmingLanguage ?? "Rust",
     ...(data.license && { license: data.license }),
-  };
-}
-
-/*
- * blogPost() is wired to /blog/$slug and changelogPage() to /changelog.
- * techArticle() and howTo() have no current call site: they are retained for
- * future doc/blog embeds (the docs live in the separate Docusaurus app). Do
- * not remove.
- */
-// Retained for Docusaurus/future use — no current call site in this app.
-export function techArticle(data: TechArticleData) {
-  return {
-    "@context": "https://schema.org",
-    "@type": "TechArticle",
-    headline: data.headline,
-    description: data.description,
-    ...(data.author && { author: { "@type": "Person", name: data.author } }),
-    ...(data.datePublished && { datePublished: data.datePublished }),
-    ...(data.url && { url: data.url }),
-  };
-}
-
-// Retained for Docusaurus/future use — no current call site in this app.
-export function howTo(data: HowToData) {
-  return {
-    "@context": "https://schema.org",
-    "@type": "HowTo",
-    name: data.name,
-    description: data.description,
-    step: data.steps.map((step) => ({
-      "@type": "HowToStep",
-      name: step.name,
-      text: step.text,
-    })),
   };
 }
 

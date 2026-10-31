@@ -122,7 +122,7 @@ impl FilePersister {
         Ok(())
     }
 
-    /// Lock-free: the atomic rename means a concurrent save only swaps in a complete file.
+    // Lock-free: the atomic rename means a concurrent save only swaps in a complete file.
     fn read_tolerant(&self) -> Result<PersistSnapshot, PersistError> {
         let mut file = match File::open(&self.path) {
             Ok(f) => f,
@@ -175,8 +175,8 @@ impl Persister for FilePersister {
 
 pub use gpui_query::client::NoopPersister;
 
-/// bincode cannot drive `serde_json::Value`'s `deserialize_any`; `value` and
-/// `meta` are carried as JSON strings. Lossless.
+// bincode cannot drive `serde_json::Value`'s `deserialize_any`; `value` and
+// `meta` are carried as JSON strings. Lossless.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct BincodeSnapshot {
     entries: HashMap<String, BincodeEntry>,
@@ -238,8 +238,8 @@ fn bincode_load(buf: &[u8]) -> Result<PersistSnapshot, String> {
     adapter.into_snapshot().map_err(|e| e.to_string())
 }
 
-/// std maps `ERROR_ACCESS_DENIED` (5) to `PermissionDenied`; errors built
-/// via `from_raw_os_error` on older toolchains may not be.
+// std maps `ERROR_ACCESS_DENIED` (5) to `PermissionDenied`; errors built
+// via `from_raw_os_error` on older toolchains may not be.
 #[cfg(windows)]
 const ERROR_ACCESS_DENIED: i32 = 5;
 fn is_windows_access_denied(raw: Option<i32>) -> bool {
@@ -254,8 +254,8 @@ fn is_windows_access_denied(raw: Option<i32>) -> bool {
     }
 }
 
-/// macOS `F_FULLFSYNC` also flushes the drive's write cache, unlike plain
-/// `fsync`. Best-effort: the save already succeeded via the earlier `sync_all`.
+// macOS `F_FULLFSYNC` also flushes the drive's write cache, unlike plain
+// `fsync`. Best-effort: the save already succeeded via the earlier `sync_all`.
 #[cfg(target_os = "macos")]
 fn try_fullfsync(file: &File) {
     // F_FULLFSYNC = 0x00008027 (fcntl.h on Darwin); extern declared here to avoid a libc dep.
@@ -271,7 +271,7 @@ fn try_fullfsync(file: &File) {
     }
 }
 
-/// fsync the parent directory so the rename is durable across power loss.
+// fsync the parent directory so the rename is durable across power loss.
 #[cfg(unix)]
 fn fsync_parent(parent: &Path) {
     match OpenOptions::new().read(true).open(parent) {
@@ -286,7 +286,7 @@ fn fsync_parent(parent: &Path) {
     }
 }
 
-/// A bare filename has `parent() == Some("")`, which `open`/`create_dir_all` reject or skip.
+// A bare filename has `parent() == Some("")`, which `open`/`create_dir_all` reject or skip.
 fn effective_parent(path: &Path) -> &Path {
     path.parent()
         .filter(|p| !p.as_os_str().is_empty())

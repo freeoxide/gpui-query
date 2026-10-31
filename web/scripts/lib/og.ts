@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 export const OG_WIDTH = 1200;
 export const OG_HEIGHT = 630;
 
-/* ── Shared design tokens (see shared/tokens.css, dark mode) ───────── */
 const BG = "#0a0a0a"; // --color-background: oklch(0.145 0 0)
 const FG = "#fafafa"; // --color-foreground: oklch(0.985 0 0)
 const MUTED = "#a1a1a1"; // --color-muted-foreground: oklch(0.708 0 0)
@@ -54,7 +53,6 @@ export interface OgContent {
 
 const escapeXml = (s: string): string => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-/* ── Text measurement + wrapping ────────────────────────────────────── */
 /*
  * SVG <text> doesn't wrap, so lines are broken here. Widths are estimated
  * from per-character factors (em units) — coarse, but the layout leaves
@@ -117,7 +115,6 @@ function layoutTitle(title: string, maxWidth: number): { size: number; lines: st
   return { size: 48, lines: wrapText(title, 48, maxWidth, 3, true).lines };
 }
 
-/* ── SVG composition ────────────────────────────────────────────────── */
 export function composeOgSvg(content: OgContent): string {
   const MARGIN = 80;
   const BAR_W = 8; // left accent bar, mirrors border-l-4 on the blog header

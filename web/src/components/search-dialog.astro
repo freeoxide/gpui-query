@@ -1,9 +1,7 @@
 ---
-// ⌘K search dialog — vanilla port of search-dialog.tsx. Uses the Pagefind
-// combined index built into /pagefind by the post-build step. Rendered once in
-// BaseLayout; opens via showModal(), bound here to [data-search-open] buttons
-// and the ⌘K / Ctrl-K shortcut. Markup is plain Tailwind (the original used no
-// ui/* primitives), so only the state machine moved from React to vanilla.
+// ⌘K search dialog. Uses the Pagefind combined index built into /pagefind by
+// the post-build step. Rendered once in BaseLayout; opens via showModal(),
+// bound to [data-search-open] buttons and the ⌘K / Ctrl-K shortcut.
 ---
 <dialog
   id="search-dialog"

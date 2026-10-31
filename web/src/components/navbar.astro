@@ -1,8 +1,7 @@
 ---
-// Navbar: vanilla port of navbar.tsx (+ mobile-nav.tsx folded in as a Basecoat
-// Drawer). Static markup; a small inline script wires the scroll shadow, the
-// mobile drawer open/close, and hands search opening off to SearchDialog
-// (which binds [data-search-open] and the ⌘K shortcut itself).
+// Static navbar markup; a small inline script wires the scroll shadow and the
+// mobile drawer. Search opening is handled by SearchDialog, which binds
+// [data-search-open] and the ⌘K shortcut itself.
 import ThemeToggle from "./theme-toggle.astro";
 
 const navLinks: { href: string; label: string }[] = [

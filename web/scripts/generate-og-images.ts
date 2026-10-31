@@ -34,7 +34,6 @@ interface BlogFrontmatter {
   tags: string[];
 }
 
-/* ── CLI args ───────────────────────────────────────────────────────── */
 const args = process.argv.slice(2);
 const argValue = (flag: string): string | undefined => {
   const i = args.indexOf(flag);
@@ -46,7 +45,6 @@ const keepSvg = args.includes("--keep-svg");
 const contentDir = resolve("src/content/blog");
 const publicDir = resolve("public");
 
-/* ── Frontmatter parsing (same simple YAML shape as lib/blog.ts) ───── */
 function parseFrontmatter(source: string, file: string): BlogFrontmatter {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) throw new Error(`${file}: no frontmatter block found`);
@@ -73,7 +71,6 @@ function formatDate(iso: string | undefined): string {
 
 /* Latest release (version from Cargo.toml, date from CHANGELOG.md) — see src/lib/release.ts. */
 
-/* ── Rasterization ──────────────────────────────────────────────────── */
 async function renderPng(content: OgContent, outFile: string): Promise<void> {
   const svg = composeOgSvg(content);
   await mkdir(dirname(outFile), { recursive: true });
@@ -89,7 +86,6 @@ async function renderPng(content: OgContent, outFile: string): Promise<void> {
   console.log(`Generated ${outFile.replace(`${process.cwd()}/`, "")} (${OG_WIDTH}x${OG_HEIGHT})`);
 }
 
-/* ── Site pages ─────────────────────────────────────────────────────── */
 async function sitePages(): Promise<Array<{ name: string; content: OgContent; outFile: string }>> {
   const release = await latestRelease();
   return [
@@ -150,7 +146,6 @@ async function sitePages(): Promise<Array<{ name: string; content: OgContent; ou
   ];
 }
 
-/* ── Blog posts ─────────────────────────────────────────────────────── */
 async function blogPosts(): Promise<Array<{ name: string; content: OgContent; outFile: string }>> {
   const files = (await readdir(contentDir)).filter((f) => f.endsWith(".mdx"));
   const posts = [];
@@ -172,7 +167,6 @@ async function blogPosts(): Promise<Array<{ name: string; content: OgContent; ou
   return posts;
 }
 
-/* ── Main ───────────────────────────────────────────────────────────── */
 async function main(): Promise<void> {
   const all = [...(await sitePages()), ...(await blogPosts())];
   const targets = onlyName ? all.filter((t) => t.name === onlyName) : all;

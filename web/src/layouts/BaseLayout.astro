@@ -1,7 +1,7 @@
 ---
-// App shell for marketing/blog/legal pages. Mirrors web/src/routes/__root.tsx:
-// HTML shell, no-flash theme bootstrap, global stylesheet, navbar island,
-// footer, Firebase Analytics, and explicit per-page metadata.
+// App shell for marketing/blog/legal pages: HTML shell, no-flash theme
+// bootstrap, global stylesheet, navbar island, footer, Firebase Analytics,
+// and explicit per-page metadata.
 //
 // Docs pages are owned by Starlight (its own layout) and are NOT wrapped here.
 import "../styles.css";
@@ -85,9 +85,9 @@ const altHref = (ext: string) => `${altBase === "" ? "/index" : altBase}${ext}`;
       <script type="application/ld+json" set:html={JSON.stringify(data)} />
     ))}
 
-    {/* No-flash theme bootstrap: same contract as the old __root.tsx — the
-        marketing app keys dark mode off a `.dark` class on <html> and a
-        `theme` localStorage entry (docs/Starlight use `data-theme` instead). */}
+    {/* No-flash theme bootstrap: the marketing app keys dark mode off a `.dark`
+        class on <html> and a `theme` localStorage entry (docs/Starlight use
+        `data-theme` instead). */}
     <script is:inline>
       (function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.classList.add('dark');document.querySelector('meta[name=theme-color]')?.setAttribute('content','#0C1222')}}catch(e){}})()
     </script>
@@ -111,10 +111,9 @@ const altHref = (ext: string) => `${altBase === "" ? "/index" : altBase}${ext}`;
       import "basecoat-css/all";
     </script>
 
-    {/* Scroll-reveal — global vanilla replacement for the old useScrollReveal
-        hook. Adds .js-reveal to <html> (enabling the [data-reveal] hidden
-        state defined in styles.css) and reveals elements as they enter view.
-        Progressive enhancement: content is visible without JS. */}
+    {/* Scroll-reveal: adds .js-reveal to <html> (enabling the [data-reveal]
+        hidden state defined in styles.css) and reveals elements as they enter
+        view. Progressive enhancement: content is visible without JS. */}
     <script>
       const enable = () => {
         const root = document.documentElement;

@@ -242,15 +242,16 @@ fn bootstrap(cx: &mut App) {
     client.register_deserializer::<Users, QueryError>(|v| serde_json::from_value(v.clone()).ok());
 
     let persister = FilePersister::json("/var/cache/myapp/gpui-query-cache.json");
+    let max_age = Duration::from_secs(60 * 60 * 24);
     let opts = PersistOptions {
         filter: PersistFilter::All,
-        max_age: Duration::from_secs(60 * 60 * 24),
+        max_age,
         ..PersistOptions::default()
     };
 
-    // 2. Cold start: hydrate needs &mut QueryClient + &mut App on the main
-    //    thread under a blocking executor (pollster::block_on), before any
-    //    view reads the client.
+    // 2. Cold start: hydrate before any view reads the client (&mut QueryClient
+    //    + &mut App, main thread, blocking executor like pollster::block_on).
+    let _ = pollster::block_on(hydrate(&mut client, &persister, &PersistFilter::All, max_age, cx));
 
     cx.set_global(ClientGlobal(client));
 
